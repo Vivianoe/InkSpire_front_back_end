@@ -2,8 +2,8 @@
 Supabase database initialization script
 Creates database table structures
 """
-from database import engine, Base
-from models import (
+from app.core.database import engine, Base
+from app.models.models import (
     ScaffoldAnnotation,
     ScaffoldAnnotationVersion,
     User,

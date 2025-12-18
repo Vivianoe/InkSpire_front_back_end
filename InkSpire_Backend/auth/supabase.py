@@ -7,7 +7,7 @@ from typing import Dict, Any
 import jwt
 from jwt.exceptions import PyJWTError
 from supabase import Client
-from database import get_supabase_client
+from app.core.database import get_supabase_client
 
 # Load JWT secret for token validation
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")

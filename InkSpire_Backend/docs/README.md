@@ -27,95 +27,39 @@ A FastAPI-based backend service for managing educational courses, class profiles
 ## Project Structure
 
 ```
-InkSpire_Backend/
-├── app/                          # Main application package
-│   ├── __init__.py
-│   ├── main.py                  # FastAPI application entry point
-│   │
-│   ├── api/                     # API layer
-│   │   ├── __init__.py
-│   │   ├── models.py            # Pydantic request/response models
-│   │   └── routes/              # API route handlers
-│   │       ├── __init__.py
-│   │       ├── users.py         # User authentication endpoints
-│   │       ├── courses.py       # Course management endpoints
-│   │       ├── class_profiles.py # Class profile endpoints
-│   │       ├── readings.py      # Reading management endpoints
-│   │       ├── scaffolds.py     # Scaffold generation endpoints
-│   │       └── perusall.py     # Perusall integration endpoints
-│   │
-│   ├── core/                    # Core configuration
-│   │   ├── __init__.py
-│   │   ├── config.py            # Application configuration
-│   │   └── database.py          # Database connection and session
-│   │
-│   ├── models/                  # SQLAlchemy ORM models
-│   │   ├── __init__.py
-│   │   └── models.py            # Database table definitions
-│   │
-│   ├── services/                # Business logic layer
-│   │   ├── __init__.py
-│   │   ├── user_service.py      # User management logic
-│   │   ├── course_service.py    # Course management logic
-│   │   ├── class_profile_service.py # Class profile logic
-│   │   ├── reading_service.py  # Reading management logic
-│   │   ├── reading_chunk_service.py # Reading chunk logic
-│   │   ├── session_service.py   # Session management logic
-│   │   └── reading_scaffold_service.py # Scaffold annotation logic
-│   │
-│   ├── workflows/               # LLM workflow definitions
-│   │   ├── __init__.py
-│   │   ├── scaffold_workflow.py # Reading scaffold generation workflow
-│   │   ├── profile_workflow.py  # Class profile generation workflow
-│   │   └── scaffold_reviewer.py # CLI tool for reviewing scaffolds
-│   │
-│   ├── prompts/                 # LLM prompt templates
-│   │   ├── __init__.py
-│   │   ├── material_prompt.py   # Material analysis prompts
-│   │   ├── focus_prompt.py     # Focus identification prompts
-│   │   ├── scaffold_prompt.py  # Scaffold generation prompts
-│   │   └── class_profile_prompt.py # Class profile prompts
-│   │
-│   └── utils/                   # Utility functions
-│       ├── __init__.py
-│       ├── pdf_chunk_utils.py   # PDF chunking utilities
-│       └── perusall.py         # Perusall integration utilities
+Inkspire/
+├── main.py                      # FastAPI application and API endpoints
+├── database.py                  # Database connection and configuration
+├── models.py                    # SQLAlchemy ORM models (all tables)
+├── init_db.py                   # Database initialization script
+├── supabase_schema.sql          # Database schema SQL (Supabase compatible)
 │
-├── migrations/                  # Database migration scripts
-│   ├── README.md
-│   ├── create_scaffold_annotations_tables.sql
-│   └── ...
+├── user_service.py              # User authentication services
+├── course_service.py            # Course management services
+├── class_profile_service.py    # Class profile services
+├── reading_service.py           # Reading management services
+├── session_service.py           # Session management services
+├── reading_scaffold_service.py  # Scaffold annotation services
 │
-├── scripts/                     # Utility scripts
-│   ├── init_db.py              # Database initialization
-│   ├── init_cloud_db.py        # Cloud database setup
-│   ├── verify_db.py            # Database verification
-│   └── ...
+├── workflow.py                  # Reading scaffold generation workflow
+├── profile.py                   # Class profile generation workflow
+├── scaffold_reviewer.py         # CLI tool for reviewing scaffolds
 │
-├── tests/                       # Test files
-│   ├── test_scaffold_*.py
-│   └── ...
+├── prompts/                     # LLM prompt templates
+│   ├── material_prompt.py
+│   ├── focus_prompt.py
+│   ├── scaffold_prompt.py
+│   └── class_profile_prompt.py
 │
-├── docs/                        # Documentation
-│   ├── README.md               # This file (moved from root)
-│   ├── API_TEST_DATA.md        # API test examples
+├── Documentation Files           # Detailed documentation
 │   ├── CLASS_PROFILE_DATABASE_LOGIC.md
+│   ├── CLASS_PROFILE_EXAMPLE.md
 │   ├── COURSE_DATABASE_LOGIC.md
-│   ├── SCAFFOLD_GENERATION_DATABASE_LOGIC.md
-│   └── ...
+│   └── SCAFFOLD_GENERATION_DATABASE_LOGIC.md
 │
-├── auth/                        # Authentication modules
-│   ├── __init__.py
-│   ├── dependencies.py         # Auth dependencies
-│   └── supabase.py             # Supabase auth integration
-│
-├── pdf/                         # PDF processing files
-│   ├── README.md
-│   └── ...
-│
+├── API_TEST_DATA.md             # API test data and expected outcomes
 ├── requirements.txt             # Python dependencies
-├── .env.example                 # Environment variables template
-└── supabase_schema.sql          # Complete database schema
+└── README.md                    # This file
 ```
 
 ## Installation
@@ -131,7 +75,7 @@ InkSpire_Backend/
 1. **Clone the repository**:
 ```bash
 git clone <repository-url>
-cd Inkspire_Backend
+cd Inkspire
 ```
 
 2. **Create a virtual environment**:
@@ -160,19 +104,11 @@ SUPABASE_KEY=your_anon_key  # Alternative, for Auth operations only
 
 # Google Gemini API
 GOOGLE_API_KEY=your_google_api_key
-
-# Perusall Integration (Optional)
-PERUSALL_INSTITUTION=your_institution
-PERUSALL_API_TOKEN=your_api_token
-PERUSALL_COURSE_ID=your_course_id
-PERUSALL_ASSIGNMENT_ID=your_assignment_id
-PERUSALL_DOCUMENT_ID=your_document_id
-PERUSALL_USER_ID=your_user_id
 ```
 
 5. **Initialize the database**:
 ```bash
-python scripts/init_db.py
+python init_db.py
 ```
 
 Alternatively, you can run the SQL schema directly in Supabase:
@@ -181,30 +117,10 @@ Alternatively, you can run the SQL schema directly in Supabase:
 ```
 
 6. **Run the application**:
-
-**Option 1: Using the start script (Recommended)**
 ```bash
-# Linux/Mac
-./run.sh
-
-# Windows
-run.bat
-```
-
-**Option 2: Manual start**
-```bash
-# Activate virtual environment first
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# From InkSpire_Backend directory
-# Using new structure (recommended)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Or using legacy main.py (temporary during migration)
+cd InkSpire_Backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-**Important**: Make sure you're in the `InkSpire_Backend` directory and have activated the virtual environment before running uvicorn.
 
 The API will be available at `http://localhost:8000`
 
@@ -232,7 +148,6 @@ Once the server is running, you can access:
 
 #### Reading & Session Management
 - **readings**: Reading materials (PDFs, documents) with file paths
-- **reading_chunks**: Chunked reading content for processing
 - **sessions**: Teaching sessions (week-based organization, links to course)
 - **session_readings**: Many-to-many relationship between sessions and readings
 - **session_items**: Independent content for each reading within a session
@@ -240,7 +155,6 @@ Once the server is running, you can access:
 #### Scaffold Generation
 - **scaffold_annotations**: Generated annotation scaffolds (current version, links to session and reading)
 - **scaffold_annotation_versions**: Version history for scaffold annotations (tracks all edits, approvals, rejections)
-- **annotation_highlight_coords**: Highlight coordinates for PDF annotations
 
 ### Key Relationships
 
@@ -249,12 +163,11 @@ Once the server is running, you can access:
 - `course_basic_info.course_id` → `courses.id` (1:1)
 - `scaffold_annotations.session_id` → `sessions.id`
 - `scaffold_annotations.reading_id` → `readings.id`
-- `scaffold_annotations.current_version_id` → `scaffold_annotation_versions.id`
 
 For detailed database logic documentation, see:
-- [Class Profile Database Logic](docs/CLASS_PROFILE_DATABASE_LOGIC.md)
-- [Course Database Logic](docs/COURSE_DATABASE_LOGIC.md)
-- [Scaffold Generation Database Logic](docs/SCAFFOLD_GENERATION_DATABASE_LOGIC.md)
+- [Class Profile Database Logic](CLASS_PROFILE_DATABASE_LOGIC.md)
+- [Course Database Logic](COURSE_DATABASE_LOGIC.md)
+- [Scaffold Generation Database Logic](SCAFFOLD_GENERATION_DATABASE_LOGIC.md)
 
 ## API Endpoints
 
@@ -264,14 +177,12 @@ For detailed database logic documentation, see:
 ### User Authentication
 - `POST /api/users/register` - Register a new user
 - `POST /api/users/login` - Login user
-- `GET /api/users/me` - Get current user
 - `GET /api/users/{user_id}` - Get user by ID
 - `GET /api/users/email/{email}` - Get user by email
 
 ### Course Management
 - `POST /api/basic_info/edit` - Edit course basic information
 - `POST /api/design-considerations/edit` - Edit design considerations
-- `GET /api/courses/instructor/{instructor_id}` - Get courses by instructor
 
 ### Class Profiles
 - `POST /api/class-profiles` - Create and generate class profile
@@ -287,23 +198,15 @@ For detailed database logic documentation, see:
 - `GET /api/readings` - Get reading list (filter by course_id and/or instructor_id)
 
 ### Scaffold Generation
-- `POST /api/generate-scaffolds` - Generate scaffolds via Material → Focus → Scaffold workflow
+- `POST /api/reading-scaffolds` - Generate scaffolds via Material → Focus → Scaffold workflow
 - `POST /api/annotation-scaffolds/{scaffold_id}/approve` - Approve a scaffold (creates version)
 - `POST /api/annotation-scaffolds/{scaffold_id}/reject` - Reject a scaffold (creates version)
 - `POST /api/annotation-scaffolds/{scaffold_id}/edit` - Manually edit scaffold content (creates version)
 - `POST /api/annotation-scaffolds/{scaffold_id}/llm-refine` - Refine scaffold using LLM (creates version)
-- `GET /api/annotation-scaffolds/by-session/{session_id}` - Get scaffolds by session
 - `GET /api/annotation-scaffolds/export` - Export approved scaffolds (filter by reading_id or session_id)
 
-### Highlight Coordinates
-- `POST /api/highlight-report` - Save PDF highlight coordinates
-
 ### Perusall Integration
-- `POST /api/perusall/annotations` - Upload annotations to Perusall
-
-### Compatibility Endpoints (Legacy)
-- `POST /threads/{thread_id}/review` - Thread-based review endpoint (maps to scaffold actions)
-- `GET /threads/{thread_id}/scaffold-bundle` - Get scaffolds by thread/session
+- `POST /api/perusall/annotations` - Process Perusall annotations
 
 ## Workflows
 
@@ -330,26 +233,154 @@ For detailed database logic documentation, see:
 
 **Versioning**: Every change creates an immutable version record with change type, creator, and timestamp.
 
+## Usage Examples
+
+### User Registration
+
+```bash
+POST /api/users/register
+{
+  "email": "instructor@example.com",
+  "password": "SecurePassword123!",
+  "name": "John Doe",
+  "role": "instructor"
+}
+```
+
+### Create a Class Profile
+
+```bash
+POST /api/class-profiles
+{
+  "instructor_id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Introduction to Computer Science",
+  "course_code": "CS101",
+  "description": "Basic programming concepts",
+  "class_input": {
+    "discipline_info": {
+      "discipline": "Computer Science",
+      "subdiscipline": "Programming Fundamentals"
+    },
+    "course_info": {
+      "syllabus_overview": "Introduction to programming",
+      "learning_objectives": ["Understand variables", "Master loops"]
+    },
+    "class_info": {
+      "class_size": 25,
+      "student_background": "Mixed experience levels",
+      "prerequisites": "None"
+    }
+  }
+}
+```
+
+This endpoint:
+1. Creates a `Course` record
+2. Creates a `CourseBasicInfo` record
+3. Generates class profile via LLM workflow
+4. Creates a `ClassProfile` with version 1
+5. Links the course to the class profile
+
+### Generate Scaffolds
+
+```bash
+POST /api/reading-scaffolds
+{
+  "session_id": "bb0e8400-e29b-41d4-a716-446655440000",
+  "reading_id": "880e8400-e29b-41d4-a716-446655440000",
+  "class_profile": {
+    "class_id": "class_001",
+    "profile": {...},
+    "design_consideration": "..."
+  },
+  "reading_chunks": {
+    "chunks": [
+      {
+        "chunk_id": "chunk_001",
+        "text": "Data structures are fundamental...",
+        "page_number": 1,
+        "start_offset": 0,
+        "end_offset": 500
+      }
+    ]
+  },
+  "reading_info": {
+    "assignment_id": "assignment_001",
+    "session_description": "Week 1 session",
+    "assignment_description": "Read and annotate chapter 1",
+    "assignment_objective": "Understand basic data structures"
+  }
+}
+```
+
+This endpoint:
+1. Runs Material → Focus → Scaffold pipeline
+2. Creates `ScaffoldAnnotation` records for each scaffold
+3. Creates initial version 1 for each annotation (change_type: "pipeline")
+4. Returns review objects for instructor approval
+
+### Edit Course Basic Info
+
+```bash
+POST /api/basic_info/edit
+{
+  "course_id": "660e8400-e29b-41d4-a716-446655440000",
+  "discipline_info_json": {
+    "discipline": "Computer Science",
+    "subdiscipline": "Artificial Intelligence"
+  },
+  "course_info_json": {
+    "syllabus_overview": "Updated overview",
+    "learning_objectives": ["Understand AI", "Master ML"]
+  },
+  "class_info_json": {
+    "class_size": 30,
+    "student_background": "Advanced students",
+    "prerequisites": "CS101"
+  }
+}
+```
+
+This endpoint:
+1. Gets current `CourseBasicInfo`
+2. Creates a new version with **old values** (snapshot)
+3. Updates `CourseBasicInfo` with **new values**
+4. Sets `current_version_id` to the new version
+
+### Batch Upload Readings
+
+```bash
+POST /api/readings/batch-upload
+{
+  "instructor_id": "550e8400-e29b-41d4-a716-446655440000",
+  "course_id": "660e8400-e29b-41d4-a716-446655440000",
+  "readings": [
+    {
+      "title": "Reading 1",
+      "file_path": "path/to/file.pdf",
+      "source_type": "uploaded"
+    }
+  ]
+}
+```
+
 ## Development
 
 ### Running the Server
 
 ```bash
-# Development mode with auto-reload (new structure)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Legacy main.py (during migration)
+# Development mode with auto-reload
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # Production mode
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### Database Initialization
 
 **Option 1: Using Python script**
 ```bash
-python scripts/init_db.py
+python init_db.py
 ```
 
 **Option 2: Using SQL schema**
@@ -378,7 +409,7 @@ alembic downgrade -1
 
 ### Testing API Endpoints
 
-See [docs/API_TEST_DATA.md](docs/API_TEST_DATA.md) for comprehensive test data examples and expected outcomes for all endpoints.
+See [API_TEST_DATA.md](API_TEST_DATA.md) for comprehensive test data examples and expected outcomes for all endpoints.
 
 ## Environment Variables
 
@@ -389,12 +420,6 @@ See [docs/API_TEST_DATA.md](docs/API_TEST_DATA.md) for comprehensive test data e
 | `SUPABASE_URL` | Supabase project URL | Optional |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Optional |
 | `GOOGLE_API_KEY` | Google Gemini API key | Yes |
-| `PERUSALL_INSTITUTION` | Perusall institution name | Optional |
-| `PERUSALL_API_TOKEN` | Perusall API token | Optional |
-| `PERUSALL_COURSE_ID` | Perusall course ID | Optional |
-| `PERUSALL_ASSIGNMENT_ID` | Perusall assignment ID | Optional |
-| `PERUSALL_DOCUMENT_ID` | Perusall document ID | Optional |
-| `PERUSALL_USER_ID` | Perusall user ID | Optional |
 
 **Database URL Format:**
 ```
@@ -417,24 +442,9 @@ The application implements a comprehensive version control system for:
 - Current state always in main table, history in version table
 
 See detailed documentation:
-- [Class Profile Database Logic](docs/CLASS_PROFILE_DATABASE_LOGIC.md)
-- [Course Database Logic](docs/COURSE_DATABASE_LOGIC.md)
-- [Scaffold Generation Database Logic](docs/SCAFFOLD_GENERATION_DATABASE_LOGIC.md)
-
-## File Organization
-
-The project follows a modular structure:
-
-- **app/api/routes/**: API endpoint handlers organized by domain
-- **app/services/**: Business logic and database operations
-- **app/workflows/**: LLM workflow definitions using LangGraph
-- **app/models/**: SQLAlchemy ORM models
-- **app/prompts/**: LLM prompt templates
-- **app/utils/**: Utility functions and helpers
-- **scripts/**: Database initialization and utility scripts
-- **tests/**: Test files
-- **docs/**: Documentation files
-- **migrations/**: Database migration scripts
+- [Class Profile Database Logic](CLASS_PROFILE_DATABASE_LOGIC.md)
+- [Course Database Logic](COURSE_DATABASE_LOGIC.md)
+- [Scaffold Generation Database Logic](SCAFFOLD_GENERATION_DATABASE_LOGIC.md)
 
 ## Contributing
 

@@ -71,7 +71,7 @@ except Exception as e:
 # 4. 检查 Supabase 客户端
 print("\n4. Supabase 客户端检查:")
 try:
-    from database import get_supabase_client
+    from app.core.database import get_supabase_client
     client = get_supabase_client()
     print("   ✅ Supabase 客户端初始化成功")
 except Exception as e:

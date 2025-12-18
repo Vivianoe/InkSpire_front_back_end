@@ -6,7 +6,7 @@ Password authentication is managed by Supabase Auth
 import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
-from models import User
+from app.models.models import User
 
 
 def create_user_from_supabase(

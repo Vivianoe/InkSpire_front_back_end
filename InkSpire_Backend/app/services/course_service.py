@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
-from models import Course, CourseBasicInfo, CourseBasicInfoVersion
+from app.models.models import Course, CourseBasicInfo, CourseBasicInfoVersion
 
 
 def create_course(

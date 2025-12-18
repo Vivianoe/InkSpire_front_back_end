@@ -6,7 +6,7 @@ import uuid
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from models import ScaffoldAnnotation, ScaffoldAnnotationVersion
+from app.models.models import ScaffoldAnnotation, ScaffoldAnnotationVersion
 
 
 def create_scaffold_annotation(

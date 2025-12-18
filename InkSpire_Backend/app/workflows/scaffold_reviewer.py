@@ -24,7 +24,7 @@ import json
 import argparse
 from typing import List
 
-from workflow import (
+from app.workflows.scaffold_workflow import (
     WorkflowState,
     build_workflow,
     load_reading_chunks_from_jsonl,

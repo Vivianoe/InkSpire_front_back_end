@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from models import ReadingChunk
+from app.models.models import ReadingChunk
 
 
 def create_reading_chunk(

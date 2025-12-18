@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from models import ClassProfile, ClassProfileVersion
+from app.models.models import ClassProfile, ClassProfileVersion
 
 
 def create_class_profile(

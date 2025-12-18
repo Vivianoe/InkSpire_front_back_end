@@ -14,9 +14,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
 # Prompt imports (from prompts/ folder)
-from prompts.material_prompt import get_material_prompt
-from prompts.focus_prompt import get_focus_prompt
-from prompts.scaffold_prompt import get_scaffold_prompt
+from app.prompts.material_prompt import get_material_prompt
+from app.prompts.focus_prompt import get_focus_prompt
+from app.prompts.scaffold_prompt import get_scaffold_prompt
 
 # ======================================================
 # 0. ENVIRONMENT

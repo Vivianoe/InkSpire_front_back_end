@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, Integer, ForeignKey, func, Float, Boolean
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
-from database import Base
+from app.core.database import Base
 
 # Scaffold Annotation Model
 class ScaffoldAnnotation(Base):

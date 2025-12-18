@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
-from prompts.class_profile_prompt import get_class_profile_prompt
+from app.prompts.class_profile_prompt import get_class_profile_prompt
 
 # ======================================================
 # 0. ENVIRONMENT

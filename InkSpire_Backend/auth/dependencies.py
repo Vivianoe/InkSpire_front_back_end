@@ -7,9 +7,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from database import get_db
-from user_service import get_user_by_supabase_id
-from models import User
+from app.core.database import get_db
+from app.services.user_service import get_user_by_supabase_id
+from app.models.models import User
 from auth.supabase import validate_jwt_token
 
 # HTTPBearer extracts the token from Authorization: Bearer <token> header

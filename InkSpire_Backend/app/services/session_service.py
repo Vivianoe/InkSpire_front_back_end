@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
-from models import Session, SessionReading, Reading, SessionItem
+from app.models.models import Session, SessionReading, Reading, SessionItem
 
 
 def create_session(

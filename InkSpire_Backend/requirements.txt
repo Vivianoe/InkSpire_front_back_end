@@ -7,11 +7,11 @@ uvicorn
 python-dotenv
 
 langchain
+langchain-core>=0.3.0
+langchain-google-genai>=1.0.0
 langgraph
-#langchain-core>=1.0.0
-# langchain-google-genai>=3.0.0
 
-google-generativeai
+google-generativeai>=0.9.0
 protobuf
 typing-extensions
 
