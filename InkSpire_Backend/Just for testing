@@ -1,0 +1,65 @@
+
+
+### Below is just for testing
+---
+
+### GET /api/annotation-scaffolds/session/{session_id}
+
+**Test Data**:
+- Path parameter: `session_id` = `"bb0e8400-e29b-41d4-a716-446655440000"`
+
+**Expected Outcome**:
+```json
+{
+  "scaffolds": [
+    {
+      "id": "aa0e8400-e29b-41d4-a716-446655440000",
+      "fragment": "Data structures are fundamental...",
+      "text": "This passage introduces key concepts...",
+      "status": "draft",
+      "history": [...]
+    }
+  ],
+  "total": 1
+}
+```
+
+**Status Code**: `200 OK`
+
+**Expected Database State**:
+- **scaffold_annotations** table: No changes (read-only operation)
+
+**Error Cases**:
+- `400 Bad Request`: Invalid session_id format
+- `404 Not Found`: Session not found
+
+---
+
+### GET /api/annotation-scaffolds/{scaffold_id}
+
+**Test Data**:
+- Path parameter: `scaffold_id` = `"aa0e8400-e29b-41d4-a716-446655440000"`
+
+**Expected Outcome**:
+```json
+{
+  "scaffold": {
+    "id": "aa0e8400-e29b-41d4-a716-446655440000",
+    "fragment": "Data structures are fundamental...",
+    "text": "This passage introduces key concepts...",
+    "status": "draft",
+    "history": [...]
+  }
+}
+```
+
+**Status Code**: `200 OK`
+
+**Expected Database State**:
+- **scaffold_annotations** table: No changes (read-only operation)
+
+**Error Cases**:
+- `400 Bad Request`: Invalid scaffold_id format
+- `404 Not Found`: Scaffold not found
+
+---

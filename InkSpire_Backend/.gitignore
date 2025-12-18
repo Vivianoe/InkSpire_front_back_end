@@ -1,0 +1,46 @@
+# ----------------------
+# Python cache & build
+# ----------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ----------------------
+# Virtual environments
+# (ignore any folder containing venv)
+# ----------------------
+venv/
+.venv/
+*/venv/
+*/.venv/
+
+# ----------------------
+# Environment / secrets
+# ----------------------
+GOOGLE_API_KEY
+*.key
+*.pem
+*.env
+.env.*
+secret_*
+*_key
+credentials.json
+service_account.json
+
+# ----------------------
+# OS-generated files
+# ----------------------
+.DS_Store
+Thumbs.db
+
+# ----------------------
+# IDE / Editor folders
+# ----------------------
+.vscode/
+.idea/
+*.swp
+*.swo

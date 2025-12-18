@@ -1,0 +1,27 @@
+pypdf
+tqdm
+tiktoken
+
+fastapi
+uvicorn
+python-dotenv
+
+langchain
+langgraph
+#langchain-core>=1.0.0
+# langchain-google-genai>=3.0.0
+
+google-generativeai
+protobuf
+typing-extensions
+
+# Database (Supabase/PostgreSQL)
+sqlalchemy>=2.0.0
+psycopg2-binary
+alembic
+supabase>=2.0.0
+
+# Authentication
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4

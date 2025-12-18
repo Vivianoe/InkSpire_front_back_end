@@ -1,0 +1,29 @@
+{
+  "annotation_scaffolds": [
+    {
+      "id": "scaf001",
+      "fragment": "Project Jupyter is an open - source project for interactive computing widely used in data science , machine learning , and scientiﬁc computing. ... The core of Jupyter is the Jupyter Notebook, 1 an open document format and web application that enables users to compose and share interactive programs that combine live code with narrative text, equations, inter - active visualizations, images, and more.",
+      "text": "This section introduces Jupyter and its core component, the Jupyter Notebook. In your own words, how would you describe what a Jupyter Notebook is and what makes it 'interactive'?"
+    },
+    {
+      "id": "scaf002",
+      "fragment": "For our purposes , an interactive computation is a persistent computer program that runs with a “ human in the loop , ” where the primary mode of interaction is through the same human iteratively writing / running blocks of code and looking at the results.",
+      "text": "The text defines 'interactive computing' as a 'persistent computer program that runs with a human in the loop.' What does it mean for a program to be 'persistent' and why is having a 'human in the loop' important for this type of computing?"
+    },
+    {
+      "id": "scaf003",
+      "fragment": "More colloquially , the simplest expression of an an interactive computation is the REPL , or read – eval – print loop. ... The user has a counterpart to the computer ’ s read – eval – print loop : a “ write – eval – think loop ” ( WETL ).",
+      "text": "REPL and WETL describe two sides of the same interactive process. How do the 'read-eval-print loop' (REPL) and the 'write-eval-think loop' (WETL) work together, and what does each emphasize?"
+    },
+    {
+      "id": "scaf004",
+      "fragment": "More spe - ciﬁcally , Jupyter also builds and consists of services , open standards and protocols , and community. ... The JSON - based Jupyter Notebook doc - ument formatn enables ﬁrst - and third - party tools to use and combine Jupyter Notebooks for a wide range of purposes...",
+      "text": "Jupyter is described as 'more than merely software,' including services, open standards, and community. How do these additional elements contribute to Jupyter's widespread use and impact in computational science?"
+    },
+    {
+      "id": "scaf005",
+      "fragment": "JupyterHub , ﬁrst released in 2015... It could host Notebooks on a remote server for multiple concurrent users, with authenticated access. ... with the release of Binder... it became possible to share a live, executable version of one or more notebooks with simi - lar ease.",
+      "text": "JupyterHub and Binder are presented as tools for sharing. What is the main difference in *how* JupyterHub and Binder allow users to share notebooks, and why are both important for collaborative work?"
+    }
+  ]
+}
