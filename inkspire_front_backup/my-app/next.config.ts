@@ -9,9 +9,6 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  experimental: {
-    proxyTimeout: 600_000, // 600 seconds (10 minutes) for long-running scaffold generation
-  },
   // Proxy API requests to FastAPI backend
   async rewrites() {
     return [

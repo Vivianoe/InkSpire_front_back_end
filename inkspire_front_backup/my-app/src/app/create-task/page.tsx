@@ -88,7 +88,6 @@ export default function CreateNewReadingTaskPage() {
   const [dragActive, setDragActive] = useState(false);
   const [scaffoldsGenerated, setScaffoldsGenerated] = useState(false);
   const [pdfContent, setPdfContent] = useState<string>('');
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);  // PDF URL from backend
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [scaffolds, setScaffolds] = useState<any[]>([]);
   const [modificationRequest, setModificationRequest] = useState<string>('');
@@ -501,20 +500,11 @@ export default function CreateNewReadingTaskPage() {
   // Testing endpoint that mirrors /api/generate-scaffolds handling,
   // but hits /api/test-scaffold-response instead.
   const handleTestResponse = async () => {
-    if (!currentReading) {
-      alert('Select a reading from the library before testing scaffolds.');
-      return;
-    }
-
     try {
-      setScaffoldsGenerated(true);
-      const newThreadId = `ui-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      setThreadId(newThreadId);
-
-      const readingLabel = currentReading.title || currentReading.name;
-      const readingDescriptor = readingLabel
-        ? `Reading ${currentReading.order ?? currentReadingIndex + 1}: ${readingLabel}`
-        : `Reading ${currentReadingIndex + 1}`;
+      if (!currentReading) {
+        alert('Select a reading from the library before testing scaffolds.');
+        return;
+      }
 
       const courseIdForRequest =
         currentReading.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID;
@@ -534,29 +524,10 @@ export default function CreateNewReadingTaskPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      console.log('res:', res);
 
       if (!res.ok) {
-        let errorDetail = 'Failed to get test response';
-        // Clone the response to read it multiple times if needed
-        const clonedRes = res.clone();
-        try {
-          const errorData = await res.json();
-          errorDetail = errorData.detail || errorData.message || errorData.error || JSON.stringify(errorData);
-          console.error('[Frontend] Error response JSON:', errorData);
-        } catch (e) {
-          // If JSON parsing fails, try text
-          try {
-            const errorText = await clonedRes.text();
-            errorDetail = errorText || 'Failed to get test response';
-            console.error('[Frontend] Error response text:', errorText);
-          } catch (textError) {
-            console.error('[Frontend] Failed to read error response:', textError);
-            errorDetail = `HTTP ${res.status}: ${res.statusText}`;
-          }
-        }
-        console.error('[Frontend] Error status:', res.status, res.statusText);
-        throw new Error(errorDetail);
+        const errorText = await res.text();
+        throw new Error(errorText || 'Failed to get test response');
       }
 
       const data = await res.json();
@@ -566,13 +537,6 @@ export default function CreateNewReadingTaskPage() {
         '[Frontend] annotation_scaffolds_review isArray (test):',
         Array.isArray(data.annotation_scaffolds_review),
       );
-      console.log('[Frontend] pdf_url (test):', data.pdf_url);
-      
-      // Extract and save PDF URL from backend
-      if (data.pdf_url) {
-        setPdfUrl(data.pdf_url);
-        console.log('[Frontend] Set PDF URL (test):', data.pdf_url);
-      }
 
       const nextSessionId =
         typeof data.session_id === 'string' ? data.session_id : sessionId;
@@ -580,9 +544,6 @@ export default function CreateNewReadingTaskPage() {
         setSessionId(nextSessionId);
         persistReadingSelection(selectedReadings, currentReadingIndex, nextSessionId);
       }
-      
-      // Use data.pdf_url directly (not pdfUrl state) since state update is async
-      const hasPdfUrl = !!data.pdf_url;
 
       const serverScaffolds = Array.isArray(data.annotation_scaffolds_review)
         ? data.annotation_scaffolds_review
@@ -641,6 +602,7 @@ export default function CreateNewReadingTaskPage() {
 
       console.log('[Frontend] Total test cards created:', cards.length);
       setScaffolds(cards);
+      setScaffoldsGenerated(true);
       setManualEditOpenId(null);
       setManualEditMap({});
       setCurrentReviewIndex(0);
@@ -649,22 +611,8 @@ export default function CreateNewReadingTaskPage() {
         scaffold_final: [],
         scaffold_rejected: [],
       });
-
-      const responseThreadId = data.thread_id || newThreadId;
-      setThreadId(responseThreadId);
-
-      // Set PDF content for rendering - prioritize URL from backend, fallback to uploaded file
-      // Use hasPdfUrl (from data.pdf_url) instead of pdfUrl state since state update is async
-      if (hasPdfUrl || formData.uploadedFile) {
-        setPdfContent('PDF_LOADED');
-      } else {
-        setPdfContent(
-          `<h3>Scaffolds generated for ${readingDescriptor}</h3><p>The remaining readings stay in the queue.</p>`
-        );
-      }
     } catch (e) {
       console.error('[Frontend] Test Response Error:', e);
-      setScaffoldsGenerated(false);
       alert(`Failed to get test response: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
@@ -762,22 +710,12 @@ export default function CreateNewReadingTaskPage() {
       console.log('[Frontend] annotation_scaffolds_review:', data.annotation_scaffolds_review);
       console.log('[Frontend] annotation_scaffolds_review type:', typeof data.annotation_scaffolds_review);
       console.log('[Frontend] annotation_scaffolds_review isArray:', Array.isArray(data.annotation_scaffolds_review));
-      console.log('[Frontend] pdf_url:', data.pdf_url);
-      
-      // Extract and save PDF URL from backend
-      if (data.pdf_url) {
-        setPdfUrl(data.pdf_url);
-        console.log('[Frontend] Set PDF URL:', data.pdf_url);
-      }
       
       const nextSessionId = typeof data.session_id === 'string' ? data.session_id : sessionId;
       if (nextSessionId && nextSessionId !== sessionId) {
         setSessionId(nextSessionId);
         persistReadingSelection(selectedReadings, currentReadingIndex, nextSessionId);
       }
-      
-      // Use data.pdf_url directly (not pdfUrl state) since state update is async
-      const hasPdfUrl = !!data.pdf_url;
 
       const serverScaffolds = Array.isArray(data.annotation_scaffolds_review)
         ? data.annotation_scaffolds_review
@@ -834,9 +772,7 @@ export default function CreateNewReadingTaskPage() {
       const responseThreadId = data.thread_id || newThreadId;
       setThreadId(responseThreadId);
 
-      // Set PDF content - prioritize URL from backend, fallback to uploaded file
-      // Use hasPdfUrl (from data.pdf_url) instead of pdfUrl state since state update is async
-      if (hasPdfUrl || formData.uploadedFile) {
+      if (formData.uploadedFile) {
         setPdfContent('PDF_LOADED');
       } else {
         setPdfContent(
@@ -917,14 +853,9 @@ export default function CreateNewReadingTaskPage() {
     }
 
     if (actionResult) {
-      console.log('[processReviewResponse] actionResult:', actionResult);
-      console.log('[processReviewResponse] actionResult.status:', actionResult.status);
-      console.log('[processReviewResponse] targetKey:', targetKey);
-      
       const normalizedResultText = normalizeScaffoldText(actionResult.text);
       const { title: nextTitle, texts: strippedText } = extractTitleFromTexts(normalizedResultText);
       const normalizedStatus = typeof actionResult.status === 'string' ? actionResult.status.toLowerCase() : '';
-      console.log('[processReviewResponse] normalizedStatus:', normalizedStatus);
       const bufferValue = toTextBuffer(strippedText);
 
       setScaffolds((prev) =>
@@ -934,13 +865,6 @@ export default function CreateNewReadingTaskPage() {
             if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
             else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
             else if (normalizedStatus === 'edit_pending' || normalizedStatus === 'draft') nextStatus = 'IN PROGRESS';
-            
-            console.log('[processReviewResponse] Updating scaffold:', {
-              id: s.id,
-              oldStatus: s.status,
-              newStatus: nextStatus,
-              normalizedStatus,
-            });
 
             return {
               ...s,
@@ -1024,6 +948,10 @@ export default function CreateNewReadingTaskPage() {
   };
 
   const submitManualEdit = async (scaffold: any, valueOverride?: string) => {
+    if (!threadId) {
+      console.error('No thread_id available');
+      return null;
+    }
     const key = keyForId(scaffold.id);
     const editedValueRaw = valueOverride ?? manualEditMap[key] ?? '';
     const editedValue = editedValueRaw.trim();
@@ -1033,15 +961,29 @@ export default function CreateNewReadingTaskPage() {
     }
 
     try {
-      const scaffoldId = scaffold.scaffold_id || scaffold.id;
-      console.log('[Frontend] Manual edit - calling API:', { scaffoldId, new_text: editedValue });
-      
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/edit`, {
+      const payload = {
+        thread_id: threadId,
+        decision: 'edit' as const,
+        edited_json: {
+          fragment: scaffold.fragment,
+          text: editedValue,
+        },
+        actions: [
+          {
+            item_id: scaffold.scaffold_id || scaffold.id,
+            action: 'manual_edit',
+            data: {
+              new_text: editedValue,
+            },
+          },
+        ],
+      };
+
+      console.log('[Frontend] Manual edit payload:', payload);
+      const res = await fetch(`/threads/${threadId}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          new_text: editedValue,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -1049,17 +991,12 @@ export default function CreateNewReadingTaskPage() {
       }
 
       const data = await res.json();
-      // Backend returns { scaffold: {...} }, adapt to processReviewResponse format
-      const responseData = {
-        action_result: data.scaffold,
-        __interrupt__: null,
-      };
-      processReviewResponse(scaffold.id, responseData);
+      processReviewResponse(scaffold.id, data);
       setManualEditMap((prev) => ({
         ...prev,
         [key]: valueOverride ?? editedValueRaw,
       }));
-      return responseData;
+      return data;
     } catch (error) {
       console.error('Manual edit failed:', error);
       return null;
@@ -1074,6 +1011,11 @@ export default function CreateNewReadingTaskPage() {
 
     if (scaffold?.fragment) {
       setActiveFragment(scaffold.fragment);
+    }
+
+    if (!threadId) {
+      console.error('No thread_id available');
+      return;
     }
 
     try {
@@ -1116,55 +1058,69 @@ export default function CreateNewReadingTaskPage() {
         }
       }
 
-      // Call corresponding backend API directly
-      const scaffoldId = scaffold.scaffold_id || scaffold.id;
-      let res: Response;
-      let data: any;
+      // Call review API
+      const decision =
+        action === 'accept'
+          ? 'approve'
+          : action === 'reject'
+          ? 'reject'
+          : 'edit';
+      const requestBody: any = {
+        thread_id: threadId,
+        decision
+      };
 
-      if (action === 'accept') {
-        console.log('[Frontend] Approving scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/approve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) throw new Error(`Approve API failed: ${res.status}`);
-        const responseData = await res.json();
-        console.log('[Frontend] Backend response (approve):', responseData);
-        console.log('[Frontend] Backend response.scaffold:', responseData.scaffold);
-        console.log('[Frontend] Backend response.scaffold.status:', responseData.scaffold?.status);
-        // Adapt response format
-        data = {
-          action_result: responseData.scaffold,
-          __interrupt__: null,
-        };
-        console.log('[Frontend] Formatted data for processReviewResponse:', data);
-      } else if (action === 'reject') {
-        console.log('[Frontend] Rejecting scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/reject`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) throw new Error(`Reject API failed: ${res.status}`);
-        const responseData = await res.json();
-        console.log('[Frontend] Backend response (reject):', responseData);
-        console.log('[Frontend] Backend response.scaffold:', responseData.scaffold);
-        console.log('[Frontend] Backend response.scaffold.status:', responseData.scaffold?.status);
-        // Adapt response format
-        data = {
-          action_result: responseData.scaffold,
-          __interrupt__: null,
-        };
-        console.log('[Frontend] Formatted data for processReviewResponse:', data);
-      } else {
-        // edit action should be handled by handleSendModificationRequest
-        return;
+      if (action === 'edit' && modificationRequest.trim()) {
+        // Use edit_prompt for AI editing
+        requestBody.edit_prompt = modificationRequest.trim();
+        setModificationRequest('');
       }
+
+      const actionsPayload: Array<{ item_id: string | number; action: string; data?: Record<string, unknown> }> = [];
+      const itemId = scaffold.scaffold_id || scaffold.id;
+      if (decision === 'approve') {
+        actionsPayload.push({ item_id: itemId, action: 'approve' });
+      } else if (decision === 'reject') {
+        actionsPayload.push({ item_id: itemId, action: 'reject' });
+      } else if (decision === 'edit' && requestBody.edit_prompt) {
+        actionsPayload.push({
+          item_id: itemId,
+          action: 'llm_refine',
+          data: { prompt: requestBody.edit_prompt },
+        });
+      }
+      if (actionsPayload.length > 0) {
+        requestBody.actions = actionsPayload;
+      }
+
+      console.log('[Frontend] Calling review API with:', { threadId, decision, requestBody });
+      const res = await fetch(`/threads/${threadId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!res.ok) throw new Error(`Review API failed: ${res.status}`);
+      const data = await res.json();
 
       processReviewResponse(
         scaffold.id,
         data,
         action === 'accept' ? 'ACCEPTED' : action === 'reject' ? 'REJECTED' : undefined
       );
+      // Note: modify action status is already updated in the modify handler above
+
+      // If all reviewed, optionally fetch final bundle
+      if (data.__interrupt__ === null) {
+        try {
+          const bundleRes = await fetch(`/threads/${threadId}/scaffold-bundle`);
+          if (bundleRes.ok) {
+            await bundleRes.json();
+          }
+        } catch (err) {
+          console.error('Failed to fetch final bundle:', err);
+        }
+      }
     } catch (e) {
       console.error('Review action failed:', e);
       alert('Failed to process review action. Please try again.');
@@ -1177,42 +1133,39 @@ export default function CreateNewReadingTaskPage() {
 
   const handleSendModificationRequest = async () => {
     const message = modificationRequest.trim();
-    if (!message) {
-      return;
-    }
-
-    const currentCard = scaffolds[currentReviewIndex] ?? null;
-    if (!currentCard) {
+    if (!message || !threadId) {
       return;
     }
 
     try {
-      const scaffoldId = currentCard.scaffold_id || currentCard.id;
-      console.log('[Frontend] LLM refine scaffold:', { scaffoldId, prompt: message });
-      
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/llm-refine`, {
+      // Use edit decision with edit_prompt
+      const res = await fetch(`/threads/${threadId}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: message,
+          thread_id: threadId,
+          decision: 'edit',
+          edit_prompt: message,
+          actions: [
+            {
+              item_id: scaffolds[currentReviewIndex]?.scaffold_id || scaffolds[currentReviewIndex]?.id,
+              action: 'llm_refine',
+              data: { prompt: message },
+            },
+          ],
         })
       });
 
-      if (!res.ok) throw new Error(`LLM refine API failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Edit API failed: ${res.status}`);
       const data = await res.json();
-      
-      // Adapt response format
-      const responseData = {
-        action_result: data.scaffold,
-        __interrupt__: null,
-      };
-      
-      processReviewResponse(currentCard.id, responseData);
+      const currentCard = scaffolds[currentReviewIndex] ?? null;
+
+      processReviewResponse(currentCard?.id ?? null, data);
 
       // Update scaffold with edited version
-      if (data.scaffold) {
-        const editedItem = data.scaffold;
-        const scaffoldToUpdate = scaffolds.find(s => s.id === currentCard.id);
+      if (data.__interrupt__?.draft_item) {
+        const editedItem = data.__interrupt__.draft_item;
+        const scaffoldToUpdate = scaffolds.find(s => s.id === currentCard?.id);
         if (scaffoldToUpdate) {
           const normalizedText = normalizeScaffoldText(editedItem.text);
           const { title, texts } = extractTitleFromTexts(normalizedText);
@@ -1256,7 +1209,6 @@ export default function CreateNewReadingTaskPage() {
       setScaffolds([]);
       setScaffoldsGenerated(false);
       setPdfContent('');
-      setPdfUrl(null);
       setThreadId(null);
       setActiveFragment(null);
       setManualEditMap({});
@@ -1499,13 +1451,10 @@ export default function CreateNewReadingTaskPage() {
             {pdfContent === 'PDF_LOADED' ? (
               <div className={styles.pdfContent}>
                 <PdfPreviewComponent 
-                  url={pdfUrl || undefined}
-                  file={pdfUrl ? null : formData.uploadedFile}
+                  file={formData.uploadedFile} 
                   onTextExtracted={handleTextExtracted} 
                   scrollToFragment={activeFragment || undefined}
                   scaffoldIndex={activeFragment ? scaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
-                  searchQueries={scaffolds.map(s => s.fragment).filter(f => f && f.trim())}
-                  sessionId={sessionId || undefined}
                 />
               </div>
             ) : (
@@ -1665,9 +1614,9 @@ export default function CreateNewReadingTaskPage() {
                             setActiveFragment(scaffold.fragment);
                           }
                           try {
-                            if (!historyMap[scaffold.id] && sessionId && scaffold.scaffold_id) {
-                              // Use new history API: GET /threads/{session_id}/scaffolds/{scaffold_id}/history
-                              const res = await fetch(`/threads/${sessionId}/scaffolds/${scaffold.scaffold_id}/history`);
+                            if (!historyMap[scaffold.id] && threadId && scaffold.scaffold_id) {
+                              // Use new history API: GET /threads/{thread_id}/scaffolds/{scaffold_id}/history
+                              const res = await fetch(`/threads/${threadId}/scaffolds/${scaffold.scaffold_id}/history`);
                               if (res.ok) {
                                 const data = await res.json();
                                 const events = Array.isArray(data.history) ? data.history : [];

@@ -118,6 +118,7 @@ Alternatively, you can run the SQL schema directly in Supabase:
 
 6. **Run the application**:
 ```bash
+cd InkSpire_Backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 

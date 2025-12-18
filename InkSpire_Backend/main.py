@@ -23,7 +23,7 @@ app.add_middleware(
 
 # Database
 from database import get_db
-from models import AnnotationHighlightCoords, ScaffoldAnnotationVersion
+from models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
 from reading_scaffold_service import (
     create_scaffold_annotation,
     get_scaffold_annotation,
@@ -51,6 +51,14 @@ class ReviewedScaffoldModel(BaseModel):
     id: str
     fragment: str
     text: str
+
+
+class ReviewedScaffoldModelWithStatusAndHistory(BaseModel):
+    id: str
+    fragment: str
+    text: str
+    status: Literal["pending", "approved", "rejected"]
+    history: List[HistoryEntryModel]
 
 
 class ReviewedProfileModel(BaseModel):
@@ -196,18 +204,19 @@ def test_scaffold_response(payload: Dict[str, Any]):
     """
     # 这里完全忽略 payload，只用来验证“同样的请求体 + 同样的编码路径”在 FastAPI 下是否正常
 
-    test_scaffolds = []
-    for i in range(5):
+    test_scaffolds = [{'id': 'cbf12d27-9155-431c-9fa0-857fb142b727', 'fragment': 'A version control system serves the following purposes, among others. Version control enables multiple people to simultaneously work on a single project. Each person edits his or her own copy of the ﬁles and chooses when to share those changes with the rest of the team.', 'text': 'Consider a collaborative education data analysis project. How could version control help your team manage Python scripts and datasets, ensuring everyone has the latest version and can track changes effectively?', 'status': 'pending', 'history': [{'ts': 1766037322.98965, 'action': 'init', 'prompt': None, 'old_text': None, 'new_text': 'Consider a collaborative education data analysis project. How could version control help your team manage Python scripts and datasets, ensuring everyone has the latest version and can track changes effectively?'}]}, {'id': '1b9585d0-4f9c-4192-80fc-8d96ed9bd5a4', 'fragment': 'Version control uses a repository (a database of program versions) and a working copy where you edit ﬁles. Your working copy (sometimes called a checkout or clone) is your personal copy of all the ﬁles in the project. When you are happy with your edits, you commit your changes to a repository.', 'text': "In your own words, explain the difference between a 'working copy' and a 'repository'. What specific action does 'committing' your changes perform, and why is it a crucial step in managing your code?", 'status': 'pending', 'history': [{'ts': 1766037403.106373, 'action': 'init', 'prompt': None, 'old_text': None, 'new_text': "In your own words, explain the difference between a 'working copy' and a 'repository'. What specific action does 'committing' your changes perform, and why is it a crucial step in managing your code?"}]}, {'id': '363ae2cf-6ec3-40a4-9341-b58ecf281510', 'fragment': 'There are two general varieties of version control: centralized and distributed. Distributed version control is more modern, runs faster, is less prone to errors, has more features, and is more complex to understand. The main diﬀerence between centralized and distributed version control is the number of repositories.', 'text': 'Given that we will primarily use Git, a distributed version control system, what do you think are the key advantages of having multiple repositories for a team working on Python-based data analysis workflows?', 'status': 'pending', 'history': [{'ts': 1766037403.37672, 'action': 'init', 'prompt': None, 'old_text': None, 'new_text': 'Given that we will primarily use Git, a distributed version control system, what do you think are the key advantages of having multiple repositories for a team working on Python-based data analysis workflows?'}]}, {'id': 'beb89a84-8abf-4dd1-a900-9968ea82f739', 'fragment': 'A typical workﬂow when using Git is: On the main branch: git pull git branch NEW-BRANCH-NAME git checkout NEW-BRANCH-NAME As many times as desired: Make local edits. Examine the local edits: git status and git diff git commit, or git add then git commit git pull Ensure that tests pass. git push Make a pull request for branch NEW-BRANCH-NAME', 'text': 'Imagine you are developing a new Python function to clean student assessment data. How would you apply this typical Git workflow to ensure your changes are integrated smoothly and safely into the main project?', 'status': 'pending', 'history': [{'ts': 1766037403.572485, 'action': 'init', 'prompt': None, 'old_text': None, 'new_text': 'Imagine you are developing a new Python function to clean student assessment data. How would you apply this typical Git workflow to ensure your changes are integrated smoothly and safely into the main project?'}]}, {'id': '833f6ac1-b8a4-457f-95cd-f0d42090c7ee', 'fragment': "Don't rewrite history. git rebase is a powerful command that lets you rewrite the version control history. Never use rebase, including git pull -r. (Until you are more experienced with git. And, then still don't use it.) Rewriting history is ineﬀective if anyone else has cloned your repository.", 'text': "Why is 'rewriting history' with commands like `git rebase` strongly discouraged, especially when working on a shared codebase with other researchers? What are the potential negative consequences for collaboration?", 'status': 'pending', 'history': [{'ts': 1766037403.737651, 'action': 'init', 'prompt': None, 'old_text': None, 'new_text': "Why is 'rewriting history' with commands like `git rebase` strongly discouraged, especially when working on a shared codebase with other researchers? What are the potential negative consequences for collaboration?"}]}]
+    '''for i in range(5):
         test_scaffolds.append({
             "id": f"test-scaffold-{i+1}",
             "fragment": f"Test fragment text {i+1}. " * 2,
             "text": f"Test scaffold text {i+1}. " * 3,
-        })
+        })'''
 
     test_response = {
         "annotation_scaffolds_review": test_scaffolds,
-        "session_id": "test-session-id",
-        "reading_id": str(payload.get("reading_id")) if payload.get("reading_id") else "test-reading-id",
+        "session_id": "cbac0675-6ba0-401e-9919-75046b6dcc5f",
+        "reading_id": str(payload.get("reading_id")) if payload.get("reading_id") else "59c15877-b451-41a8-b7c1-0f02839afe73",
+        "pdf_url": "https://jrcstgmtxnavrkbdcdig.supabase.co/storage/v1/object/sign/readings/course_98adc978-af12-4b83-88ce-a9178670ae46/59c15877-b451-41a8-b7c1-0f02839afe73_reading02.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV85NWYyODY4Ni1mOTAzLTQ4NjMtODQ3Mi0zNzNiMWFhYmRhZDciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJyZWFkaW5ncy9jb3Vyc2VfOThhZGM5NzgtYWYxMi00YjgzLTg4Y2UtYTkxNzg2NzBhZTQ2LzU5YzE1ODc3LWI0NTEtNDFhOC1iN2MxLTBmMDI4MzlhZmU3M19yZWFkaW5nMDIucGRmIiwiaWF0IjoxNzY2MDc0ODAzLCJleHAiOjE3NjY2Nzk2MDN9.SQeFoTJXtXOKHFSRs9ebCyoMK7w3wZQq_vHpOE4IBGk",  # Mock PDF URL
     }
 
     encoded = jsonable_encoder(test_response)
@@ -233,7 +242,8 @@ def test_scaffold_response():
     test_response = {
         "annotation_scaffolds_review": test_scaffolds,
         "session_id": "test-session-id",
-        "reading_id": "test-reading-id"
+        "reading_id": "test-reading-id",
+        "pdf_url": "https://jrcstgmtxnavrkbdcdig.supabase.co/storage/v1/object/sign/readings/course_98adc978-af12-4b83-88ce-a9178670ae46/59c15877-b451-41a8-b7c1-0f02839afe73_reading02.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV85NWYyODY4Ni1mOTAzLTQ4NjMtODQ3Mi0zNzNiMWFhYmRhZDciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJyZWFkaW5ncy9jb3Vyc2VfOThhZGM5NzgtYWYxMi00YjgzLTg4Y2UtYTkxNzg2NzBhZTQ2LzU5YzE1ODc3LWI0NTEtNDFhOC1iN2MxLTBmMDI4MzlhZmU3M19yZWFkaW5nMDIucGRmIiwiaWF0IjoxNzY2MDc0ODAzLCJleHAiOjE3NjY2Nzk2MDN9.SQeFoTJXtXOKHFSRs9ebCyoMK7w3wZQq_vHpOE4IBGk",  # Mock PDF URL
     }
     
     print(f"[test_scaffold_response] Returning test response")
@@ -1456,6 +1466,7 @@ class ReadingScaffoldsResponse(BaseModel):
     annotation_scaffolds_review: List[ReviewedScaffoldModel]
     session_id: Optional[str] = None  # UUID as string
     reading_id: Optional[str] = None  # UUID as string
+    pdf_url: Optional[str] = None  # Public URL to PDF file in Supabase Storage
 
 
 class EditScaffoldRequest(BaseModel):
@@ -1467,7 +1478,7 @@ class LLMRefineScaffoldRequest(BaseModel):
 
 
 class ScaffoldResponse(BaseModel):
-    scaffold: ReviewedScaffoldModel
+    scaffold: ReviewedScaffoldModelWithStatusAndHistory
 
 
 class ExportedScaffold(BaseModel):
@@ -1478,6 +1489,20 @@ class ExportedScaffold(BaseModel):
 
 class ExportedScaffoldsResponse(BaseModel):
     annotation_scaffolds: List[ExportedScaffold]
+
+
+# Thread-based review API (compatibility layer for frontend)
+class ThreadReviewAction(BaseModel):
+    item_id: str
+    action: Literal["approve", "reject", "llm_refine"]
+    data: Optional[Dict[str, Any]] = None
+
+
+class ThreadReviewRequest(BaseModel):
+    thread_id: Optional[str] = None
+    decision: Optional[Literal["approve", "reject", "edit"]] = None
+    edit_prompt: Optional[str] = None
+    actions: Optional[List[ThreadReviewAction]] = None
 
 
 
@@ -1707,6 +1732,32 @@ def generate_scaffolds_with_session(
                     status_code=500,
                     detail=f"Response JSON serialization failed: {str(json_error)}",
                 )
+            
+            # Get PDF URL from Supabase Storage (signed URL for private buckets)
+            pdf_url = None
+            if reading.file_path:
+                try:
+                    from database import get_supabase_client
+                    supabase_client = get_supabase_client()
+                    bucket_name = "readings"
+                    
+                    # Try to get signed URL (works for both public and private buckets)
+                    # Expires in 7 days (604800 seconds)
+                    signed_url_response = supabase_client.storage.from_(bucket_name).create_signed_url(
+                        reading.file_path,
+                        expires_in=604800  # 7 days
+                    )
+                    pdf_url = signed_url_response.get('signedURL') if isinstance(signed_url_response, dict) else signed_url_response
+                    print(f"[generate_scaffolds_with_session] Got PDF signed URL: {pdf_url}")
+                except Exception as url_error:
+                    print(f"[generate_scaffolds_with_session] Warning: Failed to get PDF URL: {url_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue without PDF URL - not critical
+            
+            # Add pdf_url to response_dict
+            if pdf_url:
+                response_dict['pdf_url'] = pdf_url
             
             # Use jsonable_encoder to encode the dict (same as test endpoint)
             try:
@@ -2044,7 +2095,7 @@ def approve_scaffold_endpoint(
     )
     
     updated_dict = scaffold_to_dict_with_status_and_history(annotation)
-    return ScaffoldResponse(scaffold=scaffold_to_model(updated_dict))
+    return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
 @app.post(
@@ -2076,7 +2127,7 @@ def edit_scaffold_endpoint(
     )
     
     updated_dict = scaffold_to_dict_with_status_and_history(annotation)
-    return ScaffoldResponse(scaffold=scaffold_to_model(updated_dict))
+    return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
 @app.post(
@@ -2118,7 +2169,7 @@ def llm_refine_scaffold_endpoint(
     )
     
     final_dict = scaffold_to_dict_with_status_and_history(annotation)
-    return ScaffoldResponse(scaffold=scaffold_to_model(final_dict))
+    return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**final_dict))
 
 
 @app.post(
@@ -2149,7 +2200,7 @@ def reject_scaffold_endpoint(
     )
     
     updated_dict = scaffold_to_dict_with_status_and_history(annotation)
-    return ScaffoldResponse(scaffold=scaffold_to_model(updated_dict))
+    return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
 @app.get(
@@ -2204,6 +2255,219 @@ def export_approved_scaffolds_endpoint(
     return ExportedScaffoldsResponse(annotation_scaffolds=items)
 
 
+# ======================================================
+# Thread-based review API (compatibility endpoint)
+# ======================================================
+
+class ThreadReviewAction(BaseModel):
+    item_id: str
+    action: Literal["approve", "reject", "llm_refine"]
+    data: Optional[Dict[str, Any]] = None
+
+
+class ThreadReviewRequest(BaseModel):
+    thread_id: Optional[str] = None
+    decision: Optional[Literal["approve", "reject", "edit"]] = None
+    edit_prompt: Optional[str] = None
+    actions: Optional[List[ThreadReviewAction]] = None
+
+
+@app.post("/threads/{thread_id}/review")
+def thread_review_endpoint(
+    thread_id: str,
+    payload: ThreadReviewRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Compatibility endpoint for thread-based review API.
+    Maps to individual scaffold endpoints based on actions.
+    """
+    if not payload.actions or len(payload.actions) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one action is required"
+        )
+    
+    results = []
+    
+    for action_item in payload.actions:
+        scaffold_id = str(action_item.item_id)
+        action = action_item.action
+        
+        try:
+            if action == "approve":
+                # Call approve endpoint
+                annotation_id = uuid.UUID(scaffold_id)
+                annotation = update_scaffold_annotation_status(
+                    db=db,
+                    annotation_id=annotation_id,
+                    status="accepted",
+                    change_type="accept",
+                    created_by="user",
+                )
+                updated_dict = scaffold_to_dict_with_status_and_history(annotation)
+                scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**updated_dict)
+                results.append({
+                    "item_id": scaffold_id,
+                    "scaffold": scaffold_model.model_dump(),
+                })
+                
+            elif action == "reject":
+                # Call reject endpoint
+                annotation_id = uuid.UUID(scaffold_id)
+                annotation = update_scaffold_annotation_status(
+                    db=db,
+                    annotation_id=annotation_id,
+                    status="rejected",
+                    change_type="reject",
+                    created_by="user",
+                )
+                updated_dict = scaffold_to_dict_with_status_and_history(annotation)
+                scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**updated_dict)
+                results.append({
+                    "item_id": scaffold_id,
+                    "scaffold": scaffold_model.model_dump(),
+                })
+                
+            elif action == "llm_refine":
+                # Call llm-refine endpoint
+                prompt = None
+                if action_item.data and "prompt" in action_item.data:
+                    prompt = action_item.data["prompt"]
+                elif payload.edit_prompt:
+                    prompt = payload.edit_prompt
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Prompt is required for llm_refine action"
+                    )
+                
+                scaffold_dict = get_scaffold_or_404(scaffold_id, db)
+                
+                state: ScaffoldWorkflowState = {
+                    "model": "gemini-2.5-flash",
+                    "temperature": 0.3,
+                    "max_output_tokens": 2048,
+                }
+                llm = make_scaffold_llm(state)
+                
+                updated_dict = llm_refine_scaffold(scaffold_dict, prompt, llm)
+                
+                annotation_id = uuid.UUID(scaffold_id)
+                annotation = update_scaffold_annotation_content(
+                    db=db,
+                    annotation_id=annotation_id,
+                    new_content=updated_dict["text"],
+                    change_type="llm_edit",
+                    created_by="llm",
+                )
+                
+                final_dict = scaffold_to_dict_with_status_and_history(annotation)
+                scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**final_dict)
+                results.append({
+                    "item_id": scaffold_id,
+                    "scaffold": scaffold_model.model_dump(),
+                })
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown action: {action}"
+                )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid scaffold ID format: {scaffold_id}"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[thread_review_endpoint] Error processing action {action} for scaffold {scaffold_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to process action {action} for scaffold {scaffold_id}: {str(e)}"
+            )
+    
+    # Return response in format expected by frontend
+    # Frontend expects a response with __interrupt__ and action_result fields
+    if len(results) == 1:
+        # Single action - return in format expected by processReviewResponse
+        result = results[0]
+        return {
+            "action_result": result.get("scaffold"),
+            "__interrupt__": None,  # Indicates all actions completed
+        }
+    else:
+        # Multiple actions - return all results
+        return {
+            "results": results,
+            "__interrupt__": None,  # Indicates all actions completed
+        }
+
+
+@app.get("/threads/{thread_id}/scaffold-bundle")
+def get_scaffold_bundle_endpoint(
+    thread_id: str,
+    session_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get final scaffold bundle for a thread/session.
+    Returns all approved scaffolds for the session.
+    """
+    session_uuid = None
+    
+    # Try to get session_id from query parameter first
+    if session_id:
+        try:
+            session_uuid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid session_id format: {session_id}"
+            )
+    else:
+        # If no session_id provided, try to find the most recent session with annotations
+        # This is a fallback for when frontend only provides thread_id
+        from reading_scaffold_service import get_scaffold_annotations_by_session
+        from models import ScaffoldAnnotation
+        
+        # Get the most recent annotation to find its session_id
+        recent_annotation = db.query(ScaffoldAnnotation).order_by(
+            ScaffoldAnnotation.created_at.desc()
+        ).first()
+        
+        if recent_annotation and recent_annotation.session_id:
+            session_uuid = recent_annotation.session_id
+            print(f"[get_scaffold_bundle] Using session_id from recent annotation: {session_uuid}")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="session_id is required. Please provide it as a query parameter."
+            )
+    
+    # Get approved annotations for the session
+    annotations = get_approved_annotations(
+        db=db,
+        reading_id=None,  # Get all readings in the session
+        session_id=session_uuid,
+    )
+    
+    if not annotations:
+        return ExportedScaffoldsResponse(annotation_scaffolds=[])
+    
+    # Convert to export format
+    items = [
+        ExportedScaffold(
+            id=str(ann.id),
+            fragment=ann.highlight_text,
+            text=ann.current_content,
+        )
+        for ann in annotations
+    ]
+    
+    return ExportedScaffoldsResponse(annotation_scaffolds=items)
 
 
 # ======================================================
@@ -2261,61 +2525,124 @@ def post_annotations_to_perusall(req: PerusallAnnotationRequest):
     Each annotation corresponds to one POST request to:
     POST /courses/{courseId}/assignments/{assignmentId}/annotations
     """
-    if not (X_INSTITUTION and X_API_TOKEN and COURSE_ID and ASSIGNMENT_ID and DOCUMENT_ID and USER_ID):
+    # Check for missing environment variables
+    missing_vars = []
+    if not X_INSTITUTION:
+        missing_vars.append("PERUSALL_INSTITUTION")
+    if not X_API_TOKEN:
+        missing_vars.append("PERUSALL_API_TOKEN")
+    if not COURSE_ID:
+        missing_vars.append("PERUSALL_COURSE_ID")
+    if not ASSIGNMENT_ID:
+        missing_vars.append("PERUSALL_ASSIGNMENT_ID")
+    if not DOCUMENT_ID:
+        missing_vars.append("PERUSALL_DOCUMENT_ID")
+    if not USER_ID:
+        missing_vars.append("PERUSALL_USER_ID")
+    
+    if missing_vars:
         raise HTTPException(
             status_code=500,
-            detail="Perusall API environment variables are missing."
+            detail=f"Perusall API environment variables are missing: {', '.join(missing_vars)}. Please configure these in your .env file."
         )
 
     created_ids = []
     errors = []
 
-    with requests.Session() as session:
-        headers = {
-            "X-Institution": X_INSTITUTION,
-            "X-API-Token": X_API_TOKEN,
-        }
-
-        for idx, item in enumerate(req.annotations):
-
-            payload = {
-                "documentId": DOCUMENT_ID,
-                "userId": USER_ID,
-                "positionStartX": item.positionStartX,
-                "positionStartY": item.positionStartY,
-                "positionEndX": item.positionEndX,
-                "positionEndY": item.positionEndY,
-                "rangeType": item.rangeType,
-                "rangePage": item.rangePage,
-                "rangeStart": item.rangeStart,
-                "rangeEnd": item.rangeEnd,
-                "fragment": item.fragment,
-                "text": f"<p>{item.fragment}</p>"
+    try:
+        with requests.Session() as session:
+            headers = {
+                "X-Institution": X_INSTITUTION,
+                "X-API-Token": X_API_TOKEN,
             }
 
-            url = f"{PERUSALL_BASE_URL}/courses/{COURSE_ID}/assignments/{ASSIGNMENT_ID}/annotations"
+            for idx, item in enumerate(req.annotations):
+                payload = {
+                    "documentId": DOCUMENT_ID,
+                    "userId": USER_ID,
+                    "positionStartX": item.positionStartX,
+                    "positionStartY": item.positionStartY,
+                    "positionEndX": item.positionEndX,
+                    "positionEndY": item.positionEndY,
+                    "rangeType": item.rangeType,
+                    "rangePage": item.rangePage,
+                    "rangeStart": item.rangeStart,
+                    "rangeEnd": item.rangeEnd,
+                    "fragment": item.fragment,
+                    "text": f"<p>{item.fragment}</p>"
+                }
 
-            try:
-                response = session.post(url, data=payload, headers=headers)
-                response.raise_for_status()
+                url = f"{PERUSALL_BASE_URL}/courses/{COURSE_ID}/assignments/{ASSIGNMENT_ID}/annotations"
 
-                data = response.json()
-                ann_id = data[0]["id"]
-                created_ids.append(ann_id)
+                try:
+                    response = session.post(url, data=payload, headers=headers, timeout=30)
+                    response.raise_for_status()
 
-            except Exception as e:
-                errors.append({
-                    "index": idx,
-                    "error": str(e),
-                    "response": getattr(e, "response", None).text if hasattr(e, "response") and e.response else None,
-                    "payload": payload
-                })
+                    data = response.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        ann_id = data[0].get("id")
+                        if ann_id:
+                            created_ids.append(ann_id)
+                        else:
+                            errors.append({
+                                "index": idx,
+                                "error": f"Unexpected response format: {data}",
+                                "payload": payload
+                            })
+                    else:
+                        errors.append({
+                            "index": idx,
+                            "error": f"Unexpected response format: {data}",
+                            "payload": payload
+                        })
 
-    return PerusallAnnotationResponse(
-        success=len(errors) == 0,
-        created_ids=created_ids,
-        errors=errors,
-    )
+                except requests.exceptions.RequestException as e:
+                    error_msg = str(e)
+                    response_text = None
+                    if hasattr(e, "response") and e.response is not None:
+                        try:
+                            response_text = e.response.text
+                        except:
+                            pass
+                        if e.response.status_code:
+                            error_msg = f"HTTP {e.response.status_code}: {error_msg}"
+                    
+                    errors.append({
+                        "index": idx,
+                        "error": error_msg,
+                        "response": response_text,
+                        "payload": payload
+                    })
+                    print(f"[post_annotations_to_perusall] Error posting annotation {idx}: {error_msg}")
+                    if response_text:
+                        print(f"[post_annotations_to_perusall] Response: {response_text}")
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"[post_annotations_to_perusall] Unexpected error for annotation {idx}: {e}")
+                    print(f"[post_annotations_to_perusall] Traceback: {error_trace}")
+                    errors.append({
+                        "index": idx,
+                        "error": str(e),
+                        "payload": payload
+                    })
+
+        return PerusallAnnotationResponse(
+            success=len(errors) == 0,
+            created_ids=created_ids,
+            errors=errors,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[post_annotations_to_perusall] Fatal error: {e}")
+        print(f"[post_annotations_to_perusall] Traceback: {error_trace}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to post annotations to Perusall: {str(e)}"
+        )
 
 
 # ======================================================
@@ -2323,7 +2650,7 @@ def post_annotations_to_perusall(req: PerusallAnnotationRequest):
 # ======================================================
 
 class HighlightCoordsItem(BaseModel):
-    annotation_version_id: str
+    annotation_version_id: Optional[str] = None  # Optional: can be looked up by fragment
     rangeType: str
     rangePage: int
     rangeStart: int
@@ -2333,6 +2660,7 @@ class HighlightCoordsItem(BaseModel):
     positionStartY: float
     positionEndX: float
     positionEndY: float
+    session_id: Optional[str] = None  # Optional: used to lookup annotation if annotation_version_id not provided
 
 
 class HighlightReportRequest(BaseModel):
@@ -2359,13 +2687,47 @@ def save_highlight_coords(
 
     for idx, item in enumerate(req.coords):
         try:
-            # Validate annotation_version_id
-            try:
-                annotation_version_id = uuid.UUID(item.annotation_version_id)
-            except ValueError:
+            # Get annotation_version_id: either provided directly or looked up by fragment
+            annotation_version_id = None
+            
+            if item.annotation_version_id:
+                # Use provided annotation_version_id
+                try:
+                    annotation_version_id = uuid.UUID(item.annotation_version_id)
+                except ValueError:
+                    errors.append({
+                        "index": idx,
+                        "error": f"Invalid annotation_version_id format: {item.annotation_version_id}"
+                    })
+                    continue
+            elif item.session_id and item.fragment:
+                # Look up annotation by fragment and session_id
+                try:
+                    session_uuid = uuid.UUID(item.session_id)
+                    # Find annotation by matching fragment (highlight_text)
+                    annotation = db.query(ScaffoldAnnotation).filter(
+                        ScaffoldAnnotation.session_id == session_uuid,
+                        ScaffoldAnnotation.highlight_text.ilike(f"%{item.fragment[:100]}%")  # Partial match
+                    ).first()
+                    
+                    if annotation and annotation.current_version_id:
+                        annotation_version_id = annotation.current_version_id
+                    else:
+                        errors.append({
+                            "index": idx,
+                            "error": f"Could not find annotation for fragment: {item.fragment[:50]}..."
+                        })
+                        continue
+                except ValueError:
+                    errors.append({
+                        "index": idx,
+                        "error": f"Invalid session_id format: {item.session_id}"
+                    })
+                    continue
+            else:
                 errors.append({
                     "index": idx,
-                    "error": f"Invalid annotation_version_id format: {item.annotation_version_id}"
+                    "error": "Either annotation_version_id or (session_id + fragment) must be provided"
                 })
                 continue
 
@@ -2377,7 +2739,7 @@ def save_highlight_coords(
             if not version:
                 errors.append({
                     "index": idx,
-                    "error": f"Annotation version not found: {item.annotation_version_id}"
+                    "error": f"Annotation version not found: {annotation_version_id}"
                 })
                 continue
 

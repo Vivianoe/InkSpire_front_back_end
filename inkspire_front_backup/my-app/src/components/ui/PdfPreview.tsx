@@ -42,8 +42,7 @@ const loadRangy = async () => {
 };
 
 interface PdfPreviewProps {
-  file?: File | null;
-  url?: string | null;  // PDF URL from Supabase Storage
+  file: File | null;
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -51,22 +50,10 @@ interface PdfPreviewProps {
   scrollToFragment?: string;
   // Scaffold index for direct matching (0-based, Card 1 -> index 0)
   scaffoldIndex?: number;
-  // Session ID for mapping fragments to annotation_version_id
-  sessionId?: string | null;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scrollToFragment, scaffoldIndex, sessionId }: PdfPreviewProps) {
+export default function PdfPreview({ file, searchQueries, scrollToFragment, scaffoldIndex }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  
-  // Debug logging
-  useEffect(() => {
-    console.log('[PdfPreview] Props received:', {
-      hasUrl: !!url,
-      url: url,
-      hasFile: !!file,
-      fileName: file?.name,
-    });
-  }, [file, url]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -172,7 +159,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
   }, []);
 
   useEffect(() => {
-    if (!file && !url) {
+    if (!file) {
       setPdfDoc(null);
       setRenderedPages(new Set());
       setPageElements(new Map());
@@ -188,50 +175,17 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
         const pdfjs = await loadPdfJs();
         if (!pdfjs || cancelled) return;
 
-        let pdf;
-        if (url) {
-          // Load PDF from URL
-          console.log('[PdfPreview] Loading PDF from URL:', url);
-          try {
-            // Add CORS and other options for loading from external URL
-            pdf = await pdfjs.getDocument({ 
-              url,
-              httpHeaders: {},
-              withCredentials: false,
-              // Disable worker for URL loading if needed
-            }).promise;
-            console.log('[PdfPreview] PDF document loaded from URL successfully');
-          } catch (urlError: any) {
-            console.error('[PdfPreview] Error loading PDF from URL:', urlError);
-            console.error('[PdfPreview] URL was:', url);
-            throw urlError;
-          }
-        } else if (file) {
-          // Load PDF from File object
-          console.log('[PdfPreview] Loading PDF from File:', file.name);
-          const arrayBuffer = await file.arrayBuffer();
-          pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-          console.log('[PdfPreview] PDF document loaded from File successfully');
-        } else {
-          console.warn('[PdfPreview] No file or URL provided');
-          return;
-        }
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
         
         if (!cancelled) {
-          console.log('[PdfPreview] PDF loaded successfully:', pdf);
-          console.log('[PdfPreview] PDF pages:', pdf.numPages);
+          console.log('PDF loaded successfully:', pdf);
+          console.log('PDF pages:', pdf.numPages);
           setPdfDoc(pdf);
         }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
-        console.error('[PdfPreview] PDF loading error:', err);
-        console.error('[PdfPreview] Error details:', {
-          message: err?.message,
-          name: err?.name,
-          stack: err?.stack,
-          url: url,
-          hasFile: !!file,
-        });
+        console.error('PDF loading error:', err);
         if (!cancelled) {
           setError(err?.message || 'PDF loading failed');
         }
@@ -245,7 +199,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     loadPdf();
 
     return () => { cancelled = true; };
-  }, [file, url]);
+  }, [file]);
 
   const calculateScale = (baseWidth: number) => {
     const padding = 48; // account for inner padding/margins
@@ -492,9 +446,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
 
     const HYPHENS = '\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212';
     const HYPHEN_CLASS = `[${HYPHENS}]`;
-    // GAP now allows: nothing (words directly connected), spaces, or hyphens
-    // This handles PDF text layers where words may be concatenated without spaces
-    const GAP = `(?:|[\\s\\u00A0]*|\\s*${HYPHEN_CLASS}\\s*)`;
+    const GAP = `(?:|[\\s\\u00A0]+|\\s*${HYPHEN_CLASS}\\s*)`;
 
     const SUP_DIGITS = '0-9\\u2070\\u00B2\\u00B3\\u2074-\\u2079';
     const DIGIT_CLASS = `[${SUP_DIGITS}]+`;
@@ -502,34 +454,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     const RBRACK = `[\\]\\uFF3D\\u301B]`;
     const CITATION_PATTERN = `${LBRACK}\\s*${DIGIT_CLASS}(?:\\s*,\\s*${DIGIT_CLASS})*\\s*${RBRACK}`;
 
-    // Handle single-letter words that might be merged with next word in PDF
-    // e.g., "A version" might appear as "aversion" in PDF text
-    const parts: string[] = [];
-    for (let i = 0; i < rawParts.length; i++) {
-      const tok = rawParts[i];
-      if (/^\[\s*\d+(?:\s*,\s*\d+)*\s*\]$/.test(tok)) {
-        parts.push(CITATION_PATTERN);
-      } else if (tok.length === 1 && /^[a-zA-Z]$/.test(tok) && i < rawParts.length - 1) {
-        // Single letter word: allow it to be merged with next word or have space
-        // e.g., "A version" -> match "A version", "aversion", "Aversion"
-        const nextTok = rawParts[i + 1];
-        const escapedLetter = escapeRegExp(tok);
-        const escapedNext = escapeRegExp(nextTok);
-        // Create pattern that matches:
-        // 1. "A version" (with space) - (?:A[\s\u00A0]+)version
-        // 2. "aversion" (merged, lowercase) - aversion
-        // 3. "Aversion" (merged, uppercase) - Aversion
-        // Use case-insensitive matching, so pattern: (?:[Aa](?:[\s\u00A0]+|))?version
-        const letterLower = tok.toLowerCase();
-        const letterUpper = tok.toUpperCase();
-        // Match: [Aa]version OR (?:[Aa][\s\u00A0]+)version
-        parts.push(`(?:[${letterLower}${letterUpper}]${escapedNext}|(?:[${letterLower}${letterUpper}]${GAP})${escapedNext})`);
-        i++; // Skip next token since we've already included it
-      } else {
-        parts.push(escapeRegExp(tok));
-      }
-    }
-
+    const parts = rawParts.map(tok => /^\[\s*\d+(?:\s*,\s*\d+)*\s*\]$/.test(tok) ? CITATION_PATTERN : escapeRegExp(tok));
     return parts.join(GAP);
   }
 
@@ -796,56 +721,18 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     }, 300);
   }
 
-  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false) {
+  function highlightInLayer(layer: Element, query: string, applier: any) {
     const nodes = getTextNodesIn(layer);
-    if (!nodes.length) {
-      if (debug) console.log('[PdfPreview] No text nodes in layer');
-      return 0;
-    }
+    if (!nodes.length) return 0;
     const { text, map } = buildIndex(nodes);
-
-    if (debug) {
-      console.log('[PdfPreview] Layer text length:', text.length);
-      console.log('[PdfPreview] Layer text sample:', text.substring(0, 400));
-    }
 
     const flags = 'gius';
     const pattern = patternFromQueryLiteralFlexible(query);
-    if (!pattern) {
-      console.warn('[PdfPreview] No pattern generated for query:', query.substring(0, 80));
-      return 0;
-    }
-
-    if (debug) {
-      console.log('[PdfPreview] Query:', query.substring(0, 100));
-      console.log('[PdfPreview] Pattern:', pattern);
-    }
+    if (!pattern) return 0;
 
     let re: RegExp;
-    try { 
-      re = new RegExp(pattern, flags);
-    } catch (e) {
-      console.warn('[PdfPreview] Failed to create regex for pattern:', pattern, 'error:', e);
-      return 0;
-    }
-    
-    // Test if pattern matches
-    if (debug) {
-      const testMatch = re.test(text);
-      console.log('[PdfPreview] Pattern test match:', testMatch);
-      // Reset regex after test
-      re.lastIndex = 0;
-      
-      // Also test a simpler pattern: just the key words
-      const keyWords = query.split(/\s+/).filter(w => w.length > 1 && !/^[aA]$/.test(w));
-      if (keyWords.length > 0) {
-        const simplePattern = keyWords.slice(0, 3).map(w => escapeRegExp(w.toLowerCase())).join('.*?');
-        const simpleRe = new RegExp(simplePattern, 'gi');
-        const simpleMatch = simpleRe.test(text);
-        console.log('[PdfPreview] Simple key words test (first 3 words):', simpleMatch, 'words:', keyWords.slice(0, 3));
-        console.log('[PdfPreview] Looking for in text:', text.toLowerCase().includes(keyWords[0].toLowerCase()) ? 'FOUND' : 'NOT FOUND', keyWords[0]);
-      }
-    }
+    try { re = new RegExp(pattern, flags); }
+    catch { return 0; }
 
     const pageEl = layer.closest('.page') as HTMLElement | null;
     const pageNum = pageEl ? parseInt(pageEl.dataset.page || '1', 10) : 1;
@@ -877,57 +764,6 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
       count++;
       if (m[0].length === 0) re.lastIndex++;
     }
-    
-    // Fallback: If no matches found, try keyword-based matching
-    // This handles cases where PDF text has words concatenated
-    if (count === 0) {
-      const keyWords = query.split(/\s+/)
-        .filter(w => w.length > 1)
-        .map(w => w.replace(/[^\w]/g, '').toLowerCase())
-        .filter(w => w.length > 2); // Only words longer than 2 chars
-      
-      if (keyWords.length >= 2) {
-        // Try to find a sequence of keywords (allowing any characters between them)
-        // This matches cases like "aversion" (a+version) or "Afterreading" (After+reading)
-        const keyPattern = keyWords.slice(0, Math.min(5, keyWords.length))
-          .map(w => escapeRegExp(w))
-          .join('.*?');
-        const keyRe = new RegExp(keyPattern, 'gi');
-        keyRe.lastIndex = 0;
-        
-        while ((m = keyRe.exec(text)) !== null) {
-          const start = m.index;
-          const end = start + m[0].length;
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const rng: any = indexToDomRange(start, end, map);
-          if (!rng) { if (m[0].length === 0) keyRe.lastIndex++; continue; }
-
-          try { applier.applyToRange(rng); } catch {}
-
-          if (pageEl) {
-            const coords = coordsPageEncodedY(rng, pageEl, pageNum);
-            highlightRecordsRef.current.push({
-              rangeType: 'text',
-              rangePage: pageNum,
-              rangeStart: start,
-              rangeEnd: end,
-              fragment: m[0],
-              ...coords,
-            });
-          }
-
-          try { rng.detach?.(); } catch {}
-          count++;
-          if (m[0].length === 0) keyRe.lastIndex++;
-        }
-        
-        if (count > 0 && debug) {
-          console.log('[PdfPreview] Fallback keyword matching found', count, 'match(es)');
-        }
-      }
-    }
-    
     return count;
   }
 
@@ -938,7 +774,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     if (!allRendered) return;
 
     (async () => {
-      // Strategy A: Use fragments from props (scaffolds) → search locally → highlight → report coords
+      // Strategy A: Server sends sentences → search locally → highlight → report coords
       try {
         if (!appliersRef.current.A || !appliersRef.current.B) {
           const r = await loadRangy();
@@ -948,93 +784,28 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
           }
         }
 
-        // Priority 1: Use searchQueries from props (fragments from scaffolds)
-        let list: string[] = [];
-        if (searchQueries) {
-          if (typeof searchQueries === 'string') {
-            list = [searchQueries];
-            console.log('[PdfPreview] Search queries (string):', list);
-          } else if (Array.isArray(searchQueries)) {
-            list = searchQueries.filter(q => q && typeof q === 'string' && q.trim());
-            console.log('[PdfPreview] Search queries (array):', list.length, 'fragments');
-            console.log('[PdfPreview] Fragment samples (first 3):', list.slice(0, 3).map(f => f.substring(0, 100)));
-          }
-        }
-
-        // Fallback: If no searchQueries provided, try fetching from API； needs to be changed to fetch from backend
-        if (list.length === 0) {
-          try {
-            console.log('[PdfPreview] Fetching queries from API');
-            const qRes = await fetch('/api/queries');
-            if (qRes.ok) {
-              const { queries } = await qRes.json();
-              list = Array.isArray(queries) ? queries : [];
-            }
-          } catch (e) {
-            console.warn('[PdfPreview] Failed to fetch queries from API:', e);
-          }
-        }
-
-        if (list.length === 0) {
-          clearHighlights();
-          return;
-        }
+        const qRes = await fetch('/api/queries');
+        if (!qRes.ok) { clearHighlights(); return; }
+        const { queries } = await qRes.json();
+        const list: string[] = Array.isArray(queries) ? queries : [];
 
         clearHighlights();
         const layers = Array.from(containerRef.current!.querySelectorAll('.textLayer')) as Element[];
-        console.log('[PdfPreview] Found', layers.length, 'text layers');
-        if (layers.length > 0) {
-          const firstLayerText = layers[0].textContent || '';
-          console.log('[PdfPreview] First layer text sample (first 200 chars):', firstLayerText.substring(0, 200));
-        }
-        
         let total = 0;
-        list.forEach((q, i) => {
-          console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
-          let fragmentTotal = 0;
-          layers.forEach((layer, layerIdx) => {
+        layers.forEach(layer => {
+          list.forEach((q, i) => {
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
-            if (applier && q && q.trim()) {
-              const matches = highlightInLayer(layer, q, applier, i === 0 && layerIdx === 0);
-              if (matches > 0) {
-                console.log(`[PdfPreview] Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
-              }
-              fragmentTotal += matches;
-            }
+            if (applier && q && q.trim()) total += highlightInLayer(layer, q, applier);
           });
-          console.log(`[PdfPreview] Fragment ${i + 1} total matches: ${fragmentTotal}`);
-          total += fragmentTotal;
         });
 
         const report = highlightRecordsRef.current || [];
         if (report.length) {
-          try {
-            // Format: backend expects { coords: [...] }
-            // Add session_id to each coord item for lookup if annotation_version_id is not provided
-            const coordsWithSession = report.map(coord => ({
-              ...coord,
-              session_id: sessionId || undefined,
-            }));
-            const formattedReport = { coords: coordsWithSession };
-            const response = await fetch('/api/highlight-report', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' }, 
-              body: JSON.stringify(formattedReport) 
-            });
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
-            } else {
-              console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
-            }
-          } catch (e) {
-            console.warn('[PdfPreview] Error sending highlight report:', e);
-          }
+          try { await fetch('/api/highlight-report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) }); } catch {}
           // Strategy A uses textLayer mark elements, not overlay
         }
-        console.log(`Local search highlighted ${total} match(es) across ${layers.length} page(s) using ${list.length} fragment(s) from scaffolds.`);
-      } catch (e) {
-        console.error('[PdfPreview] Error in highlight strategy A:', e);
+        console.log(`Local search highlighted ${total} match(es) across ${layers.length} page(s).`);
+      } catch {
         // Strategy B: Server returns coordinates directly
         try {
           const res = await fetch('/api/mock-highlights');
@@ -1049,7 +820,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
         }
       }
     })();
-  }, [pdfDoc, renderedPages, searchQueries]);
+  }, [pdfDoc, renderedPages]);
 
   // Handle external scroll requests
   useEffect(() => {
@@ -1069,22 +840,10 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     scrollToMatchFragment(frag!, scaffoldIndex);
   }, [renderedPages, scaffoldIndex]);
 
-  // Debug: Log pageElements state
-  // IMPORTANT: This hook must be before any early returns to maintain hooks order
-  useEffect(() => {
-    console.log('[PdfPreview] pageElements state:', {
-      size: pageElements.size,
-      pages: Array.from(pageElements.keys()),
-      renderedPagesSize: renderedPages.size,
-      renderedPages: Array.from(renderedPages),
-      pdfDocPages: pdfDoc?.numPages,
-    });
-  }, [pageElements, renderedPages, pdfDoc]);
-
-  if (!file && !url) {
+  if (!file) {
     return (
       <div className="flex items-center justify-center h-64 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-        <p className="text-gray-500">Please upload a PDF file or provide a PDF URL to preview content</p>
+        <p className="text-gray-500">Please upload a PDF file to preview content</p>
       </div>
     );
   }
@@ -1134,11 +893,9 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
                 {pageContainer ? (
                   <div ref={(el) => {
                     if (el && pageContainer) {
-                      // Clear and append the page container
-                      if (el.children.length === 0 || !el.contains(pageContainer)) {
-                        el.innerHTML = '';
-                        el.appendChild(pageContainer);
-                        console.log(`[PdfPreview] Attached page ${pageNumber} to DOM`);
+                      // Clear content if it doesn't contain the current pageContainer
+                      if (!el.contains(pageContainer)) {
+                        el.replaceChildren(pageContainer);
                       }
                     }
                   }} />
@@ -1146,7 +903,6 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
                   <div className="flex items-center justify-center h-32 w-full bg-gray-100 rounded">
                     <div className="text-center">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      <p className="text-gray-600 text-sm mt-2">Loading page {pageNumber}...</p>
                     </div>
                   </div>
                 )}
