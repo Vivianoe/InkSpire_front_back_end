@@ -1,0 +1,156 @@
+.header {
+  background-color: var(--white);
+}
+
+.nav {
+  margin: 0 auto;
+  display: flex;
+  max-width: 80rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 1rem;
+}
+
+.logoContainer {
+  display: flex;
+  flex: 1;
+}
+
+.logo {
+  margin: -0.375rem;
+  padding: 0.375rem;
+}
+
+.logoText {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.mobileMenuButton {
+  display: flex;
+  border-radius: 0.5rem;
+  padding: 0.625rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-700);
+}
+
+.mobileMenuButton:hover {
+  background-color: var(--gray-100);
+}
+
+.menuIcon {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.desktopNav {
+  display: none;
+  gap: 3rem;
+}
+
+.navLink {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--gray-900);
+  transition: color 0.15s ease-in-out;
+}
+
+.navLink:hover {
+  color: var(--indigo-600);
+}
+
+.profileContainer {
+  display: none;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.profileAvatar {
+  width: 2rem;
+  height: 2rem;
+  background-color: var(--gray-700);
+  border-radius: 50%;
+}
+
+/* Mobile menu */
+.mobileMenu {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 10;
+  width: 100%;
+  overflow-y: auto;
+  background-color: var(--white);
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+@media (min-width: 640px) {
+  .mobileMenu {
+    max-width: 24rem;
+  }
+}
+
+.mobileMenuHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mobileMenuCloseButton {
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  color: var(--gray-700);
+}
+
+.mobileMenuCloseButton:hover {
+  background-color: var(--gray-100);
+}
+
+.closeIcon {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.mobileMenuContent {
+  margin-top: 1.5rem;
+}
+
+.mobileMenuItems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mobileNavLink {
+  display: block;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.75;
+  color: var(--gray-900);
+}
+
+.mobileNavLink:hover {
+  background-color: var(--gray-50);
+}
+
+@media (min-width: 1024px) {
+  .mobileMenuButton {
+    display: none;
+  }
+  
+  .desktopNav {
+    display: flex;
+  }
+  
+  .profileContainer {
+    display: flex;
+  }
+}
+
