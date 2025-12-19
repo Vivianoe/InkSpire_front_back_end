@@ -44,6 +44,7 @@ from app.api.models import (
     ReadingScaffoldsRequest,
     ReadingScaffoldsResponse,
     GenerateScaffoldsRequest,
+    GenerateScaffoldsResponse,
     EditScaffoldRequest,
     LLMRefineScaffoldRequest,
     ScaffoldResponse,
@@ -367,70 +368,76 @@ def generate_scaffolds_with_session(
         response = run_material_focus_scaffold(scaffold_request, db)
         print(f"[generate_scaffolds_with_session] Successfully got response from run_material_focus_scaffold")
         
-        # Convert to dict first
+        # Re-fetch annotations from database with full status and history
+        # This ensures we return complete information including status and history
+        # Filter by both session_id and reading_id to ensure we only return annotations for this reading
+        print(f"[generate_scaffolds_with_session] Re-fetching annotations with full status and history...")
+        all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
+        # Filter by reading_id to only return annotations for this specific reading
+        annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
+        print(f"[generate_scaffolds_with_session] Found {len(annotations)} annotations in database for reading {reading_uuid}")
+        
+        # Convert to full API format with status and history
+        full_scaffolds = []
+        for annotation in annotations:
+            try:
+                annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+                scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**annotation_dict)
+                full_scaffolds.append(scaffold_model)
+                print(f"[generate_scaffolds_with_session] Converted annotation {annotation.id} with status={annotation_dict.get('status')} and history length={len(annotation_dict.get('history', []))}")
+            except Exception as convert_error:
+                print(f"[generate_scaffolds_with_session] ERROR converting annotation {annotation.id}: {convert_error}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to convert annotation to API format: {str(convert_error)}",
+                )
+        
+        # Get PDF URL from Supabase Storage
+        pdf_url = None
+        if reading.file_path:
+            try:
+                supabase_client = get_supabase_client()
+                bucket_name = "readings"
+                
+                # Try to get signed URL (expires in 7 days)
+                signed_url_response = supabase_client.storage.from_(bucket_name).create_signed_url(
+                    reading.file_path,
+                    expires_in=604800  # 7 days
+                )
+                pdf_url = signed_url_response.get('signedURL') if isinstance(signed_url_response, dict) else signed_url_response
+                print(f"[generate_scaffolds_with_session] Got PDF signed URL: {pdf_url}")
+            except Exception as url_error:
+                print(f"[generate_scaffolds_with_session] Warning: Failed to get PDF URL: {url_error}")
+                import traceback
+                traceback.print_exc()
+        
+        # Build GenerateScaffoldsResponse with full information
         try:
-            response_dict = response.model_dump(mode='json')
+            full_response = GenerateScaffoldsResponse(
+                annotation_scaffolds_review=full_scaffolds,
+                session_id=str(session_uuid),
+                reading_id=str(reading_uuid),
+                pdf_url=pdf_url,
+            )
+            print(f"[generate_scaffolds_with_session] Built GenerateScaffoldsResponse with {len(full_scaffolds)} scaffolds")
             
-            # Try JSON serialization to catch any issues
-            try:
-                json_str = json_module.dumps(response_dict, default=str)
-                print(f"[generate_scaffolds_with_session] Response can be serialized to JSON (length: {len(json_str)})")
-            except Exception as json_error:
-                print(f"[generate_scaffolds_with_session] ERROR: Response cannot be serialized to JSON: {json_error}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Response JSON serialization failed: {str(json_error)}",
-                )
+            # Convert to dict and encode
+            response_dict = full_response.model_dump(mode='json')
+            encoded = jsonable_encoder(response_dict)
             
-            # Get PDF URL from Supabase Storage
-            pdf_url = None
-            if reading.file_path:
-                try:
-                    supabase_client = get_supabase_client()
-                    bucket_name = "readings"
-                    
-                    # Try to get signed URL (expires in 7 days)
-                    signed_url_response = supabase_client.storage.from_(bucket_name).create_signed_url(
-                        reading.file_path,
-                        expires_in=604800  # 7 days
-                    )
-                    pdf_url = signed_url_response.get('signedURL') if isinstance(signed_url_response, dict) else signed_url_response
-                    print(f"[generate_scaffolds_with_session] Got PDF signed URL: {pdf_url}")
-                except Exception as url_error:
-                    print(f"[generate_scaffolds_with_session] Warning: Failed to get PDF URL: {url_error}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # Add pdf_url to response_dict
-            if pdf_url:
-                response_dict['pdf_url'] = pdf_url
-            
-            # Use jsonable_encoder to encode the dict
-            try:
-                encoded = jsonable_encoder(response_dict)
-                print(f"[generate_scaffolds_with_session] Response encoded successfully using jsonable_encoder")
-            except Exception as encode_error:
-                print(f"[generate_scaffolds_with_session] ERROR: jsonable_encoder failed: {encode_error}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Response encoding failed: {str(encode_error)}",
-                )
-            
-            # Return the encoded dict using JSONResponse
-            print(f"[generate_scaffolds_with_session] Returning JSONResponse with encoded content...")
-            try:
-                json_response = JSONResponse(content=encoded)
-                print(f"[generate_scaffolds_with_session] JSONResponse created successfully")
-                return json_response
-            except Exception as json_response_error:
-                print(f"[generate_scaffolds_with_session] ERROR: Failed to create JSONResponse: {json_response_error}")
-                import traceback
-                traceback.print_exc()
-                return encoded
+            print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
+            print(f"[generate_scaffolds] Encoded content type: {JSONResponse(content=encoded)}")
+            return JSONResponse(content=encoded)
+        except Exception as response_error:
+            print(f"[generate_scaffolds_with_session] ERROR building response: {response_error}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to build response: {str(response_error)}",
+            )
         except HTTPException:
             raise
         except Exception as final_error:
@@ -1047,7 +1054,7 @@ def save_highlight_coords(
 
     for idx, item in enumerate(req.coords):
         try:
-            # Get annotation_version_id: either provided directly or looked up by fragment
+            # Get annotation_version_id: either provided directly, looked up by annotation_id, or looked up by fragment
             annotation_version_id = None
             
             if item.annotation_version_id:
@@ -1058,6 +1065,28 @@ def save_highlight_coords(
                     errors.append({
                         "index": idx,
                         "error": f"Invalid annotation_version_id format: {item.annotation_version_id}"
+                    })
+                    continue
+            elif item.annotation_id:
+                # Look up annotation by annotation_id and get current_version_id
+                try:
+                    annotation_uuid = uuid.UUID(item.annotation_id)
+                    annotation = db.query(ScaffoldAnnotation).filter(
+                        ScaffoldAnnotation.id == annotation_uuid
+                    ).first()
+                    
+                    if annotation and annotation.current_version_id:
+                        annotation_version_id = annotation.current_version_id
+                    else:
+                        errors.append({
+                            "index": idx,
+                            "error": f"Could not find annotation or current_version_id for annotation_id: {item.annotation_id}"
+                        })
+                        continue
+                except ValueError:
+                    errors.append({
+                        "index": idx,
+                        "error": f"Invalid annotation_id format: {item.annotation_id}"
                     })
                     continue
             elif item.session_id and item.fragment:
@@ -1087,7 +1116,7 @@ def save_highlight_coords(
             else:
                 errors.append({
                     "index": idx,
-                    "error": "Either annotation_version_id or (session_id + fragment) must be provided"
+                    "error": "Either annotation_version_id, annotation_id, or (session_id + fragment) must be provided"
                 })
                 continue
 
@@ -1103,25 +1132,28 @@ def save_highlight_coords(
                 })
                 continue
 
-            # Check if coordinate already exists for this version
+            # Check if coordinate already exists for this version with same page and range
+            # A fragment can appear in multiple locations (different pages/positions), so we need to check
+            # for exact matches based on annotation_version_id + range_page + range_start + range_end
             existing = db.query(AnnotationHighlightCoords).filter(
-                AnnotationHighlightCoords.annotation_version_id == annotation_version_id
+                AnnotationHighlightCoords.annotation_version_id == annotation_version_id,
+                AnnotationHighlightCoords.range_page == item.rangePage,
+                AnnotationHighlightCoords.range_start == item.rangeStart,
+                AnnotationHighlightCoords.range_end == item.rangeEnd
             ).first()
 
             if existing:
-                # Update existing record
+                # Update existing record (same location)
                 existing.range_type = item.rangeType
-                existing.range_page = item.rangePage
-                existing.range_start = item.rangeStart
-                existing.range_end = item.rangeEnd
                 existing.fragment = item.fragment
                 existing.position_start_x = item.positionStartX
                 existing.position_start_y = item.positionStartY
                 existing.position_end_x = item.positionEndX
                 existing.position_end_y = item.positionEndY
                 existing.valid = True
+                print(f"[save_highlight_coords] Updated existing coords for annotation_version_id={annotation_version_id}, page={item.rangePage}, range=[{item.rangeStart}, {item.rangeEnd}]")
             else:
-                # Create new record
+                # Create new record (new location for same annotation_version)
                 coords = AnnotationHighlightCoords(
                     annotation_version_id=annotation_version_id,
                     range_type=item.rangeType,
@@ -1136,6 +1168,7 @@ def save_highlight_coords(
                     valid=True
                 )
                 db.add(coords)
+                print(f"[save_highlight_coords] Created new coords for annotation_version_id={annotation_version_id}, page={item.rangePage}, range=[{item.rangeStart}, {item.rangeEnd}]")
 
             db.commit()
             created_count += 1

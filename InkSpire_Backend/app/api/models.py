@@ -201,9 +201,16 @@ class GenerateScaffoldsRequest(BaseModel):
     session_id: Optional[str] = None  # UUID as string, optional - will create new session if not provided
     reading_id: str  # UUID as string
 
-
+# return value of reading-scaffolds endpoint
 class ReadingScaffoldsResponse(BaseModel):
     annotation_scaffolds_review: List[ReviewedScaffoldModel]
+    session_id: Optional[str] = None
+    reading_id: Optional[str] = None
+    pdf_url: Optional[str] = None
+
+# need to add the GenerateScaffoldsResponse model
+class GenerateScaffoldsResponse(BaseModel):
+    annotation_scaffolds_review: List[ReviewedScaffoldModelWithStatusAndHistory]
     session_id: Optional[str] = None
     reading_id: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -261,7 +268,8 @@ class PerusallAnnotationItem(BaseModel):
 
 
 class PerusallAnnotationRequest(BaseModel):
-    annotations: List[PerusallAnnotationItem]
+    annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
+    annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
 
 
 class PerusallAnnotationResponse(BaseModel):
@@ -276,6 +284,7 @@ class PerusallAnnotationResponse(BaseModel):
 
 class HighlightCoordsItem(BaseModel):
     annotation_version_id: Optional[str] = None
+    annotation_id: Optional[str] = None  # Frontend can provide annotation_id, backend will find current_version_id
     rangeType: str
     rangePage: int
     rangeStart: int

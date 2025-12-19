@@ -9,6 +9,10 @@ let pdfjsLib: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let rangyLib: any = null;
 
+/**
+ * Loads PDF.js library from global window object (injected via CDN in layout.tsx)
+ * Returns the pdfjsLib instance for PDF rendering operations
+ */
 const loadPdfJs = async () => {
   if (typeof window === 'undefined') return null;
   
@@ -27,7 +31,10 @@ const loadPdfJs = async () => {
   return pdfjsLib;
 };
 
-// Dynamically load rangy and class applier
+/**
+ * Dynamically loads Rangy library and class applier module for text selection and highlighting
+ * Returns the initialized Rangy instance for creating text ranges and applying CSS classes
+ */
 const loadRangy = async () => {
   if (typeof window === 'undefined') return null;
   if (!rangyLib) {
@@ -47,6 +54,16 @@ interface PdfPreviewProps {
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
+  // Scaffolds array with annotation_id and fragment mapping
+  scaffolds?: Array<{
+    id: string;  // annotation_id
+    fragment: string;
+    history?: Array<{
+      ts: number;
+      action: string;
+      new_text?: string;
+    }>;
+  }>;
   // Request scroll to the first highlight matching this fragment (case-insensitive substring)
   scrollToFragment?: string;
   // Scaffold index for direct matching (0-based, Card 1 -> index 0)
@@ -55,7 +72,7 @@ interface PdfPreviewProps {
   sessionId?: string | null;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scrollToFragment, scaffoldIndex, sessionId }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   
   // Debug logging
@@ -81,6 +98,27 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
 
   // rangy appliers
   const appliersRef = useRef<{ A: any | null; B: any | null }>({ A: null, B: null });
+  
+  // Fragment to annotation_id mapping
+  const fragmentToAnnotationIdRef = useRef<Map<string, string>>(new Map());
+  
+  // Build fragment -> annotation_id mapping from scaffolds
+  useEffect(() => {
+    if (scaffolds && Array.isArray(scaffolds)) {
+      const mapping = new Map<string, string>();
+      scaffolds.forEach((scaffold) => {
+        if (scaffold.id && scaffold.fragment) {
+          // Normalize fragment for matching (lowercase, trim)
+          const normalizedFragment = scaffold.fragment.toLowerCase().trim();
+          mapping.set(normalizedFragment, scaffold.id);
+          // Also store original fragment as key for exact match
+          mapping.set(scaffold.fragment, scaffold.id);
+        }
+      });
+      fragmentToAnnotationIdRef.current = mapping;
+      console.log('[PdfPreview] Built fragment -> annotation_id mapping:', Array.from(mapping.entries()).slice(0, 3));
+    }
+  }, [scaffolds]);
 
   // Inject PDF styles into document head
   useEffect(() => {
@@ -247,6 +285,12 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return () => { cancelled = true; };
   }, [file, url]);
 
+  /**
+   * Calculates the optimal scale factor for PDF pages based on container width
+   * Ensures pages fit within the viewport while maintaining readability
+   * @param baseWidth - The base width of the PDF page at scale 1
+   * @returns Scale factor between minScale (1) and maxScale (1.5)
+   */
   const calculateScale = (baseWidth: number) => {
     const padding = 48; // account for inner padding/margins
     const availableWidth = containerRef.current
@@ -270,6 +314,12 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     setPageElements(new Map());
     setOverlayLayers(new Map());
 
+    /**
+     * Renders a single PDF page with three layers: Canvas (image), Text Layer (selectable text), and Overlay (highlights)
+     * Creates the page container, renders PDF content, extracts text, and sets up layers for interaction
+     * @param pageNumber - 1-based page number to render
+     * @param force - If true, re-render even if page already exists
+     */
     const renderPage = async (pageNumber: number, force = false) => {
       if (!pdfDoc || cancelled) return;
 
@@ -406,6 +456,10 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
       }
     };
 
+    /**
+     * Renders all pages of the PDF document sequentially
+     * Also initializes Rangy class appliers for text highlighting after all pages are rendered
+     */
     const renderAllPages = async () => {
       const force = viewportVersion > 0;
       for (let i = 1; i <= pdfDoc.numPages; i++) {
@@ -435,6 +489,10 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
   useEffect(() => {
     if (!pdfDoc) return;
 
+    /**
+     * Updates the viewport version to trigger re-rendering of all pages when window is resized
+     * This ensures PDF pages scale correctly to fit the new container size
+     */
     const updateScale = () => {
       setViewportVersion((prev) => prev + 1);
     };
@@ -450,6 +508,12 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
   const pendingScrollRef = useRef<string | null>(null);
   const activeHighlightRef = useRef<HTMLElement | null>(null);
 
+  /**
+   * Extracts all text nodes from a DOM element using TreeWalker
+   * Used to build a searchable text index for highlighting
+   * @param root - The root element to traverse
+   * @returns Array of text nodes found in the element tree
+   */
   function getTextNodesIn(root: Element) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     const nodes: Node[] = [];
@@ -457,6 +521,12 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return nodes;
   }
 
+  /**
+   * Builds a character index mapping from text nodes to their positions in the concatenated text
+   * Creates a map that allows converting character positions back to DOM nodes and offsets
+   * @param nodes - Array of text nodes to index
+   * @returns Object with concatenated text string and mapping array for position lookups
+   */
   function buildIndex(nodes: Node[]) {
     const map: { node: Node; start: number; end: number }[] = [];
     let acc = '';
@@ -469,6 +539,14 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return { text: acc, map };
   }
 
+  /**
+   * Converts character index positions to a DOM Range object
+   * Uses the index map to locate the corresponding text nodes and create a selection range
+   * @param idxStart - Starting character index in the concatenated text
+   * @param idxEnd - Ending character index in the concatenated text
+   * @param map - Index mapping array from buildIndex()
+   * @returns DOM Range object or null if positions are invalid
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function indexToDomRange(idxStart: number, idxEnd: number, map: any[]) {
     function locate(idx: number) {
@@ -484,8 +562,19 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return r;
   }
 
+  /**
+   * Escapes special regex characters in a string to make it safe for use in RegExp
+   * @param s - String to escape
+   * @returns Escaped string safe for regex pattern matching
+   */
   function escapeRegExp(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+  /**
+   * Generates a flexible regex pattern from a query string to handle PDF text quirks
+   * Handles missing spaces, hyphens, merged words (e.g., "A version" -> "aversion"), and citations
+   * @param q - Query string to convert to regex pattern
+   * @returns Regex pattern string that can match text with spacing variations
+   */
   function patternFromQueryLiteralFlexible(q: string) {
     const rawParts = q.trim().split(/\s+/).filter(Boolean);
     if (!rawParts.length) return '';
@@ -533,12 +622,24 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return parts.join(GAP);
   }
 
+  /**
+   * Clears all highlights from overlay layers and resets the highlight records array
+   * Removes all visual highlights and coordinate records
+   */
   function clearHighlights() {
     overlayLayers.forEach(layer => { while (layer.firstChild) layer.removeChild(layer.firstChild); });
     highlightRecordsRef.current = [];
   }
 
-  // Coordinates: X in [0,1]; Y as n + [0,1) (n = 1-based page number)
+  /**
+   * Converts a DOM Range to normalized page coordinates
+   * X coordinates are in [0, 1] range (relative to page width)
+   * Y coordinates are encoded as pageNum + fraction [0, 0.999] (e.g., page 2, 50% down = 2.5)
+   * @param rng - DOM Range object representing the text selection
+   * @param pageEl - The page container element for coordinate calculations
+   * @param pageNum - 1-based page number
+   * @returns Object with normalized position coordinates (positionStartX, positionStartY, positionEndX, positionEndY)
+   */
   function coordsPageEncodedY(rng: Range, pageEl: HTMLElement, pageNum: number) {
     const native: Range = (rng as any).nativeRange || rng;
     const rect = native.getBoundingClientRect();
@@ -561,6 +662,16 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     };
   }
 
+  /**
+   * Draws a highlight rectangle on a specific page using normalized coordinates
+   * Creates a div element in the overlay layer positioned at the specified coordinates
+   * @param pageNum - 1-based page number
+   * @param startX - Normalized X start position [0, 1]
+   * @param startY - Encoded Y start position (pageNum + fraction)
+   * @param endX - Normalized X end position [0, 1]
+   * @param endY - Encoded Y end position (pageNum + fraction)
+   * @returns The created highlight div element or undefined if page not found
+   */
   function drawRectOnPage(pageNum: number, startX: number, startY: number, endX: number, endY: number) {
     const overlay = overlayLayers.get(pageNum);
     const pageContainer = pageElements.get(pageNum);
@@ -588,6 +699,12 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     return rect;
   }
 
+  /**
+   * Renders highlight rectangles from backend coordinate records
+   * Draws highlights in the overlay layer based on saved coordinate data
+   * @param records - Array of highlight coordinate records from backend
+   * @param clearOverlayOnly - If true, only clear overlay without clearing highlightRecordsRef
+   */
   function renderBackendHighlights(records: any[], clearOverlayOnly = false) {
     if (!records || !records.length) return;
     // Clear overlay layers but preserve highlightRecordsRef if we're just adding overlays
@@ -605,6 +722,10 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     });
   }
 
+  /**
+   * Removes the 'highlighted' class and visual indicators from all currently active highlights
+   * Used to clear the active state before highlighting a new element
+   */
   function clearAllHighlights() {
     const allHighlighted = document.querySelectorAll('.pdf-hit.highlighted, mark.pdf-highlight.highlighted, mark.pdf-highlight-alt.highlighted');
     allHighlighted.forEach((el) => {
@@ -615,6 +736,11 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     activeHighlightRef.current = null;
   }
 
+  /**
+   * Applies visual highlighting to a single element (adds box-shadow and highlighted class)
+   * Used to indicate the currently active/selected highlight when scrolling to a fragment
+   * @param element - The DOM element to highlight (mark or .pdf-hit)
+   */
   function highlightSentence(element: HTMLElement) {
     console.log('[Highlight] Highlighting element:', element, 'tagName:', element.tagName, 'className:', element.className);
     element.classList.add('highlighted');
@@ -622,6 +748,13 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     element.style.setProperty('z-index', '25', 'important');
   }
 
+  /**
+   * Scrolls the PDF container to the position of a matching highlight fragment
+   * Uses two strategies: direct index matching (most accurate) or text similarity matching (fallback)
+   * After scrolling, finds and activates the matching highlight element with visual feedback
+   * @param fragment - Text fragment to scroll to (from scaffold)
+   * @param scaffoldIdx - Optional 0-based scaffold index for direct matching
+   */
   function scrollToMatchFragment(fragment: string, scaffoldIdx?: number) {
     const list = highlightRecordsRef.current || [];
     
@@ -796,7 +929,17 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
     }, 300);
   }
 
-  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false) {
+  /**
+   * Searches for and highlights text in a text layer using flexible regex pattern matching
+   * Applies CSS classes to matched text and records coordinates for backend storage
+   * Falls back to keyword-based matching if full pattern matching fails
+   * @param layer - The text layer element to search in
+   * @param query - Search query string (fragment from scaffold)
+   * @param applier - Rangy class applier for applying highlight CSS classes
+   * @param debug - If true, logs detailed debugging information
+   * @returns Number of matches found and highlighted
+   */
+  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false, annotationId?: string) {
     const nodes = getTextNodesIn(layer);
     if (!nodes.length) {
       if (debug) console.log('[PdfPreview] No text nodes in layer');
@@ -870,6 +1013,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
           rangeEnd: end,
           fragment: m[0],
           ...coords,
+          ...(annotationId ? { annotation_id: annotationId } : {}),
         });
       }
 
@@ -914,6 +1058,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
               rangeEnd: end,
               fragment: m[0],
               ...coords,
+              ...(annotationId ? { annotation_id: annotationId } : {}),
             });
           }
 
@@ -991,11 +1136,24 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
         let total = 0;
         list.forEach((q, i) => {
           console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
+          
+          // Find annotation_id for this fragment
+          let annotationId: string | undefined;
+          const normalizedQuery = q.toLowerCase().trim();
+          annotationId = fragmentToAnnotationIdRef.current.get(normalizedQuery) || 
+                         fragmentToAnnotationIdRef.current.get(q) || 
+                         undefined;
+          if (annotationId) {
+            console.log(`[PdfPreview] Found annotation_id for fragment ${i + 1}:`, annotationId);
+          } else {
+            console.warn(`[PdfPreview] No annotation_id found for fragment ${i + 1}:`, q.substring(0, 50));
+          }
+          
           let fragmentTotal = 0;
           layers.forEach((layer, layerIdx) => {
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
             if (applier && q && q.trim()) {
-              const matches = highlightInLayer(layer, q, applier, i === 0 && layerIdx === 0);
+              const matches = highlightInLayer(layer, q, applier, i === 0 && layerIdx === 0, annotationId);
               if (matches > 0) {
                 console.log(`[PdfPreview] Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               }
@@ -1010,12 +1168,15 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
         if (report.length) {
           try {
             // Format: backend expects { coords: [...] }
-            // Add session_id to each coord item for lookup if annotation_version_id is not provided
-            const coordsWithSession = report.map(coord => ({
+            // Add session_id and annotation_id to each coord item
+            // Backend can use annotation_id to find current_version_id if annotation_version_id is not provided
+            const coordsWithMetadata = report.map(coord => ({
               ...coord,
               session_id: sessionId || undefined,
+              // annotation_id is already included in coord if found during highlighting
+              // Backend will use annotation_id to find current_version_id if annotation_version_id is not provided
             }));
-            const formattedReport = { coords: coordsWithSession };
+            const formattedReport = { coords: coordsWithMetadata };
             const response = await fetch('/api/highlight-report', { 
               method: 'POST', 
               headers: { 'Content-Type': 'application/json' }, 
@@ -1049,7 +1210,7 @@ export default function PdfPreview({ file, url, searchQueries, scrollToFragment,
         }
       }
     })();
-  }, [pdfDoc, renderedPages, searchQueries]);
+  }, [pdfDoc, renderedPages, searchQueries, scaffolds]);
 
   // Handle external scroll requests
   useEffect(() => {

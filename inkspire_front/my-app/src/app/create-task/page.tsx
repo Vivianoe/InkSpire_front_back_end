@@ -1391,36 +1391,24 @@ export default function CreateNewReadingTaskPage() {
       return;
     }
 
-    const annotations = acceptedScaffolds.map((scaffold, index) => {
-      const fragment = scaffold.fragment || '';
-      const textArray = Array.isArray(scaffold.text)
-        ? scaffold.text
-        : scaffold.content
-        ? [scaffold.content]
-        : [];
-      const bodyText = textArray.join(' ').trim() || fragment || 'Scaffold text unavailable';
-      const rangeLength = Math.max(bodyText.length, 1);
+    // Extract annotation IDs from accepted scaffolds
+    const annotationIds = acceptedScaffolds
+      .map((scaffold) => scaffold.id)
+      .filter((id) => id); // Filter out any undefined/null IDs
 
-      return {
-        rangeType: 'text',
-        rangePage: index + 1,
-        rangeStart: 0,
-        rangeEnd: rangeLength,
-        fragment: bodyText,
-        positionStartX: 0,
-        positionStartY: index,
-        positionEndX: 1,
-        positionEndY: index + 1,
-      };
-    });
+    if (annotationIds.length === 0) {
+      setPublishError('No valid annotation IDs found in accepted scaffolds.');
+      return;
+    }
 
     try {
       setPublishLoading(true);
       setPublishError(null);
+      console.log('[Frontend] Publishing annotations with IDs:', annotationIds);
       const response = await fetch(`/api/perusall/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ annotations }),
+        body: JSON.stringify({ annotation_ids: annotationIds }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -1505,6 +1493,11 @@ export default function CreateNewReadingTaskPage() {
                   scrollToFragment={activeFragment || undefined}
                   scaffoldIndex={activeFragment ? scaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
                   searchQueries={scaffolds.map(s => s.fragment).filter(f => f && f.trim())}
+                  scaffolds={scaffolds.map(s => ({
+                    id: s.id,
+                    fragment: s.fragment,
+                    history: s.history || [],
+                  }))}
                   sessionId={sessionId || undefined}
                 />
               </div>
