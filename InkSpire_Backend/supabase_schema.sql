@@ -293,6 +293,32 @@ CREATE TABLE IF NOT EXISTS annotation_highlight_coords (
 CREATE INDEX IF NOT EXISTS idx_annotation_highlight_coords_annotation_version_id ON annotation_highlight_coords(annotation_version_id);
 CREATE INDEX IF NOT EXISTS idx_annotation_highlight_coords_valid ON annotation_highlight_coords(valid);
 
+-- Create perusall_mappings table
+CREATE TABLE IF NOT EXISTS perusall_mappings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    reading_id UUID NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
+    perusall_course_id TEXT NOT NULL,  -- Perusall course ID
+    perusall_assignment_id TEXT NOT NULL,  -- Perusall assignment ID
+    perusall_document_id TEXT NOT NULL,  -- Perusall document ID
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Ensure one mapping per course-reading pair
+    CONSTRAINT unique_course_reading_mapping UNIQUE (course_id, reading_id)
+);
+
+-- Create indexes for perusall_mappings
+CREATE INDEX IF NOT EXISTS idx_perusall_mappings_course_id ON perusall_mappings(course_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_mappings_reading_id ON perusall_mappings(reading_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_mappings_course_reading ON perusall_mappings(course_id, reading_id);
+
+-- Create trigger for perusall_mappings table
+DROP TRIGGER IF EXISTS update_perusall_mappings_updated_at ON perusall_mappings;
+CREATE TRIGGER update_perusall_mappings_updated_at
+    BEFORE UPDATE ON perusall_mappings
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- Add table comments
 COMMENT ON TABLE scaffold_annotations IS 'Each annotation corresponds to a text fragment in a reading';
 COMMENT ON TABLE scaffold_annotation_versions IS 'Each automatic generation, manual edit, LLM rewrite, accept/reject creates a record';
@@ -307,4 +333,5 @@ COMMENT ON TABLE sessions IS 'Session information for courses';
 COMMENT ON TABLE session_readings IS 'Many-to-Many relationship between sessions and readings';
 COMMENT ON TABLE session_items IS 'Independent content for each reading within a session';
 COMMENT ON TABLE annotation_highlight_coords IS 'Stores coordinate information for annotation highlights, one record per annotation version';
+COMMENT ON TABLE perusall_mappings IS 'Maps courses and readings to Perusall course_id, assignment_id, and document_id';
 

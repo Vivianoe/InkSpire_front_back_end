@@ -1076,11 +1076,33 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     return count;
   }
 
+  // Track if coords have been reported to avoid duplicate uploads
+  const coordsReportedRef = useRef<boolean>(false);
+  const lastSearchQueriesRef = useRef<string>('');
+
   // When all pages are rendered, fetch queries, highlight, and report coords
   useEffect(() => {
     if (!pdfDoc) return;
     const allRendered = renderedPages.size === pdfDoc.numPages && pdfDoc.numPages > 0;
     if (!allRendered) return;
+
+    // Create a stable key from searchQueries to detect actual changes
+    const searchQueriesKey = Array.isArray(searchQueries) 
+      ? searchQueries.join('|') 
+      : (searchQueries || '');
+    
+    // Only run if searchQueries actually changed (not just scaffolds status)
+    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current) {
+      console.log('[PdfPreview] Skipping duplicate highlight/search - searchQueries unchanged and coords already reported');
+      return;
+    }
+
+    // Reset coords reported flag if searchQueries changed
+    if (searchQueriesKey !== lastSearchQueriesRef.current) {
+      coordsReportedRef.current = false;
+      lastSearchQueriesRef.current = searchQueriesKey;
+      console.log('[PdfPreview] SearchQueries changed, will highlight and report coords');
+    }
 
     (async () => {
       // Strategy A: Use fragments from props (scaffolds) → search locally → highlight → report coords
@@ -1165,7 +1187,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         });
 
         const report = highlightRecordsRef.current || [];
-        if (report.length) {
+        if (report.length && !coordsReportedRef.current) {
           try {
             // Format: backend expects { coords: [...] }
             // Add session_id and annotation_id to each coord item
@@ -1187,11 +1209,14 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
             } else {
               console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
+              coordsReportedRef.current = true; // Mark as reported to avoid duplicate uploads
             }
           } catch (e) {
             console.warn('[PdfPreview] Error sending highlight report:', e);
           }
           // Strategy A uses textLayer mark elements, not overlay
+        } else if (coordsReportedRef.current) {
+          console.log('[PdfPreview] Skipping coords upload - already reported');
         }
         console.log(`Local search highlighted ${total} match(es) across ${layers.length} page(s) using ${list.length} fragment(s) from scaffolds.`);
       } catch (e) {
@@ -1210,7 +1235,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         }
       }
     })();
-  }, [pdfDoc, renderedPages, searchQueries, scaffolds]);
+  }, [pdfDoc, renderedPages, searchQueries]); // Removed 'scaffolds' from dependencies to avoid re-triggering on status changes
 
   // Handle external scroll requests
   useEffect(() => {

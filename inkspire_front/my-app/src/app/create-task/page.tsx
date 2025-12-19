@@ -1411,24 +1411,53 @@ export default function CreateNewReadingTaskPage() {
         body: JSON.stringify({ annotation_ids: annotationIds }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch((e) => {
+        console.error('[Frontend] Failed to parse response JSON:', e);
+        return {};
+      });
 
-      if (!response.ok || data?.success === false) {
+      console.log('[Frontend] Perusall API response:', {
+        status: response.status,
+        ok: response.ok,
+        data: data
+      });
+
+      if (!response.ok) {
         const errorMessage =
-          (Array.isArray(data?.errors) && data.errors[0]?.error) ||
+          data?.detail ||
+          (Array.isArray(data?.errors) && data.errors.length > 0 && data.errors[0]?.error) ||
           data?.message ||
           (data?.errors && JSON.stringify(data.errors)) ||
-          `Publish failed with status ${response.status}`;
+          `Publish failed with status ${response.status}: ${response.statusText}`;
+        console.error('[Frontend] Perusall API error:', errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      if (data?.success === false) {
+        const errorMessage =
+          (Array.isArray(data?.errors) && data.errors.length > 0 && data.errors[0]?.error) ||
+          data?.message ||
+          (data?.errors && JSON.stringify(data.errors)) ||
+          'Publish failed: Unknown error';
+        console.error('[Frontend] Perusall API returned success=false:', data);
         throw new Error(errorMessage);
       }
 
       setShowPublishModal(false);
       setShowPostPublishModal(true);
     } catch (error) {
-      console.error('Publish failed:', error);
-      setPublishError(
-        error instanceof Error ? error.message : 'Failed to publish scaffolds. Please try again.'
-      );
+      console.error('[Frontend] Publish failed:', error);
+      console.error('[Frontend] Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Failed to publish scaffolds. Please try again.';
+      
+      setPublishError(errorMessage);
+      console.error('[Frontend] Error message displayed to user:', errorMessage);
     } finally {
       setPublishLoading(false);
     }

@@ -374,3 +374,27 @@ class AnnotationHighlightCoords(Base):
     def __repr__(self):
         return f"<AnnotationHighlightCoords(id={self.id}, annotation_version_id={self.annotation_version_id}, valid={self.valid})>"
 
+
+class PerusallMapping(Base):
+    """
+    perusall_mappings table
+    Stores mapping between courses/readings and Perusall IDs
+    """
+    __tablename__ = "perusall_mappings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
+    reading_id = Column(UUID(as_uuid=True), ForeignKey("readings.id"), nullable=False, index=True)
+    perusall_course_id = Column(Text, nullable=False)  # Perusall course ID
+    perusall_assignment_id = Column(Text, nullable=False)  # Perusall assignment ID
+    perusall_document_id = Column(Text, nullable=False)  # Perusall document ID
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    course = relationship("Course", foreign_keys=[course_id])
+    reading = relationship("Reading", foreign_keys=[reading_id])
+
+    def __repr__(self):
+        return f"<PerusallMapping(id={self.id}, course_id={self.course_id}, reading_id={self.reading_id}, perusall_course_id={self.perusall_course_id})>"
+

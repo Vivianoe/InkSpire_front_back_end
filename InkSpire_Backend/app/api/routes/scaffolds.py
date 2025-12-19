@@ -428,7 +428,7 @@ def generate_scaffolds_with_session(
             encoded = jsonable_encoder(response_dict)
             
             print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
-            print(f"[generate_scaffolds] Encoded content type: {JSONResponse(content=encoded)}")
+            print(f"[generate_scaffolds] Encoded content: {encoded}")
             return JSONResponse(content=encoded)
         except Exception as response_error:
             print(f"[generate_scaffolds_with_session] ERROR building response: {response_error}")

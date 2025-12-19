@@ -214,13 +214,12 @@ SUPABASE_KEY=your_anon_key_here  # Optional, for Auth operations
 # Google Gemini API (Required for LLM features)
 GOOGLE_API_KEY=your_google_api_key_here
 
-# Perusall Integration (Optional)
+# Perusall Integration (Required for posting annotations)
 PERUSALL_INSTITUTION=your_institution
 PERUSALL_API_TOKEN=your_api_token
-PERUSALL_COURSE_ID=your_course_id
-PERUSALL_ASSIGNMENT_ID=your_assignment_id
-PERUSALL_DOCUMENT_ID=your_document_id
 PERUSALL_USER_ID=your_user_id
+# Note: PERUSALL_COURSE_ID, PERUSALL_ASSIGNMENT_ID, PERUSALL_DOCUMENT_ID are optional
+# The system will automatically fetch these from Perusall API based on course/reading names
 ```
 
 ### Frontend
@@ -266,6 +265,8 @@ Once the backend is running, access the interactive API documentation:
 
 #### Perusall Integration
 - `POST /api/perusall/annotations` - Upload annotations to Perusall
+- `POST /api/perusall/mapping` - Create or update Perusall mapping
+- `GET /api/perusall/mapping/{course_id}/{reading_id}` - Get Perusall mapping
 
 For detailed API documentation, see:
 - [Backend README](InkSpire_Backend/README.md)
@@ -320,6 +321,51 @@ See [Database Documentation](InkSpire_Backend/docs/) for detailed schema informa
 6. Approved scaffolds can be exported or sent to Perusall
 
 ## 🧪 Development
+
+### Initial Setup: Create Test User
+
+Before using the application, you need to create a test user in the Supabase database. Run the following SQL in the Supabase SQL Editor:
+
+```sql
+INSERT INTO "public"."users" (
+  "id", 
+  "email", 
+  "password_hash", 
+  "name", 
+  "role", 
+  "created_at", 
+  "supabase_user_id", 
+  "updated_at"
+) VALUES (
+  '550e8400-e29b-41d4-a716-446655440000', 
+  'example@gmail.com', 
+  'hashed_password_here', 
+  'John Doe', 
+  'instructor', 
+  '2025-12-17 23:42:26.768888+00', 
+  null, 
+  '2025-12-17 23:44:50.819598+00'
+);
+```
+
+**Note**: Replace `'hashed_password_here'` with an actual bcrypt hash of your password. You can generate one using Python:
+
+```python
+import bcrypt
+password = "your_password"
+hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+print(hashed)
+```
+
+### Testing Scaffold Generation
+
+After clicking the "Generate Scaffolds" button, if you'd like to repeatedly test behavior on the same page, it's more efficient to copy the content shown in the terminal under:
+
+```
+[generate_scaffolds] Encoded content:
+```
+
+And paste it into the `@router.post("/test-scaffold-response")` endpoint. This avoids repeated LLM calls and makes testing easier.
 
 ### Backend Development
 
@@ -408,6 +454,59 @@ If using Supabase Auth:
 
 ### Frontend Documentation
 - [Frontend README](inkspire_front/README.md) - Frontend setup and structure
+
+## 📌 Perusall Integration Notes
+
+### Prerequisites for Posting to Perusall
+
+To successfully post annotations to Perusall, ensure the following:
+
+1. **Environment Variables** (Required):
+   - `PERUSALL_INSTITUTION`: Your Perusall institution identifier
+   - `PERUSALL_API_TOKEN`: Your Perusall API token
+   - `PERUSALL_USER_ID`: The Perusall user ID to post annotations as
+
+2. **Course Name Matching**:
+   - The course name in Inkspire must **exactly match** (case-insensitive, spaces normalized) the course name in Perusall
+   - The system will automatically match courses by name when posting annotations
+   - If no exact match is found, the system will return an error with available course names
+
+3. **Reading Name Matching**:
+   - The reading material name in Inkspire must **exactly match** (case-insensitive, spaces normalized) the reading name in Perusall's course library
+   - The system will:
+     1. Fetch the course library from Perusall
+     2. Match the reading by name to get the `reading_id`
+     3. Find the assignment that contains this reading
+     4. Use the `reading_id` as the `document_id` for posting annotations
+
+4. **Automatic Mapping**:
+   - On first successful post, the system automatically creates a mapping between Inkspire course/reading and Perusall IDs
+   - This mapping is stored in the `perusall_mappings` table for future use
+   - Subsequent posts will use the cached mapping, avoiding repeated API calls
+
+5. **Error Handling**:
+   - If authentication fails, the system will return an error indicating invalid credentials
+   - If course/reading names don't match, the system will list available options
+   - All errors include detailed logging for troubleshooting
+
+### Manual Mapping Management
+
+You can also manually create or update Perusall mappings using the API:
+
+```bash
+# Create or update mapping
+POST /api/perusall/mapping
+{
+  "course_id": "uuid",
+  "reading_id": "uuid",
+  "perusall_course_id": "perusall_course_id",
+  "perusall_assignment_id": "perusall_assignment_id",
+  "perusall_document_id": "perusall_document_id"
+}
+
+# Get existing mapping
+GET /api/perusall/mapping/{course_id}/{reading_id}
+```
 
 ## 🐛 Troubleshooting
 

@@ -91,10 +91,9 @@ class RunClassProfileRequest(BaseModel):
 
 
 class RunClassProfileResponse(BaseModel):
-    profile_id: str
-    course_id: str
-    profile: Dict[str, Any]
-    status: str
+    review: ReviewedProfileModel
+    course_id: Optional[str] = None  # Course ID associated with this profile
+    instructor_id: Optional[str] = None  # Instructor ID associated with this profile
 
 
 class ApproveProfileRequest(BaseModel):
@@ -276,6 +275,24 @@ class PerusallAnnotationResponse(BaseModel):
     success: bool
     created_ids: List[str]
     errors: List[Dict[str, Any]]
+
+
+class PerusallMappingRequest(BaseModel):
+    course_id: str  # UUID as string
+    reading_id: str  # UUID as string
+    perusall_course_id: str  # Perusall course ID
+    perusall_assignment_id: str  # Perusall assignment ID
+    perusall_document_id: str  # Perusall document ID
+
+
+class PerusallMappingResponse(BaseModel):
+    success: bool
+    mapping_id: str
+    course_title: str
+    reading_title: str
+    perusall_course_id: str
+    perusall_assignment_id: str
+    perusall_document_id: str
 
 
 # ======================================================
