@@ -157,6 +157,40 @@ cp env.example .env
    - Create a bucket named `readings` in Supabase Storage
    - Configure bucket policies for your use case
 
+6. **Create Test User**:
+   Before using the application, you need to create a test user in the Supabase database. Run the following SQL in the Supabase SQL Editor:
+
+   ```sql
+   INSERT INTO "public"."users" (
+     "id", 
+     "email", 
+     "password_hash", 
+     "name", 
+     "role", 
+     "created_at", 
+     "supabase_user_id", 
+     "updated_at"
+   ) VALUES (
+     '550e8400-e29b-41d4-a716-446655440000', 
+     'example@gmail.com', 
+     'hashed_password_here', 
+     'John Doe', 
+     'instructor', 
+     '2025-12-17 23:42:26.768888+00', 
+     null, 
+     '2025-12-17 23:44:50.819598+00'
+   );
+   ```
+
+   **Note**: Replace `'hashed_password_here'` with an actual bcrypt hash of your password. You can generate one using Python:
+
+   ```python
+   import bcrypt
+   password = "your_password"
+   hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+   print(hashed)
+   ```
+
 ### 4. Frontend Setup
 
 ```bash
@@ -193,6 +227,16 @@ The application will be available at:
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
+
+### 6. Testing Scaffold Generation
+
+After clicking the "Generate Scaffolds" button, if you'd like to repeatedly test behavior on the same page, it's more efficient to copy the content shown in the terminal under:
+
+```
+[generate_scaffolds] Encoded content:
+```
+
+And paste it into the `@router.post("/test-scaffold-response")` endpoint. This avoids repeated LLM calls and makes testing easier.
 
 ## ⚙️ Environment Variables
 
