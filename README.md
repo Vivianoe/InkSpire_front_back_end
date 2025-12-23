@@ -276,45 +276,60 @@ Once the backend is running, access the interactive API documentation:
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
+- **Complete API Reference**: [API_DOCUMENTATION.md](API_DOCUMENTATION.md) - Detailed request/response examples
 
 ### Key API Endpoints
+
+All endpoints follow RESTful conventions with resource hierarchy: `/api/courses/{course_id}/...`
 
 #### User Authentication
 - `POST /api/users/register` - Register a new user
 - `POST /api/users/login` - Login user
-- `GET /api/users/me` - Get current user
+- `GET /api/users/me` - Get current user (requires authentication)
+- `GET /api/users/{user_id}` - Get user by ID
+- `GET /api/users/email/{email}` - Get user by email
 
 #### Course Management
 - `GET /api/courses/instructor/{instructor_id}` - Get courses by instructor
-- `POST /api/basic_info/edit` - Edit course basic information
-- `POST /api/design-considerations/edit` - Edit design considerations
+- `POST /api/courses/{course_id}/basic-info/edit` - Edit course basic information
+- `POST /api/courses/{course_id}/design-considerations/edit` - Edit design considerations
 
 #### Class Profiles
-- `POST /api/class-profiles` - Create and generate class profile
-- `GET /api/class-profiles/{profile_id}` - Get class profile
-- `POST /api/class-profiles/{profile_id}/edit` - Edit class profile
-- `POST /api/class-profiles/{profile_id}/llm-refine` - Refine profile using LLM
+- `POST /api/courses/{course_id}/class-profiles` - Create and generate class profile (use `course_id="new"` to create new course)
+- `GET /api/class-profiles/{profile_id}` - Get class profile by ID
+- `GET /api/class-profiles/instructor/{instructor_id}` - Get profiles by instructor
+- `GET /api/class-profiles/{profile_id}/export` - Export approved profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/approve` - Approve class profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/edit` - Edit class profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/llm-refine` - Refine profile using LLM
 
 #### Reading Management
-- `POST /api/readings/batch-upload` - Batch upload readings (PDFs)
-- `GET /api/readings` - Get reading list
+- `POST /api/courses/{course_id}/readings/batch-upload` - Batch upload readings (with PDF content)
+- `GET /api/readings` - Get reading list (query params: `course_id`, `instructor_id`)
+- `DELETE /api/courses/{course_id}/readings/{reading_id}` - Delete a reading
+
+#### Session Management
+- `POST /api/courses/{course_id}/sessions` - Create session and associate readings
 
 #### Scaffold Generation
-- `POST /api/generate-scaffolds` - Generate scaffolds for readings
-- `POST /api/annotation-scaffolds/{scaffold_id}/approve` - Approve scaffold
-- `POST /api/annotation-scaffolds/{scaffold_id}/edit` - Edit scaffold
-- `POST /api/annotation-scaffolds/{scaffold_id}/llm-refine` - Refine scaffold using LLM
-- `GET /api/annotation-scaffolds/by-session/{session_id}` - Get scaffolds by session
-- `POST /api/highlight-report` - Save PDF highlight coordinates
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/generate` - Generate scaffolds (use `session_id="new"` to create new session)
+- `GET /api/courses/{course_id}/sessions/{session_id}/scaffolds/bundle` - Get scaffolds bundle for a session
+- `GET /api/courses/{course_id}/scaffolds/export` - Export approved scaffolds (query params: `session_id`, `reading_id`)
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/approve` - Approve scaffold
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/edit` - Edit scaffold
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/llm-refine` - Refine scaffold using LLM
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/reject` - Reject scaffold
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/highlight-report` - Save PDF highlight coordinates
 
 #### Perusall Integration
-- `POST /api/perusall/annotations` - Upload annotations to Perusall
-- `POST /api/perusall/mapping` - Create or update Perusall mapping
+- `POST /api/courses/{course_id}/readings/{reading_id}/perusall/annotations` - Upload annotations to Perusall
+- `POST /api/courses/{course_id}/readings/{reading_id}/perusall/mapping` - Create Perusall mapping
 - `GET /api/perusall/mapping/{course_id}/{reading_id}` - Get Perusall mapping
 
-For detailed API documentation, see:
-- [Backend README](InkSpire_Backend/README.md)
-- [API Test Data](InkSpire_Backend/docs/API_TEST_DATA.md)
+For detailed API documentation with request/response examples, see:
+- [Complete API Documentation](API_DOCUMENTATION.md) - Full API reference with examples
+- [Backend README](InkSpire_Backend/README.md) - Backend setup and architecture
+- [API Test Data](InkSpire_Backend/docs/API_TEST_DATA.md) - Test examples
 
 ## 🗄️ Database Schema
 
