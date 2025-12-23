@@ -5,6 +5,7 @@ import styles from "./page.module.css";
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthGuard } from '@/app/auth/AuthGuard';
+import { useAuth } from '@/app/contexts/AuthContext';
 
 interface CourseSummary {
   id: string;
@@ -30,9 +31,31 @@ const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 export default function DashboardPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const { user } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+
+  const getUserFirstName = () => {
+    if (!user) return 'Instructor'
+
+    // Try to get full name from metadata
+    const fullName = user.user_metadata?.display_name ||
+                     user.user_metadata?.full_name ||
+                     user.user_metadata?.name
+
+    if (fullName) {
+      // Extract first name (first word)
+      return fullName.split(' ')[0]
+    }
+
+    // Fallback to email username
+    if (user.email) {
+      return user.email.split('@')[0]
+    }
+
+    return 'Instructor'
+  };
 
   // Test backend connection when the component mounts
   useEffect(() => {
@@ -108,7 +131,7 @@ export default function DashboardPage() {
           <Navigation />
           <div className={styles.dashboard}>
             <div className={styles.dashboardHeader}>
-              <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
+              <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
             </div>
             <div style={{ textAlign: 'center', padding: '2rem' }}>
               <p>Loading class profiles...</p>
@@ -125,7 +148,7 @@ export default function DashboardPage() {
         <Navigation />
         <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
-            <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
+            <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
             <div style={{
               display: 'flex',
               alignItems: 'center',

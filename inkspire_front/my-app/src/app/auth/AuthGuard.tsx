@@ -24,14 +24,17 @@ export function AuthGuard({ children }: AuthGuardProps) {
       setShowAuthModal(false)
       return
     }
-
-    // User is not authenticated - show modal after 2-second delay
-    const timer = setTimeout(() => {
+    else {
       setShowAuthModal(true)
-    }, 2000)
+    }
 
-    // Cleanup timer on unmount or dependency change
-    return () => clearTimeout(timer)
+    // // User is not authenticated - show modal after a delay
+    // const timer = setTimeout(() => {
+    //   setShowAuthModal(true)
+    // }, 25)
+
+    // // Cleanup timer on unmount or dependency change
+    // return () => clearTimeout(timer)
   }, [user, loading])
 
   if (loading) {

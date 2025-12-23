@@ -56,16 +56,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(session?.user ?? null)
         setLoading(false)
 
-        // Handle sign-in success
-        if (event === 'SIGNED_IN' && session?.user) {
-          console.log('User signed in:', session.user.email)
-        }
+        // // Handle sign-in success
+        // if (event === 'SIGNED_IN' && session?.user) {
+        //   console.log('User signed in:', session.user.email)
+        // }
 
-        // Handle sign-out - clear any cached data
-        if (event === 'SIGNED_OUT') {
-          console.log('User signed out')
-          // Could clear any cached data here
-        }
+        // // Handle sign-out - clear any cached data
+        // if (event === 'SIGNED_OUT') {
+        //   console.log('User signed out')
+        //   // Could clear any cached data here
+        // }
       }
     )
 
@@ -89,7 +89,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      console.log('✅ Login successful:', data.user.email)
+      // console.log('✅ Login successful:', data.user.email)
 
       // Set the session in Supabase client using the access token from backend
       // This allows the auth state listener and session management to work seamlessly
@@ -126,7 +126,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      console.log('✅ Signup successful:', data.email)
+      // console.log('✅ Signup successful:', data.email)
 
       // Session will be automatically detected by onAuthStateChange listener
       return { error: undefined }

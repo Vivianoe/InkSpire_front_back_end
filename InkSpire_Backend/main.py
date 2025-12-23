@@ -5,6 +5,7 @@ import json
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security
+security = HTTPBearer()
 
 # Database
 from database import get_db
@@ -76,7 +80,7 @@ from user_service import (
     get_user_by_supabase_id,
     user_to_dict,
 )
-from auth.supabase import supabase_signup, supabase_login, AuthenticationError
+from auth.supabase import supabase_signup, supabase_login, supabase_logout, AuthenticationError
 from auth.dependencies import get_current_user
 
 # Course management
@@ -307,6 +311,10 @@ class LoginResponse(BaseModel):
     message: str = "Login successful"
 
 
+class LogoutResponse(BaseModel):
+    message: str = "Logout successful"
+
+
 class PublicUserResponse(BaseModel):
     id: str
     email: str
@@ -410,6 +418,39 @@ def login_user(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@app.post("/api/users/logout", response_model=LogoutResponse)
+def logout_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user = Depends(get_current_user)
+):
+    """
+    Logout user by invalidating their session
+
+    Flow:
+    1. Validate JWT token (via get_current_user dependency)
+    2. Call Supabase logout to invalidate session
+    3. Return success message
+
+    Requires valid JWT token in Authorization header.
+    Usage: Authorization: Bearer <token>
+    """
+    try:
+        # Extract JWT token from Authorization header
+        access_token = credentials.credentials
+
+        # Invalidate session in Supabase
+        supabase_logout(access_token)
+
+        return LogoutResponse(message="Logout successful")
+
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
 
 
 @app.get("/api/users/me", response_model=UserResponse)
