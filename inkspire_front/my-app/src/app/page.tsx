@@ -4,6 +4,7 @@ import Navigation from "@/components/layout/Navigation";
 import styles from "./page.module.css";
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { AuthGuard } from '@/app/auth/AuthGuard';
 
 interface CourseSummary {
   id: string;
@@ -36,7 +37,7 @@ export default function DashboardPage() {
   // Test backend connection when the component mounts
   useEffect(() => {
     testBackendConnection();
-    loadCourses();
+    // loadCourses();
   }, [pathname]); // Reload when pathname changes (e.g., when returning from edit page)
 
   const testBackendConnection = async () => {
@@ -102,123 +103,127 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
+      <AuthGuard>
+        <div className={styles.container}>
+          <Navigation />
+          <div className={styles.dashboard}>
+            <div className={styles.dashboardHeader}>
+              <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
+            </div>
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p>Loading class profiles...</p>
+            </div>
+          </div>
+        </div>
+      </AuthGuard>
+    );
+  }
+
+  return (
+    <AuthGuard>
       <div className={styles.container}>
         <Navigation />
         <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
             <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginTop: '8px',
+              fontSize: '14px'
+            }}>
+              <span>Backend:</span>
+              {backendStatus === 'checking' && (
+                <span style={{ color: '#666' }}>Checking...</span>
+              )}
+              {backendStatus === 'connected' && (
+                <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
+              )}
+              {backendStatus === 'disconnected' && (
+                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
+              )}
+              <button
+                onClick={testBackendConnection}
+                style={{
+                  marginLeft: '8px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: '#fff'
+                }}
+              >
+                Test
+              </button>
+            </div>
           </div>
-          <div style={{ textAlign: 'center', padding: '2rem' }}>
-            <p>Loading class profiles...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  return (
-    <div className={styles.container}>
-      <Navigation />
-      <div className={styles.dashboard}>
-        <div className={styles.dashboardHeader}>
-          <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px',
-            marginTop: '8px',
-            fontSize: '14px'
-          }}>
-            <span>Backend:</span>
-            {backendStatus === 'checking' && (
-              <span style={{ color: '#666' }}>Checking...</span>
-            )}
-            {backendStatus === 'connected' && (
-              <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
-            )}
-            {backendStatus === 'disconnected' && (
-              <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
-            )}
-            <button 
-              onClick={testBackendConnection}
-              style={{
-                marginLeft: '8px',
-                padding: '4px 8px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                background: '#fff'
-              }}
+          {/* <div className={styles.classCardsGrid}>
+            {courses.length === 0 ? (
+              <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+                <p>No courses yet. Create your first one!</p>
+              </div>
+            ) : (
+              courses.map((course) => {
+              return (
+                <div key={course.id} className={styles.classCard}>
+                  <div className={styles.classCardHeader}>
+                    <div>
+                      <h2 className={styles.courseName}>{course.title}</h2>
+                      <p className={styles.courseCode}>{course.courseCode}</p>
+                    </div>
+                    {course.classProfileId ? (
+                      <span className={`${styles.statusBadge} ${styles.statusCreated}`}>
+                        Profile Created
+                      </span>
+                    ) : (
+                      <span className={`${styles.statusBadge} ${styles.statusInProgress}`}>
+                        No Profile Yet
+                      </span>
+                    )}
+                  </div>
+
+                  <div className={styles.classCardContent}>
+                    <div className={styles.statItem}>
+                      <span className={styles.statLabel}>Last Updated</span>
+                      <span className={styles.statValue}>
+                        {course.lastUpdated
+                          ? new Date(course.lastUpdated).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                            })
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className={styles.classCardActions}>
+                    <button
+                      className={styles.viewButton}
+                      onClick={() => openCourse(course)}
+                    >
+                      {course.classProfileId ? 'Open Profile' : 'Create Profile'}
+                    </button>
+                  </div>
+                </div>
+              );
+            }))}
+          </div> */}
+
+          <div className={styles.newClassButtonContainer}>
+            <button
+              className={styles.newClassButton}
+              onClick={handleNewClass}
             >
-              Test
+              <span className={styles.plusIcon}>+</span>
+              New Class Profile
             </button>
           </div>
         </div>
-
-        <div className={styles.classCardsGrid}>
-          {courses.length === 0 ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-              <p>No courses yet. Create your first one!</p>
-            </div>
-          ) : (
-            courses.map((course) => {
-            return (
-              <div key={course.id} className={styles.classCard}>
-                <div className={styles.classCardHeader}>
-                  <div>
-                    <h2 className={styles.courseName}>{course.title}</h2>
-                    <p className={styles.courseCode}>{course.courseCode}</p>
-                  </div>
-                  {course.classProfileId ? (
-                    <span className={`${styles.statusBadge} ${styles.statusCreated}`}>
-                      Profile Created
-                    </span>
-                  ) : (
-                    <span className={`${styles.statusBadge} ${styles.statusInProgress}`}>
-                      No Profile Yet
-                    </span>
-                  )}
-                </div>
-
-                <div className={styles.classCardContent}>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Last Updated</span>
-                    <span className={styles.statValue}>
-                      {course.lastUpdated
-                        ? new Date(course.lastUpdated).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })
-                        : '—'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className={styles.classCardActions}>
-                  <button 
-                    className={styles.viewButton}
-                    onClick={() => openCourse(course)}
-                  >
-                    {course.classProfileId ? 'Open Profile' : 'Create Profile'}
-                  </button>
-                </div>
-              </div>
-            );
-          }))}
-        </div>
-
-        <div className={styles.newClassButtonContainer}>
-          <button 
-            className={styles.newClassButton}
-            onClick={handleNewClass}
-          >
-            <span className={styles.plusIcon}>+</span>
-            New Class Profile
-          </button>
-        </div>
       </div>
-    </div>
+    </AuthGuard>
   );
 }
