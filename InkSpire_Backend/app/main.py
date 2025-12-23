@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import HTTPException
 
 # Import routers
-from app.api.routes import users, courses, class_profiles, readings, scaffolds, perusall
+from app.api.routes import users, courses, class_profiles, readings, scaffolds, perusall, sessions
 
 # Create FastAPI app
 app = FastAPI(
@@ -61,6 +61,7 @@ app.include_router(class_profiles.router, prefix="/api", tags=["class-profiles"]
 app.include_router(readings.router, prefix="/api", tags=["readings"])
 app.include_router(scaffolds.router, prefix="/api", tags=["scaffolds"])
 app.include_router(perusall.router, prefix="/api", tags=["perusall"])
+app.include_router(sessions.router, prefix="/api", tags=["sessions"])
 
 if __name__ == "__main__":
     import uvicorn

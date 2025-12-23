@@ -4,6 +4,7 @@ Reading management endpoints
 import uuid
 import io
 import base64
+import time
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from app.services.reading_service import (
     get_readings_by_instructor,
     get_readings_by_course_and_instructor,
     update_reading,
+    delete_reading,
     reading_to_dict,
 )
 from app.services.reading_chunk_service import (
@@ -36,13 +38,26 @@ from app.api.models import (
 router = APIRouter()
 
 
-@router.post("/readings/batch-upload", response_model=BatchUploadReadingsResponse)
-def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Depends(get_db)):
+@router.post("/courses/{course_id}/readings/batch-upload", response_model=BatchUploadReadingsResponse)
+def batch_upload_readings(
+    course_id: str,
+    payload: BatchUploadReadingsRequest,
+    db: Session = Depends(get_db)
+):
     """
     Batch upload readings to the database.
     Each reading in the list will be created as a separate record.
     """
-    # Validate and parse IDs
+    # Validate course_id from path
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id format: {course_id}",
+        )
+    
+    # Validate and parse instructor_id from payload
     try:
         instructor_uuid = uuid.UUID(payload.instructor_id)
     except ValueError:
@@ -51,15 +66,12 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
             detail=f"Invalid instructor_id format: {payload.instructor_id}",
         )
     
-    course_uuid = None
-    if payload.course_id:
-        try:
-            course_uuid = uuid.UUID(payload.course_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid course_id format: {payload.course_id}",
-            )
+    # Verify payload course_id matches path parameter (if provided in payload)
+    if payload.course_id and payload.course_id != course_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"course_id in path ({course_id}) does not match course_id in body ({payload.course_id})",
+        )
     
     # Verify instructor exists
     instructor = get_user_by_id(db, instructor_uuid)
@@ -69,14 +81,13 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
             detail=f"Instructor {payload.instructor_id} not found",
         )
     
-    # Verify course exists if provided
-    if course_uuid:
-        course = get_course_by_id(db, course_uuid)
-        if not course:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Course {payload.course_id} not found",
-            )
+    # Verify course exists
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course {course_id} not found",
+        )
     
     # Create readings in batch
     created_readings = []
@@ -92,7 +103,10 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
             final_file_path = None
             
             # For uploaded readings: create reading first, then upload file, then convert to chunks
+            # Validate that uploaded readings have content_base64
             if reading_item.source_type == "uploaded":
+                if not reading_item.content_base64:
+                    raise ValueError("content_base64 is required for uploaded readings")
                 # Step 1: Create reading with temporary file_path (will be updated later)
                 temp_file_path = f"temp/{uuid.uuid4()}.pdf"
                 reading = create_reading(
@@ -117,20 +131,43 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
                             original_filename += '.pdf'
                         
                         # Build file path: course_{course_id}/{reading_id}_{original_filename}.pdf
-                        course_path = f"course_{payload.course_id}" if payload.course_id else "general"
+                        course_path = f"course_{course_id}"
                         final_file_path = f"{course_path}/{reading_id}_{original_filename}"
                         
-                        # Upload to Supabase Storage
-                        try:
-                            supabase_client.storage.from_(bucket_name).remove([final_file_path])
-                        except Exception:
-                            pass
+                        # Upload to Supabase Storage with retry mechanism
+                        max_retries = 3
+                        retry_delay = 2  # seconds
+                        upload_success = False
+                        last_error = None
                         
-                        supabase_client.storage.from_(bucket_name).upload(
-                            final_file_path,
-                            pdf_bytes,
-                            file_options={"content-type": "application/pdf"}
-                        )
+                        for attempt in range(max_retries):
+                            try:
+                                # Try to remove existing file first (if any) to allow overwriting
+                                try:
+                                    supabase_client.storage.from_(bucket_name).remove([final_file_path])
+                                except Exception:
+                                    pass  # File doesn't exist, which is fine
+                                
+                                # Upload the file
+                                supabase_client.storage.from_(bucket_name).upload(
+                                    final_file_path,
+                                    pdf_bytes,
+                                    file_options={"content-type": "application/pdf"}
+                                )
+                                upload_success = True
+                                break  # Success, exit retry loop
+                            except Exception as upload_attempt_error:
+                                last_error = upload_attempt_error
+                                if attempt < max_retries - 1:
+                                    wait_time = retry_delay * (attempt + 1)  # Exponential backoff
+                                    print(f"Upload attempt {attempt + 1} failed, retrying in {wait_time} seconds...")
+                                    print(f"Error: {str(upload_attempt_error)}")
+                                    time.sleep(wait_time)
+                                else:
+                                    print(f"All {max_retries} upload attempts failed")
+                        
+                        if not upload_success:
+                            raise Exception(f"Failed to upload file to Supabase Storage after {max_retries} attempts: {str(last_error)}")
                         
                         # Step 3: Update reading with correct file_path
                         reading = update_reading(
@@ -218,6 +255,61 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
         readings=[ReadingResponse(**r) for r in created_readings],
         errors=errors,
     )
+
+
+@router.delete("/courses/{course_id}/readings/{reading_id}")
+def delete_reading(
+    course_id: str,
+    reading_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a reading from the database.
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id format: {course_id}"
+        )
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid reading_id format: {reading_id}"
+        )
+    
+    # Verify course exists
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course {course_id} not found"
+        )
+    
+    # Get reading and verify it belongs to the course
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reading {reading_id} not found"
+        )
+    
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
+    # Delete reading using service function (cascade will handle reading_chunks)
+    delete_reading(db, reading_uuid)
+    
+    return {"success": True, "message": f"Reading {reading_id} deleted successfully"}
 
 
 @router.get("/readings", response_model=ReadingListResponse)

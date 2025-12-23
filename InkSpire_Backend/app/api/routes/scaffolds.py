@@ -85,6 +85,42 @@ def scaffold_to_model(scaffold: Dict[str, Any]) -> ReviewedScaffoldModel:
     )
 
 
+def verify_scaffold_belongs_to_course(
+    scaffold_id: str,
+    course_id: str,
+    db: Session
+) -> None:
+    """
+    Verify that a scaffold belongs to a specific course.
+    Raises HTTPException if verification fails.
+    """
+    try:
+        course_uuid = uuid.UUID(course_id)
+        annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == uuid.UUID(scaffold_id)).first()
+        if not annotation:
+            raise HTTPException(status_code=404, detail=f"Scaffold {scaffold_id} not found")
+        
+        # Check via reading's course_id
+        if annotation.reading_id:
+            reading = get_reading_by_id(db, annotation.reading_id)
+            if reading and reading.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Scaffold {scaffold_id} does not belong to course {course_id}"
+                )
+        # Or check via session's course_id
+        elif annotation.session_id:
+            from app.models.models import Session
+            session = db.query(Session).filter(Session.id == annotation.session_id).first()
+            if session and session.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Scaffold {scaffold_id} does not belong to course {course_id}"
+                )
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+
+
 # Test endpoints (already migrated)
 @router.post("/test-scaffold-response")
 def test_scaffold_response_post(payload: Dict[str, Any]):
@@ -186,39 +222,43 @@ def test_scaffold_response_get():
 # Scaffold Generation Endpoints
 # ======================================================
 
-@router.post("/generate-scaffolds")
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/generate")
 def generate_scaffolds_with_session(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     payload: GenerateScaffoldsRequest,
     db: Session = Depends(get_db)
 ):
     """
     Generate scaffolds endpoint - wraps run_material_focus_scaffold with error handling
     Generate scaffolds - all data loaded from database.
-    Only requires: instructor_id, course_id, session_id, reading_id
+    Requires: course_id (path), session_id (path, use "new" to create new session), reading_id (path), instructor_id (body)
     """
-    # Validate and parse IDs
+    # Validate and parse IDs from path
     try:
-        course_uuid = uuid.UUID(payload.course_id)
+        course_uuid = uuid.UUID(course_id)
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid course_id format: {payload.course_id}",
+            detail=f"Invalid course_id format: {course_id}",
         )
     
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid reading_id format: {reading_id}",
+        )
+    
+    # Validate and parse instructor_id from payload
     try:
         instructor_uuid = uuid.UUID(payload.instructor_id)
     except ValueError:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid instructor_id format: {payload.instructor_id}",
-        )
-    
-    try:
-        reading_uuid = uuid.UUID(payload.reading_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid reading_id format: {payload.reading_id}",
         )
     
     # Verify entities exist
@@ -233,33 +273,26 @@ def generate_scaffolds_with_session(
     if not course:
         raise HTTPException(
             status_code=404,
-            detail=f"Course {payload.course_id} not found",
+            detail=f"Course {course_id} not found",
         )
     
     reading = get_reading_by_id(db, reading_uuid)
     if not reading:
         raise HTTPException(
             status_code=404,
-            detail=f"Reading {payload.reading_id} not found",
+            detail=f"Reading {reading_id} not found",
         )
     
-    # Handle session_id - create new session if not provided
-    session_uuid = None
-    if payload.session_id:
-        try:
-            session_uuid = uuid.UUID(payload.session_id)
-            session = get_session_by_id(db, session_uuid)
-            if not session:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Session {payload.session_id} not found",
-                )
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid session_id format: {payload.session_id}",
-            )
-    else:
+    # Verify reading belongs to the specified course
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}. Reading belongs to course {reading.course_id}",
+        )
+    
+    # Handle session_id from path parameter
+    # If session_id is "new", create a new session; otherwise use existing session
+    if session_id.lower() == "new":
         # Create a new session (default week_number = 1, title = "Reading Session")
         session = create_session(
             db=db,
@@ -269,6 +302,27 @@ def generate_scaffolds_with_session(
         )
         session_uuid = session.id
         print(f"[generate_scaffolds_with_session] Created new session: {session_uuid}")
+    else:
+        # Use existing session
+        try:
+            session_uuid = uuid.UUID(session_id)
+            session = get_session_by_id(db, session_uuid)
+            if not session:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Session {session_id} not found",
+                )
+            # Verify session belongs to the course
+            if session.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Session {session_id} does not belong to course {course_id}",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid session_id format: {session_id}. Use UUID or 'new' to create a new session",
+            )
     
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)
@@ -286,7 +340,7 @@ def generate_scaffolds_with_session(
     if not class_profile_db:
         raise HTTPException(
             status_code=404,
-            detail=f"Class profile not found for course {payload.course_id}",
+            detail=f"Class profile not found for course {course_id}",
         )
     
     # Parse class_profile JSON from description field
@@ -360,6 +414,7 @@ def generate_scaffolds_with_session(
         reading_info=reading_info,
         session_id=str(session_uuid),
         reading_id=str(reading_uuid),
+        course_id=str(course_uuid),  # Include course_id from path parameter
     )
     
     # Call the existing workflow function
@@ -653,19 +708,38 @@ def run_material_focus_scaffold(
 # Scaffold Management Endpoints
 # ======================================================
 
-@router.get("/annotation-scaffolds/by-session/{session_id}")
+@router.get("/courses/{course_id}/sessions/{session_id}/scaffolds")
 def get_scaffolds_by_session(
+    course_id: str,
     session_id: str,
     db: Session = Depends(get_db)
 ):
     """
     Get all scaffold annotations for a session with full details (status and history)
-    Used by frontend to fetch complete scaffold information after receiving IDs from generate-scaffolds
+    Used by frontend to fetch complete scaffold information after receiving IDs from generate-scaffolds.
     """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
     try:
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+    
+    # Verify session belongs to the course
+    from app.models.models import Session
+    session = db.query(Session).filter(Session.id == session_uuid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} does not belong to course {course_id}"
+        )
     
     annotations = get_scaffold_annotations_by_session(db, session_uuid)
     
@@ -680,13 +754,55 @@ def get_scaffolds_by_session(
     }
 
 
-@router.post("/annotation-scaffolds/{scaffold_id}/approve", response_model=ScaffoldResponse)
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/approve", response_model=ScaffoldResponse)
 def approve_scaffold_endpoint(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     scaffold_id: str,
     db: Session = Depends(get_db)
 ):
-    """Approve a scaffold annotation and create a version record"""
+    """
+    Approve a scaffold annotation and create a version record.
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
     scaffold_dict = get_scaffold_or_404(scaffold_id, db)
+    
+    # Verify scaffold belongs to the course, session, and reading
+    annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == uuid.UUID(scaffold_id)).first()
+    if not annotation:
+        raise HTTPException(status_code=404, detail=f"Scaffold {scaffold_id} not found")
+    
+    if annotation.reading_id != reading_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to reading {reading_id}"
+        )
+    
+    if annotation.session_id != session_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to session {session_id}"
+        )
+    
+    verify_scaffold_belongs_to_course(scaffold_id, course_id, db)
     
     try:
         annotation_id = uuid.UUID(scaffold_id)
@@ -706,14 +822,56 @@ def approve_scaffold_endpoint(
     return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
-@router.post("/annotation-scaffolds/{scaffold_id}/edit", response_model=ScaffoldResponse)
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/edit", response_model=ScaffoldResponse)
 def edit_scaffold_endpoint(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     scaffold_id: str,
     payload: EditScaffoldRequest,
     db: Session = Depends(get_db)
 ):
-    """Manually edit scaffold annotation content and create a version record"""
+    """
+    Manually edit scaffold annotation content and create a version record.
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
     scaffold_dict = get_scaffold_or_404(scaffold_id, db)
+    
+    # Verify scaffold belongs to the course, session, and reading
+    annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == uuid.UUID(scaffold_id)).first()
+    if not annotation:
+        raise HTTPException(status_code=404, detail=f"Scaffold {scaffold_id} not found")
+    
+    if annotation.reading_id != reading_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to reading {reading_id}"
+        )
+    
+    if annotation.session_id != session_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to session {session_id}"
+        )
+    
+    verify_scaffold_belongs_to_course(scaffold_id, course_id, db)
     
     try:
         annotation_id = uuid.UUID(scaffold_id)
@@ -733,14 +891,56 @@ def edit_scaffold_endpoint(
     return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
-@router.post("/annotation-scaffolds/{scaffold_id}/llm-refine", response_model=ScaffoldResponse)
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/llm-refine", response_model=ScaffoldResponse)
 def llm_refine_scaffold_endpoint(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     scaffold_id: str,
     payload: LLMRefineScaffoldRequest,
     db: Session = Depends(get_db)
 ):
-    """Use LLM to refine scaffold annotation content and create a version record"""
+    """
+    Use LLM to refine scaffold annotation content and create a version record.
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
     scaffold_dict = get_scaffold_or_404(scaffold_id, db)
+    
+    # Verify scaffold belongs to the course, session, and reading
+    annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == uuid.UUID(scaffold_id)).first()
+    if not annotation:
+        raise HTTPException(status_code=404, detail=f"Scaffold {scaffold_id} not found")
+    
+    if annotation.reading_id != reading_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to reading {reading_id}"
+        )
+    
+    if annotation.session_id != session_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to session {session_id}"
+        )
+    
+    verify_scaffold_belongs_to_course(scaffold_id, course_id, db)
 
     state: ScaffoldWorkflowState = {
         "model": "gemini-2.5-flash",
@@ -770,13 +970,55 @@ def llm_refine_scaffold_endpoint(
     return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**final_dict))
 
 
-@router.post("/annotation-scaffolds/{scaffold_id}/reject", response_model=ScaffoldResponse)
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/reject", response_model=ScaffoldResponse)
 def reject_scaffold_endpoint(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     scaffold_id: str,
     db: Session = Depends(get_db)
 ):
-    """Reject a scaffold annotation and create a version record"""
+    """
+    Reject a scaffold annotation and create a version record.
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
     scaffold_dict = get_scaffold_or_404(scaffold_id, db)
+    
+    # Verify scaffold belongs to the course, session, and reading
+    annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == uuid.UUID(scaffold_id)).first()
+    if not annotation:
+        raise HTTPException(status_code=404, detail=f"Scaffold {scaffold_id} not found")
+    
+    if annotation.reading_id != reading_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to reading {reading_id}"
+        )
+    
+    if annotation.session_id != session_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scaffold {scaffold_id} does not belong to session {session_id}"
+        )
+    
+    verify_scaffold_belongs_to_course(scaffold_id, course_id, db)
     
     try:
         annotation_id = uuid.UUID(scaffold_id)
@@ -796,22 +1038,37 @@ def reject_scaffold_endpoint(
     return ScaffoldResponse(scaffold=ReviewedScaffoldModelWithStatusAndHistory(**updated_dict))
 
 
-@router.get("/annotation-scaffolds/export", response_model=ExportedScaffoldsResponse)
+@router.get("/courses/{course_id}/scaffolds/export", response_model=ExportedScaffoldsResponse)
 def export_approved_scaffolds_endpoint(
-    assignment_id: Optional[str] = None,
+    course_id: str,
     reading_id: Optional[str] = None,
     session_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Export final annotation_scaffolds.
+    Export final annotation_scaffolds for a course.
     Only includes status == 'accepted' (approved).
-    Can filter by reading_id or session_id.
+    Can optionally filter by reading_id or session_id.
     """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
     reading_uuid = None
     if reading_id:
         try:
             reading_uuid = uuid.UUID(reading_id)
+            # Verify reading belongs to the course
+            reading = get_reading_by_id(db, reading_uuid)
+            if not reading:
+                raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+            if reading.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Reading {reading_id} does not belong to course {course_id}"
+                )
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
     
@@ -819,6 +1076,16 @@ def export_approved_scaffolds_endpoint(
     if session_id:
         try:
             session_uuid = uuid.UUID(session_id)
+            # Verify session belongs to the course
+            from app.models.models import Session
+            session = db.query(Session).filter(Session.id == session_uuid).first()
+            if not session:
+                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+            if session.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Session {session_id} does not belong to course {course_id}"
+                )
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
     
@@ -828,6 +1095,22 @@ def export_approved_scaffolds_endpoint(
         reading_id=reading_uuid,
         session_id=session_uuid,
     )
+    
+    # Filter by course_id (verify all annotations belong to the course)
+    from app.models.models import Session, Reading
+    filtered_annotations = []
+    for ann in annotations:
+        # Check if annotation's reading belongs to the course
+        if ann.reading_id:
+            reading = db.query(Reading).filter(Reading.id == ann.reading_id).first()
+            if reading and reading.course_id == course_uuid:
+                filtered_annotations.append(ann)
+        # Or check if annotation's session belongs to the course
+        elif ann.session_id:
+            session = db.query(Session).filter(Session.id == ann.session_id).first()
+            if session and session.course_id == course_uuid:
+                filtered_annotations.append(ann)
+    annotations = filtered_annotations
     
     if not annotations:
         return ExportedScaffoldsResponse(annotation_scaffolds=[])
@@ -977,41 +1260,41 @@ def thread_review_endpoint(
         }
 
 
-@router.get("/threads/{thread_id}/scaffold-bundle")
+@router.get("/courses/{course_id}/sessions/{session_id}/scaffolds/bundle")
 def get_scaffold_bundle_endpoint(
-    thread_id: str,
-    session_id: Optional[str] = None,
+    course_id: str,
+    session_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    Get final scaffold bundle for a thread/session.
+    Get final scaffold bundle for a session.
     Returns all approved scaffolds for the session.
     """
-    session_uuid = None
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
     
-    # Try to get session_id from query parameter first
-    if session_id:
-        try:
-            session_uuid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid session_id format: {session_id}"
-            )
-    else:
-        # If no session_id provided, try to find the most recent session with annotations
-        recent_annotation = db.query(ScaffoldAnnotation).order_by(
-            ScaffoldAnnotation.created_at.desc()
-        ).first()
-        
-        if recent_annotation and recent_annotation.session_id:
-            session_uuid = recent_annotation.session_id
-            print(f"[get_scaffold_bundle] Using session_id from recent annotation: {session_uuid}")
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="session_id is required. Please provide it as a query parameter."
-            )
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid session_id format: {session_id}"
+        )
+    
+    # Verify session belongs to the course
+    from app.models.models import Session
+    session = db.query(Session).filter(Session.id == session_uuid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} does not belong to course {course_id}"
+        )
     
     # Get approved annotations for the session
     annotations = get_approved_annotations(
@@ -1040,8 +1323,11 @@ def get_scaffold_bundle_endpoint(
 # Highlight Report Endpoint
 # ======================================================
 
-@router.post("/highlight-report", response_model=HighlightReportResponse)
+@router.post("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/highlight-report", response_model=HighlightReportResponse)
 def save_highlight_coords(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
     req: HighlightReportRequest,
     db: Session = Depends(get_db)
 ):
@@ -1049,6 +1335,44 @@ def save_highlight_coords(
     Save annotation highlight coordinates to database.
     Each coordinate record is bound to an annotation_version_id.
     """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
+    # Verify reading belongs to the course
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
+    # Verify session belongs to the course
+    from app.models.models import Session
+    session = db.query(Session).filter(Session.id == session_uuid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session {session_id} does not belong to course {course_id}"
+        )
     created_count = 0
     errors = []
 
