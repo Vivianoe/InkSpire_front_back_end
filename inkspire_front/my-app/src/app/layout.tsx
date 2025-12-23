@@ -4,7 +4,7 @@ import "./globals.css";
 import "@/app/ui/ui.module.css";
 // import MswInit from "@/components/MswInit"; // MSW disabled - connecting to FastAPI backend
 import 'pdfjs-dist/web/pdf_viewer.css';
-import { AuthProvider } from "./contexts/AuthContext";
+import { AuthProvider } from "../contexts/AuthContext";
 
 export const metadata: Metadata = {
   title: "InkSpire",

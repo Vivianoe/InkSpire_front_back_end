@@ -4,8 +4,8 @@ import Navigation from "@/components/layout/Navigation";
 import styles from "./page.module.css";
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { AuthGuard } from '@/app/auth/AuthGuard';
-import { useAuth } from '@/app/contexts/AuthContext';
+import { AuthGuard } from '@/components/auth/AuthGuard';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CourseSummary {
   id: string;

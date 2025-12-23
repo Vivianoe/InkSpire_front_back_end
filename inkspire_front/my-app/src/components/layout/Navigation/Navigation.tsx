@@ -5,10 +5,10 @@ import { Dialog } from '@headlessui/react';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import styles from './Navigation.module.css';
-import { useAuth } from '@/app/contexts/AuthContext';
-import { UserProfileDropdown } from '@/app/auth/UserProfileDropdown';
-import { SignInButton } from '@/app/auth/SignInButton';
-import { AuthModal } from '@/app/auth/AuthModal';
+import { useAuth } from '@/contexts/AuthContext';
+import { UserProfileDropdown } from '@/components/auth/UserProfileDropdown';
+import { SignInButton } from '@/components/auth/SignInButton';
+import { AuthModal } from '@/components/auth/AuthModal';
 
 const NAVIGATION_LINKS = [
   { name: 'Dashboard', href: '/' },

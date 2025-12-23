@@ -1,7 +1,7 @@
 'use client'
 
 import { ReactNode, useState, useEffect } from 'react'
-import { useAuth } from '@/app/contexts/AuthContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { AuthModal } from './AuthModal'
 
 interface AuthGuardProps {

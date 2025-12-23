@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { User, Session, AuthError } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 // import { useWelcomeDialog } from '../hooks/useWelcomeDialog'
 // import { WelcomeDialog } from '../components/WelcomeDialog'
 
