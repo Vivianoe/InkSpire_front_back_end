@@ -398,3 +398,25 @@ class PerusallMapping(Base):
     def __repr__(self):
         return f"<PerusallMapping(id={self.id}, course_id={self.course_id}, reading_id={self.reading_id}, perusall_course_id={self.perusall_course_id})>"
 
+
+class UserPerusallCredentials(Base):
+    """
+    user_perusall_credentials table
+    Stores per-user Perusall API credentials for integration
+    """
+    __tablename__ = "user_perusall_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    institution_id = Column(Text, nullable=False)
+    api_token = Column(Text, nullable=False)  # TODO: need to encrypt
+    is_validated = Column(Boolean, nullable=False, default=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<UserPerusallCredentials(id={self.id}, user_id={self.user_id}, is_validated={self.is_validated})>"
+

@@ -8,15 +8,29 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, PerusallMapping, Course, Reading
+from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, PerusallMapping, Course, Reading, User
 from app.services.course_service import get_course_by_id
 from app.services.reading_service import get_reading_by_id
+from app.services.perusall_service import (
+    save_user_perusall_credentials,
+    get_user_perusall_credentials,
+    validate_perusall_credentials,
+    fetch_perusall_courses,
+    import_perusall_courses,
+)
+from auth.dependencies import get_current_user
 from app.api.models import (
     PerusallAnnotationRequest,
     PerusallAnnotationResponse,
     PerusallAnnotationItem,
     PerusallMappingRequest,
     PerusallMappingResponse,
+    PerusallAuthRequest,
+    PerusallAuthResponse,
+    PerusallCoursesResponse,
+    PerusallCourseItem,
+    PerusallImportRequest,
+    PerusallImportResponse,
 )
 
 router = APIRouter()
@@ -718,3 +732,174 @@ def get_perusall_mapping(
         perusall_assignment_id=mapping.perusall_assignment_id,
         perusall_document_id=mapping.perusall_document_id,
     )
+
+
+# ======================================================
+# Perusall User Credentials & Course Import Endpoints
+# ======================================================
+
+
+@router.post("/perusall/authenticate", response_model=PerusallAuthResponse)
+def authenticate_perusall(
+    req: PerusallAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Validate and save user Perusall credentials
+    Tests credentials against Perusall API before saving
+    """
+    try:
+        # Validate credentials by testing API access
+        is_valid = validate_perusall_credentials(req.institution_id, req.api_token)
+
+        if not is_valid:
+            return PerusallAuthResponse(
+                success=False,
+                message="Invalid Perusall credentials. Please check your institution ID and API token.",
+                user_id=None,
+            )
+
+        # Save validated credentials
+        save_user_perusall_credentials(
+            db=db,
+            user_id=current_user.id,
+            institution_id=req.institution_id,
+            api_token=req.api_token,
+            is_validated=True,
+        )
+
+        return PerusallAuthResponse(
+            success=True,
+            message="Perusall credentials validated and saved successfully",
+            user_id=str(current_user.id),
+        )
+
+    except Exception as e:
+        print(f"[authenticate_perusall] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to validate Perusall credentials: {str(e)}"
+        )
+
+
+@router.get("/perusall/courses", response_model=PerusallCoursesResponse)
+def get_perusall_courses(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch list of courses from Perusall for the authenticated user
+    Requires user to have validated Perusall credentials
+    """
+    try:
+        # Get user credentials
+        credentials = get_user_perusall_credentials(db, current_user.id)
+
+        if not credentials:
+            raise HTTPException(
+                status_code=404,
+                detail="Perusall credentials not found. Please authenticate first at /api/perusall/authenticate"
+            )
+
+        if not credentials.is_validated:
+            raise HTTPException(
+                status_code=400,
+                detail="Perusall credentials have not been validated. Please authenticate first at /api/perusall/authenticate"
+            )
+
+        # Fetch courses from Perusall API
+        courses = fetch_perusall_courses(
+            institution_id=credentials.institution_id,
+            api_token=credentials.api_token,
+        )
+
+        # Convert to Pydantic models
+        course_items = [
+            PerusallCourseItem(_id=course["_id"], name=course["name"])
+            for course in courses
+        ]
+
+        return PerusallCoursesResponse(
+            success=True,
+            courses=course_items,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[get_perusall_courses] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch Perusall courses: {str(e)}"
+        )
+
+
+@router.post("/perusall/import-courses", response_model=PerusallImportResponse)
+def import_courses_from_perusall(
+    req: PerusallImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Import selected Perusall courses as Inkspire Course records
+    Fetches full course data from Perusall API and creates Inkspire courses
+    """
+    try:
+        # Validate request
+        if not req.course_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No course IDs provided for import"
+            )
+
+        # Get user credentials to fetch course details
+        credentials = get_user_perusall_credentials(db, current_user.id)
+
+        if not credentials:
+            raise HTTPException(
+                status_code=404,
+                detail="Perusall credentials not found. Please authenticate first"
+            )
+
+        # Fetch all courses from Perusall to get course names
+        all_courses = fetch_perusall_courses(
+            institution_id=credentials.institution_id,
+            api_token=credentials.api_token,
+        )
+
+        # Filter to only selected courses
+        selected_courses = [
+            course for course in all_courses
+            if course["_id"] in req.course_ids
+        ]
+
+        if not selected_courses:
+            raise HTTPException(
+                status_code=404,
+                detail="None of the provided course IDs were found in your Perusall account"
+            )
+
+        # Import courses
+        imported_courses = import_perusall_courses(
+            db=db,
+            user_id=current_user.id,
+            perusall_courses=selected_courses,
+        )
+
+        return PerusallImportResponse(
+            success=True,
+            imported_courses=imported_courses,
+            message=f"Successfully imported {len(imported_courses)} course(s)",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[import_courses_from_perusall] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to import courses: {str(e)}"
+        )

@@ -10,9 +10,7 @@ interface AuthModalProps {
 
 interface PerusallCourse {
   _id: string
-  id?: string
   name: string
-  title?: string
 }
 
 type Step = 'set-credentials' | 'validate-credentials' | 'select-courses' | 'import-courses' | 'complete-integration'
@@ -200,21 +198,21 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
             ) : (
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {courses.map((course) => {
-                  const courseId = course._id || course.id || ''
-                  const courseName = course.name || course.title || 'Unnamed Course'
+                  const courseId = course._id || ''
+                  const courseName = course.name || 'Unnamed Course'
                   return (
-                    <label
+                  <label
                       key={courseId}
-                      className="flex items-center p-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
+                    className="flex items-center p-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
                         checked={selectedCourseIds.includes(courseId)}
                         onChange={() => handleCourseSelection(courseId)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
                       <span className="ml-3 text-gray-900">{courseName}</span>
-                    </label>
+                  </label>
                   )
                 })}
               </div>

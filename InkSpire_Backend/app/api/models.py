@@ -323,3 +323,43 @@ class HighlightReportResponse(BaseModel):
     created_count: int
     errors: List[Dict[str, Any]]
 
+
+# ========================================
+# Perusall Integration Models
+# ========================================
+
+# Perusall Authentication
+class PerusallAuthRequest(BaseModel):
+    institution_id: str
+    api_token: str
+
+class PerusallAuthResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+
+
+# Perusall Courses
+class PerusallCourseItem(BaseModel):
+    _id: str  # Perusall course ID
+    name: str  # Course name
+
+class PerusallCoursesResponse(BaseModel):
+    success: bool
+    courses: List[PerusallCourseItem]
+
+
+# Perusall Course Import
+class PerusallImportRequest(BaseModel):
+    course_ids: List[str]
+
+class ImportedCourse(BaseModel):
+    perusall_course_id: str
+    inkspire_course_id: str
+    title: str
+
+class PerusallImportResponse(BaseModel):
+    success: bool
+    imported_courses: List[ImportedCourse]
+    message: Optional[str] = None
+
