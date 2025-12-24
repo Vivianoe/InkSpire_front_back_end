@@ -10,7 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 interface CourseSummary {
   id: string;
   title: string;
-  courseCode?: string | null;
+  perusallCourseId?: string | null;
   description?: string | null;
   classProfileId?: string | null;
   lastUpdated?: string | null;
@@ -19,7 +19,7 @@ interface CourseSummary {
 interface ApiCourse {
   id: string;
   title: string;
-  course_code?: string | null;
+  perusall_course_id?: string | null;
   description?: string | null;
   class_profile_id?: string | null;
   created_at?: string | null;
@@ -91,7 +91,7 @@ export default function DashboardPage() {
         const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
           id: c.id,
           title: c.title,
-          courseCode: c.course_code ?? undefined,
+          perusallCourseId: c.perusall_course_id ?? undefined,
           description: c.description ?? undefined,
           classProfileId: c.class_profile_id ?? undefined,
           lastUpdated: c.updated_at ?? c.created_at ?? null,
@@ -195,7 +195,7 @@ export default function DashboardPage() {
                   <div className={styles.classCardHeader}>
                     <div>
                       <h2 className={styles.courseName}>{course.title}</h2>
-                      <p className={styles.courseCode}>{course.courseCode}</p>
+                      <p className={styles.courseCode}>{course.perusallCourseId}</p>
                     </div>
                     {course.classProfileId ? (
                       <span className={`${styles.statusBadge} ${styles.statusCreated}`}>

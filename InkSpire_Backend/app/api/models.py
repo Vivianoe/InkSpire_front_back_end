@@ -85,7 +85,7 @@ class PublicUserResponse(BaseModel):
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
     title: str
-    course_code: str
+    perusall_course_id: Optional[str] = None
     description: str
     class_input: Dict[str, Any]
 
@@ -123,7 +123,7 @@ class ClassProfileListResponse(BaseModel):
 class CourseSummaryModel(BaseModel):
     id: str
     title: str
-    course_code: str
+    perusall_course_id: Optional[str] = None
     description: str
     class_profile_id: Optional[str] = None
 

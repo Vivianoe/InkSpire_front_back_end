@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS courses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     instructor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    course_code TEXT,
+    perusall_course_id TEXT,
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -346,7 +346,7 @@ CREATE TRIGGER update_user_perusall_credentials_updated_at
 COMMENT ON TABLE scaffold_annotations IS 'Each annotation corresponds to a text fragment in a reading';
 COMMENT ON TABLE scaffold_annotation_versions IS 'Each automatic generation, manual edit, LLM rewrite, accept/reject creates a record';
 COMMENT ON TABLE users IS 'User authentication and profile information';
-COMMENT ON TABLE courses IS 'Course basic information';
+COMMENT ON TABLE courses IS 'Course basic information with Perusall course ID for integration';
 COMMENT ON TABLE course_basic_info IS 'Detailed course information with versioning support';
 COMMENT ON TABLE course_basic_info_versions IS 'Version history of course basic information';
 COMMENT ON TABLE class_profiles IS 'Active current version of class profile';

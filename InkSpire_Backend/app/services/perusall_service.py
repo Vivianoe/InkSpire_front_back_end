@@ -284,8 +284,8 @@ def import_perusall_courses(
                 db=db,
                 instructor_id=user_id,
                 title=course_name,
-                course_code=None,
-                description=f"Imported from Perusall (ID: {perusall_course_id})",
+                perusall_course_id=perusall_course_id,
+                description=f"Imported from Perusall",
             )
 
             imported_courses.append({

@@ -117,7 +117,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
         db=db,
         instructor_id=instructor_uuid,
         title=payload.title,
-        course_code=payload.course_code,
+        perusall_course_id=payload.perusall_course_id,
         description=payload.description,
     )
     

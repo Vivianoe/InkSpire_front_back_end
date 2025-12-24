@@ -13,7 +13,7 @@ def create_course(
     db: Session,
     instructor_id: uuid.UUID,
     title: str,
-    course_code: Optional[str] = None,
+    perusall_course_id: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Course:
     """
@@ -23,7 +23,7 @@ def create_course(
         id=uuid.uuid4(),
         instructor_id=instructor_id,
         title=title.strip(),
-        course_code=course_code.strip() if course_code else None,
+        perusall_course_id=perusall_course_id.strip() if perusall_course_id else None,
         description=description.strip() if description else None,
     )
     
@@ -52,7 +52,7 @@ def update_course(
     db: Session,
     course_id: uuid.UUID,
     title: Optional[str] = None,
-    course_code: Optional[str] = None,
+    perusall_course_id: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Course:
     """
@@ -61,11 +61,11 @@ def update_course(
     course = get_course_by_id(db, course_id)
     if not course:
         raise ValueError(f"Course {course_id} not found")
-    
+
     if title is not None:
         course.title = title.strip()
-    if course_code is not None:
-        course.course_code = course_code.strip() if course_code else None
+    if perusall_course_id is not None:
+        course.perusall_course_id = perusall_course_id.strip() if perusall_course_id else None
     if description is not None:
         course.description = description.strip() if description else None
     
@@ -211,7 +211,7 @@ def course_to_dict(course: Course) -> Dict[str, Any]:
         "id": str(course.id),
         "instructor_id": str(course.instructor_id),
         "title": course.title,
-        "course_code": course.course_code,
+        "perusall_course_id": course.perusall_course_id,
         "description": course.description,
         "created_at": course.created_at.isoformat() if course.created_at else None,
         "updated_at": course.updated_at.isoformat() if course.updated_at else None,
