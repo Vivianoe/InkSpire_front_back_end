@@ -816,7 +816,7 @@ def get_perusall_courses(
 
         # Convert to Pydantic models
         course_items = [
-            PerusallCourseItem(_id=course["_id"], name=course["name"])
+            PerusallCourseItem(id=course["_id"], name=course["name"])
             for course in courses
         ]
 

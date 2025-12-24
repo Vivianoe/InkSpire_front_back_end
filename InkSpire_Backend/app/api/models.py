@@ -2,7 +2,7 @@
 Pydantic models for API request/response validation
 """
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 # ======================================================
 # Shared Models
@@ -341,7 +341,9 @@ class PerusallAuthResponse(BaseModel):
 
 # Perusall Courses
 class PerusallCourseItem(BaseModel):
-    _id: str  # Perusall course ID
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+
+    id: str = Field(alias="_id")  # Perusall course ID - serializes as "_id"
     name: str  # Course name
 
 class PerusallCoursesResponse(BaseModel):
