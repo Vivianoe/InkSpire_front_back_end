@@ -3,19 +3,17 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { User, Session, AuthError } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase/client'
-// import { useWelcomeDialog } from '../hooks/useWelcomeDialog'
-// import { WelcomeDialog } from '../components/WelcomeDialog'
+import { AuthModal as PerusallAuthModal } from '@/components/auth/PerusallAuthModal'
 
 interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
-  // showWelcomeDialog: (userId?: string) => Promise<void>
-  // dismissWelcomeDialog: () => void
+  showPerusallModal: boolean
   signIn: (email: string, password: string) => Promise<{ error?: AuthError }>
   signUp: (email: string, password: string, name: string) => Promise<{ error?: AuthError }>
   signOut: () => Promise<{ error?: AuthError }>
-  // signInWithProvider: (provider: 'google') => Promise<{ error?: AuthError }>
+  closePerusallModal: () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -36,7 +34,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
-  // const welcomeDialog = useWelcomeDialog()
+  const [showPerusallModal, setShowPerusallModal] = useState(false)
 
   useEffect(() => {
     // Get initial session
@@ -128,12 +126,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const data = await response.json()
       // console.log('✅ Signup successful:', data.email)
 
+      // Show Perusall modal immediately after successful signup
+      setShowPerusallModal(true)
+
       // Session will be automatically detected by onAuthStateChange listener
       return { error: undefined }
     } catch (error) {
       console.error('❌ Signup catch error:', error)
       return { error: { message: String(error) } as AuthError }
     }
+  }
+
+  const closePerusallModal = () => {
+    setShowPerusallModal(false)
   }
 
   const signOut = async () => {
@@ -163,22 +168,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     user,
     session,
     loading,
-    // showWelcomeDialog: welcomeDialog.show,
-    // dismissWelcomeDialog: welcomeDialog.dismiss,
+    showPerusallModal,
     signIn,
     signUp,
     signOut,
-    // signInWithProvider,
+    closePerusallModal,
   }
 
 
   return (
     <AuthContext.Provider value={value}>
       {children}
-      {/* <WelcomeDialog
-        isOpen={welcomeDialog.isOpen}
-        onDismiss={welcomeDialog.dismiss}
-      /> */}
+      <PerusallAuthModal
+        isOpen={showPerusallModal}
+        onClose={closePerusallModal}
+      />
     </AuthContext.Provider>
   )
 }

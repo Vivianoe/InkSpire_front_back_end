@@ -3,7 +3,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import Image from 'next/image'
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
+import { AuthModal as PerusallAuthModal } from './PerusallAuthModal'
+import { ArrowRightStartOnRectangleIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { Cog8ToothIcon } from '@heroicons/react/24/outline'
 
 interface UserProfileDropdownProps {
   /**
@@ -22,13 +24,14 @@ interface UserProfileDropdownProps {
   dropdownPosition?: 'bottom-left' | 'top-left' | 'bottom-right' | 'top-right'
 }
 
-export function UserProfileDropdown({ 
-  className = '', 
+export function UserProfileDropdown({
+  className = '',
   showUserName = true,
-  dropdownPosition = 'bottom-left' 
+  dropdownPosition = 'bottom-left'
 }: UserProfileDropdownProps) {
   const { user, signOut, loading } = useAuth()
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [showPerusallModal, setShowPerusallModal] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const handleClickOutside = useCallback((event: MouseEvent) => {
@@ -61,6 +64,15 @@ export function UserProfileDropdown({
       // Keep dropdown open on error so user can retry
       // In a production app, you might want to show a toast notification
     }
+  }
+
+  const handleOpenPerusallSettings = () => {
+    setShowPerusallModal(true)
+    setIsDropdownOpen(false)
+  }
+
+  const handleClosePerusallModal = () => {
+    setShowPerusallModal(false)
   }
 
   const getUserDisplayName = () => {
@@ -171,7 +183,7 @@ export function UserProfileDropdown({
           role="menu"
           aria-orientation="vertical"
         >
-          <div className="p-4">
+          <div className="px-4 pt-4 pb-2">
             <div className="flex items-center space-x-3">
               <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center overflow-hidden">
                 {getUserAvatarUrl() ? (
@@ -199,27 +211,37 @@ export function UserProfileDropdown({
             </div>
           </div>
 
-          <div className="px-4 pb-4 border-b">
-            <p className="text-xs text-gray-500">
-              Signed in via {user.app_metadata?.provider || 'email'}
-            </p>
+          <div className="p-2">
+            <button
+              onClick={handleOpenPerusallSettings}
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center space-x-2 cursor-pointer"
+              role="menuitem"
+              style={{ pointerEvents: 'all' }}
+            >
+              <Cog8ToothIcon className="w-4 h-4 stroke-2"/>
+              <span>Perusall Settings</span>
+            </button>
           </div>
 
-          <div className="p-2">
+          <div className="p-2 border-t">
             <button
               onClick={handleSignOut}
               className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center space-x-2 cursor-pointer"
               role="menuitem"
               style={{ pointerEvents: 'all' }}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+              <ArrowRightStartOnRectangleIcon className="w-4 h-4 stroke-2"/>
               <span>Sign Out</span>
             </button>
           </div>
         </div>
       )}
+
+      <PerusallAuthModal
+        isOpen={showPerusallModal}
+        onClose={handleClosePerusallModal}
+        allowClose={true}
+      />
     </div>
   )
 }
