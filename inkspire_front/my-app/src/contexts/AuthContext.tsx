@@ -124,9 +124,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      // console.log('✅ Signup successful:', data.email)
+      // console.log('✅ Signup successful:', data.user.email)
 
-      // Show Perusall modal immediately after successful signup
+      // Set the session in Supabase client using the access token from backend
+      // This allows the auth state listener and session management to work seamlessly
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.access_token, // Backend doesn't provide refresh token yet
+      })
+
+      if (sessionError) {
+        console.error('❌ Session setup failed:', sessionError)
+        return { error: sessionError }
+      }
+
+      // Show Perusall modal immediately after successful signup and session setup
       setShowPerusallModal(true)
 
       // Session will be automatically detected by onAuthStateChange listener

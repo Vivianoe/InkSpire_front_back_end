@@ -23,7 +23,7 @@ from app.api.models import (
 
 router = APIRouter()
 
-@router.post("/users/register", response_model=UserResponse)
+@router.post("/users/register", response_model=LoginResponse)
 def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register a new user"""
     import uuid
@@ -32,7 +32,13 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
         supabase_response = supabase_signup(req.email, req.password, req.name)
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
-        
+
+        # Extract access token from session
+        supabase_session = supabase_response.get("session")
+        if not supabase_session:
+            raise AuthenticationError("Registration succeeded but no session was created")
+        access_token = supabase_session.access_token
+
         # Create user record in our database
         user = create_user_from_supabase(
             db=db,
@@ -41,8 +47,19 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             name=req.name,
             role=req.role or "instructor",
         )
-        
-        return UserResponse(**user_to_dict(user))
+
+        # Return LoginResponse with access token (like login endpoint does)
+        return LoginResponse(
+            user=UserResponse(
+                id=str(user.id),
+                supabase_user_id=str(user.supabase_user_id),
+                email=user.email,
+                name=user.name,
+                role=user.role,
+            ),
+            access_token=access_token,
+            message="Registration successful"
+        )
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

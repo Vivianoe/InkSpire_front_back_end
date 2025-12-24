@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { supabase } from '@/lib/supabase/client'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -23,16 +24,31 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // Helper function to get authorization headers
+  const getAuthHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) {
+      throw new Error('Not authenticated. Please sign in again.')
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`
+    }
+  }
+
   const handleValidateCredentials = async (e: React.FormEvent) => {
     e.preventDefault()
     setStep('validate-credentials')
     setError(null)
 
     try {
+      // Get auth headers
+      const headers = await getAuthHeaders()
+
       // Step 1: Validate Perusall credentials
       const authResponse = await fetch('/api/perusall/authenticate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           institution_id: institutionId,
           api_token: apiToken
@@ -47,7 +63,7 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       // Step 2: Fetch Perusall courses
       const coursesResponse = await fetch('/api/perusall/courses', {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+        headers
       })
 
       if (!coursesResponse.ok) {
@@ -82,9 +98,12 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
     setError(null)
 
     try {
+      // Get auth headers
+      const headers = await getAuthHeaders()
+
       const response = await fetch('/api/perusall/import-courses', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ course_ids: selectedCourseIds })
       })
 
