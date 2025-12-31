@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { useAuth } from '@/contexts/AuthContext';
+import { CourseCard } from '@/components/course/CourseCard';
 
 interface CourseSummary {
   id: string;
@@ -25,8 +26,6 @@ interface ApiCourse {
   created_at?: string | null;
   updated_at?: string | null;
 }
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -57,11 +56,13 @@ export default function DashboardPage() {
     return 'Instructor'
   };
 
-  // Test backend connection when the component mounts
+  // Test backend connection and load courses when the component mounts
   useEffect(() => {
     testBackendConnection();
-    // loadCourses();
-  }, [pathname]); // Reload when pathname changes (e.g., when returning from edit page)
+    if (user) {
+      loadCourses();
+    }
+  }, [pathname, user]); // Reload when pathname changes or user becomes available
 
   const testBackendConnection = async () => {
     try {
@@ -84,8 +85,14 @@ export default function DashboardPage() {
   };
 
   const loadCourses = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(`/api/courses/instructor/${MOCK_INSTRUCTOR_ID}`);
+      setLoading(true);
+      const response = await fetch(`/api/courses/instructor/${user.id}`);
       if (response.ok) {
         const data = await response.json();
         const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
@@ -105,24 +112,29 @@ export default function DashboardPage() {
     }
   };
 
-  const openCourse = (course: CourseSummary) => {
-    const params = new URLSearchParams({
-      courseId: course.id,
-      instructorId: MOCK_INSTRUCTOR_ID,
-    });
-    if (course.classProfileId) {
-      router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
-    } else {
-      router.push(`/class-profile/new/edit?${params.toString()}`);
-    }
+  const handleCourseClick = (course: CourseSummary) => {
+    // Placeholder: Navigation will be implemented later
+    console.log('Course clicked:', course);
   };
 
-  const handleNewClass = () => {
-    const params = new URLSearchParams({
-      instructorId: MOCK_INSTRUCTOR_ID,
-    });
-    router.push(`/class-profile/new/edit?${params.toString()}`);
-  };
+  // const openCourse = (course: CourseSummary) => {
+  //   const params = new URLSearchParams({
+  //     courseId: course.id,
+  //     instructorId: MOCK_INSTRUCTOR_ID,
+  //   });
+  //   if (course.classProfileId) {
+  //     router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
+  //   } else {
+  //     router.push(`/class-profile/new/edit?${params.toString()}`);
+  //   }
+  // };
+
+  // const handleNewClass = () => {
+  //   const params = new URLSearchParams({
+  //     instructorId: MOCK_INSTRUCTOR_ID,
+  //   });
+  //   router.push(`/class-profile/new/edit?${params.toString()}`);
+  // };
 
   if (loading) {
     return (
@@ -149,94 +161,59 @@ export default function DashboardPage() {
         <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
             <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginTop: '8px',
-              fontSize: '14px'
-            }}>
-              <span>Backend:</span>
-              {backendStatus === 'checking' && (
-                <span style={{ color: '#666' }}>Checking...</span>
-              )}
-              {backendStatus === 'connected' && (
-                <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
-              )}
-              {backendStatus === 'disconnected' && (
-                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
-              )}
-              <button
-                onClick={testBackendConnection}
-                style={{
-                  marginLeft: '8px',
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  border: '1px solid #ccc',
-                  borderRadius: '4px',
-                  background: '#fff'
-                }}
-              >
-                Test
-              </button>
-            </div>
+            {process.env.NODE_ENV === 'development' && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginTop: '8px',
+              }}>
+                <span>Backend:</span>
+                {backendStatus === 'checking' && (
+                  <span style={{ color: '#666' }}>Checking...</span>
+                )}
+                {backendStatus === 'connected' && (
+                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
+                )}
+                {backendStatus === 'disconnected' && (
+                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
+                )}
+                <button
+                  onClick={testBackendConnection}
+                  style={{
+                    marginLeft: '8px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    background: '#fff',
+                    color: 'red'
+                  }}
+                >
+                  Test
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* <div className={styles.classCardsGrid}>
+          <div className={styles.classCardsGrid}>
             {courses.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-                <p>No courses yet. Create your first one!</p>
+                <p>No courses yet. Import your first one from Perusall!</p>
               </div>
             ) : (
-              courses.map((course) => {
-              return (
-                <div key={course.id} className={styles.classCard}>
-                  <div className={styles.classCardHeader}>
-                    <div>
-                      <h2 className={styles.courseName}>{course.title}</h2>
-                      <p className={styles.courseCode}>{course.perusallCourseId}</p>
-                    </div>
-                    {course.classProfileId ? (
-                      <span className={`${styles.statusBadge} ${styles.statusCreated}`}>
-                        Profile Created
-                      </span>
-                    ) : (
-                      <span className={`${styles.statusBadge} ${styles.statusInProgress}`}>
-                        No Profile Yet
-                      </span>
-                    )}
-                  </div>
+              courses.map((course) => (
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  onClick={handleCourseClick}
+                />
+              ))
+            )}
+          </div>
 
-                  <div className={styles.classCardContent}>
-                    <div className={styles.statItem}>
-                      <span className={styles.statLabel}>Last Updated</span>
-                      <span className={styles.statValue}>
-                        {course.lastUpdated
-                          ? new Date(course.lastUpdated).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                            })
-                          : '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className={styles.classCardActions}>
-                    <button
-                      className={styles.viewButton}
-                      onClick={() => openCourse(course)}
-                    >
-                      {course.classProfileId ? 'Open Profile' : 'Create Profile'}
-                    </button>
-                  </div>
-                </div>
-              );
-            }))}
-          </div> */}
-
-          <div className={styles.newClassButtonContainer}>
+          {/* <div className={styles.newClassButtonContainer}>
             <button
               className={styles.newClassButton}
               onClick={handleNewClass}
@@ -244,7 +221,7 @@ export default function DashboardPage() {
               <span className={styles.plusIcon}>+</span>
               New Class Profile
             </button>
-          </div>
+          </div> */}
         </div>
       </div>
     </AuthGuard>
