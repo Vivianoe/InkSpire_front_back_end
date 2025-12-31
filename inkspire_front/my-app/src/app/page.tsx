@@ -30,11 +30,13 @@ interface ApiCourse {
 
 export default function DashboardPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, showPerusallModal } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [instructorId, setInstructorId] = useState<string | null>(null);
 
   const getUserFirstName = () => {
     if (!user) return 'Instructor'
@@ -114,6 +116,9 @@ export default function DashboardPage() {
       }
       const userData = await userResponse.json();
 
+      // Save instructor ID to state for navigation
+      setInstructorId(userData.id);
+
       // Step 2: Use internal ID to fetch courses
       const response = await fetch(`/api/courses/instructor/${userData.id}`, { headers });
       if (!response.ok) {
@@ -140,28 +145,24 @@ export default function DashboardPage() {
   };
 
   const handleCourseClick = (course: CourseSummary) => {
-    // Placeholder: Navigation will be implemented later
-    console.log('Course clicked:', course);
+    if (!instructorId) {
+      console.error('Instructor ID not available');
+      return;
+    }
+
+    const params = new URLSearchParams({
+      courseId: course.id,
+      instructorId: instructorId,
+    });
+
+    if (course.classProfileId) {
+      // Navigate to view existing profile
+      router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
+    } else {
+      // Navigate to create new profile
+      router.push(`/class-profile/new/edit?${params.toString()}`);
+    }
   };
-
-  // const openCourse = (course: CourseSummary) => {
-  //   const params = new URLSearchParams({
-  //     courseId: course.id,
-  //     instructorId: MOCK_INSTRUCTOR_ID,
-  //   });
-  //   if (course.classProfileId) {
-  //     router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
-  //   } else {
-  //     router.push(`/class-profile/new/edit?${params.toString()}`);
-  //   }
-  // };
-
-  // const handleNewClass = () => {
-  //   const params = new URLSearchParams({
-  //     instructorId: MOCK_INSTRUCTOR_ID,
-  //   });
-  //   router.push(`/class-profile/new/edit?${params.toString()}`);
-  // };
 
   if (loading) {
     return (

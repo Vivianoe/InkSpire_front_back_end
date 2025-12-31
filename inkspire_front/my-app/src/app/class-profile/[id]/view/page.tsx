@@ -17,7 +17,14 @@ import {
 } from '@/app/class-profile/designConsiderations';
 import styles from './page.module.css';
 
-const DEFAULT_CLASS_PROFILE_TEXT = `This discipline focuses on computing and software engineering, where knowledge is built through logical proof, empirical validation, and formal specification. Learners engage with diverse materials such as code examples, conceptual explanations, research papers, and documentation, using both linear and non-linear reading strategies to understand algorithms, design patterns, and system behavior. Core practices include debugging, testing, verification, code review, and version control, reflecting inquiry processes rooted in problem solving, replication, and collaboration.
+const DEFAULT_CLASS_BACKGROUND = '';
+
+const DEFAULT_CLASS_PROFILE_TEXT = '';
+
+const TEST_CLASS_BACKGROUND =
+  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
+
+const TEST_CLASS_PROFILE_TEXT = `This discipline focuses on computing and software engineering, where knowledge is built through logical proof, empirical validation, and formal specification. Learners engage with diverse materials such as code examples, conceptual explanations, research papers, and documentation, using both linear and non-linear reading strategies to understand algorithms, design patterns, and system behavior. Core practices include debugging, testing, verification, code review, and version control, reflecting inquiry processes rooted in problem solving, replication, and collaboration.
 
 Discipline level:
 1. common_reading_content_types: Code examples, conceptual explanations (design patterns, algorithms), primary sources (research papers, specifications), proofs (for algorithms and data structures), documentation, empirical studies (performance analysis, usability studies).
@@ -37,9 +44,6 @@ Class level:
 1. learning_goals: Understand core version control concepts and best practices; enable effective use of version control systems like Git in collaborative coding environments.
 2. key_concepts: Version control systems (VCS), distributed VCS (Git), repository, working copy, staging area, commit, branch, merge, conflict resolution, remote repositories, push, pull, best practices for version control (atomic commits, clear messages, frequent updates, branching strategies).
 3. key_terms: Version control, VCS, Git, repository, commit, branch, merge, conflict, working copy, staging area, remote, push, pull, clone, fork, HEAD, main, checkout, status, add, diff, log, rebase.`;
-
-const DEFAULT_CLASS_BACKGROUND =
-  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
 
 type ProfileLevel = 'all' | 'discipline' | 'course' | 'class';
 

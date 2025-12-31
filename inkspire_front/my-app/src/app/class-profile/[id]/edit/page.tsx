@@ -55,10 +55,40 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
   { value: 'mixed', label: 'Mixed proficiency cohort' },
 ];
 
-const DEFAULT_CLASS_BACKGROUND =
-  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
+const DEFAULT_CLASS_BACKGROUND = '';
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
+  disciplineInfo: {
+    disciplineName: '',
+    department: '',
+    fieldDescription: '',
+  },
+  courseInfo: {
+    courseName: '',
+    courseCode: '',
+    description: '',
+    credits: '',
+    prerequisites: '',
+    learningObjectives: '',
+    assessmentMethods: '',
+    deliveryMode: '',
+  },
+  classInfo: {
+    semester: '',
+    year: '',
+    section: '',
+    meetingDays: '',
+    meetingTime: '',
+    location: '',
+    enrollment: '',
+    background: DEFAULT_CLASS_BACKGROUND,
+    priorKnowledge: '',
+  },
+  generatedProfile: undefined,
+  designConsiderations: createDefaultDesignConsiderations(),
+};
+
+const TEST_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
     disciplineName: 'Computer Science',
     department: 'Department of Computer and Information Science',
@@ -85,7 +115,7 @@ const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
     meetingTime: '10:00 AM - 11:30 AM',
     location: 'Engineering Building, Room 210',
     enrollment: '30',
-    background: DEFAULT_CLASS_BACKGROUND,
+    background: 'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.',
     priorKnowledge: 'mixed',
   },
   generatedProfile: undefined,
