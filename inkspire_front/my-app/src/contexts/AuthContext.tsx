@@ -70,7 +70,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       subscription.unsubscribe()
     }
-  })
+  }, [])
 
   const signIn = async (email: string, password: string) => {
     try {

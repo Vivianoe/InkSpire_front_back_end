@@ -4,6 +4,7 @@ User authentication and management endpoints
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.models.models import User
 from app.services.user_service import (
     create_user_from_supabase,
     get_user_by_id,
@@ -98,17 +99,14 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @router.get("/users/me", response_model=UserResponse)
-def get_current_user_info(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information"""
-    user = get_user_by_supabase_id(db, current_user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     return UserResponse(
-        id=str(user.id),
-        email=user.email,
-        name=user.name,
-        role=user.role,
+        id=str(current_user.id),
+        supabase_user_id=str(current_user.supabase_user_id),
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
     )
 
 @router.get("/users/{user_id}", response_model=PublicUserResponse)

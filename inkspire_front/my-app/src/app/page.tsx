@@ -7,6 +7,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { useAuth } from '@/contexts/AuthContext';
 import { CourseCard } from '@/components/course/CourseCard';
+import { supabase } from '@/lib/supabase/client';
 
 interface CourseSummary {
   id: string;
@@ -28,11 +29,11 @@ interface ApiCourse {
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, showPerusallModal } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
 
   const getUserFirstName = () => {
@@ -59,10 +60,11 @@ export default function DashboardPage() {
   // Test backend connection and load courses when the component mounts
   useEffect(() => {
     testBackendConnection();
-    if (user) {
+    // Only load courses if user exists AND Perusall modal is closed
+    if (user && !showPerusallModal) {
       loadCourses();
     }
-  }, [pathname, user]); // Reload when pathname changes or user becomes available
+  }, [pathname, user, showPerusallModal]); // Reload when pathname changes, user becomes available, or modal closes
 
   const testBackendConnection = async () => {
     try {
@@ -92,21 +94,46 @@ export default function DashboardPage() {
 
     try {
       setLoading(true);
-      const response = await fetch(`/api/courses/instructor/${user.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
-          id: c.id,
-          title: c.title,
-          perusallCourseId: c.perusall_course_id ?? undefined,
-          description: c.description ?? undefined,
-          classProfileId: c.class_profile_id ?? undefined,
-          lastUpdated: c.updated_at ?? c.created_at ?? null,
-        }));
-        setCourses(items);
+      setError(null);
+
+      // Get auth token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
       }
-    } catch (error) {
-      console.error('Failed to load courses:', error);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      };
+
+      // Step 1: Get internal user ID from /api/users/me
+      const userResponse = await fetch('/api/users/me', { headers });
+      if (!userResponse.ok) {
+        throw new Error(`Failed to fetch user info: ${userResponse.status} ${userResponse.statusText}`);
+      }
+      const userData = await userResponse.json();
+
+      // Step 2: Use internal ID to fetch courses
+      const response = await fetch(`/api/courses/instructor/${userData.id}`, { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to load courses: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
+        id: c.id,
+        title: c.title,
+        perusallCourseId: c.perusall_course_id ?? undefined,
+        description: c.description ?? undefined,
+        classProfileId: c.class_profile_id ?? undefined,
+        lastUpdated: c.updated_at ?? c.created_at ?? null,
+      }));
+      setCourses(items);
+    } catch (err) {
+      console.error('Failed to load courses:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load courses. Please try again.');
+      setCourses([]);
     } finally {
       setLoading(false);
     }
@@ -146,7 +173,7 @@ export default function DashboardPage() {
               <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
             </div>
             <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <p>Loading class profiles...</p>
+              <p>Loading your courses...</p>
             </div>
           </div>
         </div>
@@ -197,21 +224,50 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className={styles.classCardsGrid}>
-            {courses.length === 0 ? (
-              <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-                <p>No courses yet. Import your first one from Perusall!</p>
-              </div>
-            ) : (
-              courses.map((course) => (
-                <CourseCard
-                  key={course.id}
-                  course={course}
-                  onClick={handleCourseClick}
-                />
-              ))
-            )}
-          </div>
+          {error ? (
+            <div style={{
+              gridColumn: '1 / -1',
+              textAlign: 'center',
+              padding: '2rem',
+              backgroundColor: '#fee2e2',
+              borderRadius: '0.5rem',
+              border: '1px solid #fca5a5',
+              marginBottom: '2rem'
+            }}>
+              <p style={{ color: '#991b1b', margin: 0 }}>{error}</p>
+              <button
+                onClick={() => loadCourses()}
+                style={{
+                  marginTop: '1rem',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.375rem',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className={styles.classCardsGrid}>
+              {courses.length === 0 ? (
+                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+                  <p>No courses yet. Import your first one from Perusall!</p>
+                </div>
+              ) : (
+                courses.map((course) => (
+                  <CourseCard
+                    key={course.id}
+                    course={course}
+                    onClick={handleCourseClick}
+                  />
+                ))
+              )}
+            </div>
+          )}
 
           {/* <div className={styles.newClassButtonContainer}>
             <button
