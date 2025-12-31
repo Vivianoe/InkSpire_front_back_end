@@ -28,7 +28,6 @@ export function CourseCard({ course, onClick }: CourseCardProps) {
       <div className={styles.classCardHeader}>
         <div>
           <h2 className={styles.courseName}>{course.title}</h2>
-          <p className={styles.courseCode}>{course.perusallCourseId}</p>
         </div>
         {course.classProfileId ? (
           <span className={`${styles.statusBadge} ${styles.statusCreated}`}>
@@ -51,7 +50,7 @@ export function CourseCard({ course, onClick }: CourseCardProps) {
                   month: 'short',
                   day: 'numeric',
                 })
-              : '—'}
+              : 'N/A'}
           </span>
         </div>
       </div>

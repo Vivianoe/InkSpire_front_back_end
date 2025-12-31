@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { Checkbox, Field, Label } from '@headlessui/react'
@@ -25,7 +25,23 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   const [showApiToken, setShowApiToken] = useState(false)
   const [courses, setCourses] = useState<PerusallCourse[]>([])
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([])
+  const [importedCourseIds, setImportedCourseIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Reset modal to initial state when closed
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset to initial step
+      setStep('set-credentials')
+      // Clear error state
+      setError(null)
+      // Clear temporary data
+      setCourses([])
+      setSelectedCourseIds([])
+      setImportedCourseIds([])
+      // Note: We keep institutionId and apiToken in case user reopens for settings
+    }
+  }, [isOpen])
 
   // Helper function to get authorization headers
   const getAuthHeaders = async () => {
@@ -76,6 +92,39 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
 
       const coursesData = await coursesResponse.json()
       setCourses(coursesData.courses || [])
+
+      // Fetch user's existing courses to identify which Perusall courses are already imported
+      try {
+        // Step 1: Get internal user ID from /api/users/me
+        const userResponse = await fetch('/api/users/me', { headers })
+        if (!userResponse.ok) {
+          console.error('Failed to fetch user info')
+          // Continue to course selection even if this fails
+        } else {
+          const userData = await userResponse.json()
+
+          // Step 2: Use internal ID to fetch courses
+          const userCoursesResponse = await fetch(`/api/courses/instructor/${userData.id}`, {
+            method: 'GET',
+            headers
+          })
+
+          if (userCoursesResponse.ok) {
+            const userCoursesData = await userCoursesResponse.json()
+            // Extract Perusall course IDs from courses that have been imported
+            const imported = userCoursesData.courses
+              .filter((c: any) => c.perusall_course_id)
+              .map((c: any) => c.perusall_course_id)
+            setImportedCourseIds(imported)
+            // Pre-select already imported courses
+            setSelectedCourseIds(imported)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch user courses:', err)
+        // Continue to course selection even if this fails
+      }
+
       setStep('select-courses')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -84,6 +133,9 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   }
 
   const handleCourseSelection = (courseId: string) => {
+    // Don't allow toggling imported courses
+    if (importedCourseIds.includes(courseId)) return
+
     setSelectedCourseIds(prev =>
       prev.includes(courseId)
         ? prev.filter(id => id !== courseId)
@@ -92,7 +144,10 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   }
 
   const handleImportCourses = async () => {
-    if (selectedCourseIds.length === 0) {
+    // Filter out already imported courses
+    const newCoursesToImport = selectedCourseIds.filter(id => !importedCourseIds.includes(id))
+
+    if (newCoursesToImport.length === 0) {
       setError('Please select at least one course to import')
       return
     }
@@ -107,7 +162,7 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       const response = await fetch('/api/perusall/import-courses', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ course_ids: selectedCourseIds })
+        body: JSON.stringify({ course_ids: newCoursesToImport })
       })
 
       if (!response.ok) {
@@ -116,10 +171,10 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       }
 
       setStep('complete-integration')
-      // Auto-close after 2 seconds and trigger dashboard refresh
+      // Auto-close after 1 second and trigger dashboard refresh
       setTimeout(() => {
         onClose()
-      }, 2000)
+      }, 1000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setStep('select-courses')
@@ -236,23 +291,31 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
                   const courseId = course._id || ''
                   const courseName = course.name || 'Unnamed Course'
                   const isSelected = selectedCourseIds.includes(courseId)
-                  
+                  const isImported = importedCourseIds.includes(courseId)
+
                   return (
                   <Field
                       key={courseId}
-                      className="flex items-center p-3 gap-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
-                      onClick={() => handleCourseSelection(courseId)}
+                      className={`flex items-center p-3 gap-3 border border-gray-200 rounded-md ${
+                        isImported
+                          ? 'bg-gray-50 opacity-60 cursor-not-allowed'
+                          : 'hover:bg-gray-50 cursor-pointer'
+                      }`}
+                      onClick={() => !isImported && handleCourseSelection(courseId)}
                   >
                     <Checkbox
                       checked={isSelected}
                       onChange={() => handleCourseSelection(courseId)}
-                      className="group shrink-0 block h-4 w-4 rounded border border-gray-300 bg-white data-[checked]:bg-blue-600 data-[checked]:border-blue-600"
+                      disabled={isImported}
+                      className="group shrink-0 block h-4 w-4 rounded border border-gray-300 bg-white data-[checked]:bg-blue-600 data-[checked]:border-blue-600 data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
                     >
                       <svg className="stroke-white opacity-0 group-data-[checked]:opacity-100" viewBox="0 0 14 14" fill="none">
                         <path d="M3 8L6 11L11 3.5" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </Checkbox>
-                    <Label className="text-gray-900 cursor-pointer">{courseName}</Label>
+                    <Label className={`text-gray-900 ${isImported ? 'cursor-not-allowed' : 'cursor-pointer'} flex-1`}>
+                      {courseName}
+                    </Label>
                   </Field>
                   )
                 })}
@@ -265,21 +328,28 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
               </div>
             )}
 
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={() => setStep('set-credentials')}
-                className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleImportCourses}
-                disabled={selectedCourseIds.length === 0}
-                className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                Import {selectedCourseIds.length} Course(s)
-              </button>
-            </div>
+            {(() => {
+              // Calculate courses to actually import (exclude already imported)
+              const newCoursesToImport = selectedCourseIds.filter(id => !importedCourseIds.includes(id))
+
+              return (
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => setStep('set-credentials')}
+                    className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleImportCourses}
+                    disabled={newCoursesToImport.length === 0}
+                    className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Import {newCoursesToImport.length} Course(s)
+                  </button>
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -287,7 +357,9 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
         {step === 'import-courses' && (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Importing {selectedCourseIds.length} course(s)...</p>
+            <p className="text-gray-600">
+              Importing {selectedCourseIds.filter(id => !importedCourseIds.includes(id)).length} course(s)...
+            </p>
           </div>
         )}
 
