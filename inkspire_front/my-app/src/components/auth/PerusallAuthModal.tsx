@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
+import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { Checkbox, Field, Label } from '@headlessui/react'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -20,6 +22,7 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   const [step, setStep] = useState<Step>('set-credentials')
   const [institutionId, setInstitutionId] = useState('')
   const [apiToken, setApiToken] = useState('')
+  const [showApiToken, setShowApiToken] = useState(false)
   const [courses, setCourses] = useState<PerusallCourse[]>([])
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -169,15 +172,28 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
               <label htmlFor="apiToken" className="block text-sm font-medium text-gray-700">
                 API Token
               </label>
-              <input
-                type="password"
-                id="apiToken"
-                value={apiToken}
-                onChange={(e) => setApiToken(e.target.value)}
-                required
-                className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Your Perusall API Token"
-              />
+              <div className="relative mt-1">
+                <input
+                  type={showApiToken ? "text" : "password"}
+                  id="apiToken"
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  required
+                  className="block w-full px-3 py-2 pr-10 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Your Perusall API Token"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiToken(!showApiToken)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                >
+                  {showApiToken ? (
+                    <EyeSlashIcon className="h-5 w-5" />
+                  ) : (
+                    <EyeIcon className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -219,19 +235,25 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
                 {courses.map((course) => {
                   const courseId = course._id || ''
                   const courseName = course.name || 'Unnamed Course'
+                  const isSelected = selectedCourseIds.includes(courseId)
+                  
                   return (
-                  <label
+                  <Field
                       key={courseId}
-                    className="flex items-center p-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
+                      className="flex items-center p-3 gap-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
+                      onClick={() => handleCourseSelection(courseId)}
                   >
-                    <input
-                      type="checkbox"
-                        checked={selectedCourseIds.includes(courseId)}
-                        onChange={() => handleCourseSelection(courseId)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                      <span className="ml-3 text-gray-900">{courseName}</span>
-                  </label>
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => handleCourseSelection(courseId)}
+                      className="group shrink-0 block h-4 w-4 rounded border border-gray-300 bg-white data-[checked]:bg-blue-600 data-[checked]:border-blue-600"
+                    >
+                      <svg className="stroke-white opacity-0 group-data-[checked]:opacity-100" viewBox="0 0 14 14" fill="none">
+                        <path d="M3 8L6 11L11 3.5" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </Checkbox>
+                    <Label className="text-gray-900 cursor-pointer">{courseName}</Label>
+                  </Field>
                   )
                 })}
               </div>
