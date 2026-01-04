@@ -270,7 +270,7 @@ class ReadingChunk(Base):
 class Session(Base):
     """
     sessions table
-    Stores session information for courses
+    Stores session identity information for courses
     """
     __tablename__ = "sessions"
 
@@ -278,14 +278,21 @@ class Session(Base):
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
     week_number = Column(Integer, nullable=False)  # Week number (1, 2, 3...)
     title = Column(Text, nullable=True)  # Session title (optional)
-    session_info_json = Column(JSONB, nullable=True)  # This week's teaching information (user filled)
-    assignment_info_json = Column(JSONB, nullable=True)  # This week's assignment info
-    assignment_goals_json = Column(JSONB, nullable=True)  # Assignment/task goals
+    current_version_id = Column(UUID(as_uuid=True), ForeignKey("session_versions.id"), nullable=True, index=True)  # Current active version
+    status = Column(String(50), nullable=False, default="draft")  # draft, active, archived, etc.
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     course = relationship("Course", foreign_keys=[course_id])
+    current_version = relationship("SessionVersion", foreign_keys=[current_version_id], post_update=True)
+    versions = relationship(
+        "SessionVersion",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="SessionVersion.version_number",
+        foreign_keys="SessionVersion.session_id"
+    )
     session_readings = relationship(
         "SessionReading",
         back_populates="session",
@@ -294,7 +301,7 @@ class Session(Base):
     )
 
     def __repr__(self):
-        return f"<Session(id={self.id}, course_id={self.course_id}, week_number={self.week_number})>"
+        return f"<Session(id={self.id}, course_id={self.course_id}, week_number={self.week_number}, status={self.status})>"
 
 
 class SessionReading(Base):
@@ -319,31 +326,27 @@ class SessionReading(Base):
         return f"<SessionReading(id={self.id}, session_id={self.session_id}, reading_id={self.reading_id})>"
 
 
-class SessionItem(Base):
+class SessionVersion(Base):
     """
-    session_items table
-    Stores independent content for each reading within a session
+    session_versions table
+    Stores immutable version snapshots of session data
     """
-    __tablename__ = "session_items"
+    __tablename__ = "session_versions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False, index=True)
-    reading_id = Column(UUID(as_uuid=True), ForeignKey("readings.id"), nullable=False, index=True)
-    instructor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)  # Version number (1, 2, 3...)
     session_info_json = Column(JSONB, nullable=True)  # This week's teaching information (user filled)
-    assignment_info_json = Column(JSONB, nullable=True)  # Assignment info
+    assignment_info_json = Column(JSONB, nullable=True)  # This week's assignment info
     assignment_goals_json = Column(JSONB, nullable=True)  # Assignment/task goals
-    version = Column(Integer, nullable=False, default=1)  # Version number for each Save
+    reading_ids = Column(JSONB, nullable=True)  # Array of reading IDs for this version
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    session = relationship("Session", foreign_keys=[session_id])
-    reading = relationship("Reading", foreign_keys=[reading_id])
-    instructor = relationship("User", foreign_keys=[instructor_id])
+    session = relationship("Session", back_populates="versions", foreign_keys=[session_id])
 
     def __repr__(self):
-        return f"<SessionItem(id={self.id}, session_id={self.session_id}, reading_id={self.reading_id}, version={self.version})>"
+        return f"<SessionVersion(id={self.id}, session_id={self.session_id}, version_number={self.version_number})>"
 
 
 class AnnotationHighlightCoords(Base):

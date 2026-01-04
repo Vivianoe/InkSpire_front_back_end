@@ -44,8 +44,10 @@ def normalize_name(name: str) -> str:
     return normalized
 
 
-@router.post("/perusall/annotations", response_model=PerusallAnnotationResponse)
+@router.post("/courses/{course_id}/readings/{reading_id}/perusall/annotations", response_model=PerusallAnnotationResponse)
 def post_annotations_to_perusall(
+    course_id: str,
+    reading_id: str,
     req: PerusallAnnotationRequest,
     db: Session = Depends(get_db)
 ):
@@ -56,6 +58,38 @@ def post_annotations_to_perusall(
     Each annotation corresponds to one POST request to:
     POST /courses/{courseId}/assignments/{assignmentId}/annotations
     """
+    # Validate course_id and reading_id from path
+    try:
+        course_uuid = uuid.UUID(course_id)
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id or reading_id format: course_id={course_id}, reading_id={reading_id}"
+        )
+    
+    # Verify course and reading exist
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course {course_id} not found"
+        )
+    
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reading {reading_id} not found"
+        )
+    
+    # Verify reading belongs to course
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
     # Check for required environment variables (only API credentials, not IDs)
     missing_vars = []
     if not X_INSTITUTION:
@@ -78,7 +112,7 @@ def post_annotations_to_perusall(
 
     # If annotation_ids provided, fetch highlight_coords from database
     annotations_to_post = []
-    first_annotation = None  # Store first annotation to get course_id and reading_id
+    first_annotation = None  # Store first annotation to verify it belongs to the course/reading
     if req.annotation_ids:
         print(f"[post_annotations_to_perusall] Fetching highlight_coords for {len(req.annotation_ids)} annotation(s)")
         for annotation_id_str in req.annotation_ids:
@@ -91,6 +125,15 @@ def post_annotations_to_perusall(
                 
                 if not annotation:
                     print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} not found")
+                    continue
+                
+                # Verify annotation belongs to the specified course and reading
+                if annotation.course_id != course_uuid:
+                    print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} does not belong to course {course_id}")
+                    continue
+                
+                if annotation.reading_id != reading_uuid:
+                    print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} does not belong to reading {reading_id}")
                     continue
                 
                 # Store first annotation for Perusall mapping lookup
@@ -149,317 +192,294 @@ def post_annotations_to_perusall(
             detail="No annotations found to post. Please ensure annotation_ids exist and have highlight_coords, or provide annotations directly."
         )
     
-    # Get Perusall mapping from database based on course_id and reading_id
-    if first_annotation:
-        # Get course_id from session, then get course and reading
-        from app.services.session_service import get_session_by_id
+    # Get Perusall mapping from database based on course_id and reading_id from path
+    # First, try to get from database mapping
+    perusall_mapping = db.query(PerusallMapping).filter(
+        PerusallMapping.course_id == course_uuid,
+        PerusallMapping.reading_id == reading_uuid
+    ).first()
+    
+    if perusall_mapping:
+        # Use stored mapping
+        perusall_course_id = perusall_mapping.perusall_course_id
+        perusall_assignment_id = perusall_mapping.perusall_assignment_id
+        perusall_document_id = perusall_mapping.perusall_document_id
+        print(f"[post_annotations_to_perusall] Using stored mapping: course_id={perusall_course_id}, assignment_id={perusall_assignment_id}, document_id={perusall_document_id}")
+    else:
+        # Auto-fetch from Perusall API based on course name and reading name
+        print(f"[post_annotations_to_perusall] No stored mapping found, fetching from Perusall API for course '{course.title}' and reading '{reading.title}'")
         
-        session = get_session_by_id(db, first_annotation.session_id)
-        if not session:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session {first_annotation.session_id} not found"
-            )
-        
-        course = get_course_by_id(db, session.course_id)
-        if not course:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Course {session.course_id} not found"
-            )
-        
-        reading = get_reading_by_id(db, first_annotation.reading_id)
-        if not reading:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Reading {first_annotation.reading_id} not found"
-            )
-        
-        # First, try to get from database mapping
-        perusall_mapping = db.query(PerusallMapping).filter(
-            PerusallMapping.course_id == course.id,
-            PerusallMapping.reading_id == reading.id
-        ).first()
-        
-        if perusall_mapping:
-            # Use stored mapping
-            perusall_course_id = perusall_mapping.perusall_course_id
-            perusall_assignment_id = perusall_mapping.perusall_assignment_id
-            perusall_document_id = perusall_mapping.perusall_document_id
-            print(f"[post_annotations_to_perusall] Using stored mapping: course_id={perusall_course_id}, assignment_id={perusall_assignment_id}, document_id={perusall_document_id}")
-        else:
-            # Auto-fetch from Perusall API based on course name and reading name
-            print(f"[post_annotations_to_perusall] No stored mapping found, fetching from Perusall API for course '{course.title}' and reading '{reading.title}'")
+        try:
+            # Step 1: Get Perusall courses list
+            headers = {
+                "X-Institution": X_INSTITUTION,
+                "X-API-Token": X_API_TOKEN,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
             
+            courses_url = f"{PERUSALL_BASE_URL}/courses"
+            print(f"[post_annotations_to_perusall] Fetching courses from: {courses_url}")
+            courses_response = requests.get(courses_url, headers=headers, timeout=30)
+            
+            print(f"[post_annotations_to_perusall] Courses API response status: {courses_response.status_code}")
+            print(f"[post_annotations_to_perusall] Courses API response headers: {dict(courses_response.headers)}")
+            
+            courses_response.raise_for_status()
+            
+            # Check if response is valid JSON
             try:
-                # Step 1: Get Perusall courses list
-                headers = {
-                    "X-Institution": X_INSTITUTION,
-                    "X-API-Token": X_API_TOKEN,
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                }
-                
-                courses_url = f"{PERUSALL_BASE_URL}/courses"
-                print(f"[post_annotations_to_perusall] Fetching courses from: {courses_url}")
-                courses_response = requests.get(courses_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Courses API response status: {courses_response.status_code}")
-                print(f"[post_annotations_to_perusall] Courses API response headers: {dict(courses_response.headers)}")
-                
-                courses_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_courses = courses_response.json()
-                except ValueError as json_error:
-                    response_text = courses_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall courses API returned invalid JSON. Status: {courses_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_courses, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall courses API: {type(perusall_courses)}. Expected list, got {type(perusall_courses)}"
-                    )
-                
-                # Step 2: Match course by name
-                matched_course = None
-                course_title_lower = course.title.lower().strip()
-                course_title_normalized = normalize_name(course.title)
-                
-                print(f"[post_annotations_to_perusall] Looking for course: '{course.title}' (normalized: '{course_title_normalized}')")
-                
-                # First try exact match (case-insensitive, trimmed)
+                perusall_courses = courses_response.json()
+            except ValueError as json_error:
+                response_text = courses_response.text[:500]  # First 500 chars
+                print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall courses API returned invalid JSON. Status: {courses_response.status_code}. Response: {response_text}"
+                )
+            
+            if not isinstance(perusall_courses, list):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unexpected response format from Perusall courses API: {type(perusall_courses)}. Expected list, got {type(perusall_courses)}"
+                )
+            
+            # Step 2: Match course by name
+            matched_course = None
+            course_title_lower = course.title.lower().strip()
+            course_title_normalized = normalize_name(course.title)
+            
+            print(f"[post_annotations_to_perusall] Looking for course: '{course.title}' (normalized: '{course_title_normalized}')")
+            
+            # First try exact match (case-insensitive, trimmed)
+            for pc in perusall_courses:
+                if isinstance(pc, dict):
+                    perusall_course_name = pc.get("name") or pc.get("title") or ""
+                    if perusall_course_name.lower().strip() == course_title_lower:
+                        matched_course = pc
+                        print(f"[post_annotations_to_perusall] Exact course match found: '{perusall_course_name}'")
+                        break
+            
+            # If no exact match, try normalized match (ignoring spaces)
+            if not matched_course:
                 for pc in perusall_courses:
                     if isinstance(pc, dict):
                         perusall_course_name = pc.get("name") or pc.get("title") or ""
-                        if perusall_course_name.lower().strip() == course_title_lower:
+                        perusall_normalized = normalize_name(perusall_course_name)
+                        if perusall_normalized == course_title_normalized:
                             matched_course = pc
-                            print(f"[post_annotations_to_perusall] Exact course match found: '{perusall_course_name}'")
+                            print(f"[post_annotations_to_perusall] Normalized course match found: '{perusall_course_name}' (normalized: '{perusall_normalized}')")
                             break
-                
-                # If no exact match, try normalized match (ignoring spaces)
-                if not matched_course:
-                    for pc in perusall_courses:
-                        if isinstance(pc, dict):
-                            perusall_course_name = pc.get("name") or pc.get("title") or ""
-                            perusall_normalized = normalize_name(perusall_course_name)
-                            if perusall_normalized == course_title_normalized:
-                                matched_course = pc
-                                print(f"[post_annotations_to_perusall] Normalized course match found: '{perusall_course_name}' (normalized: '{perusall_normalized}')")
-                                break
-                
-                if not matched_course:
-                    available_courses = [c.get("name", c.get("title", "Unknown")) for c in perusall_courses[:5]]
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Perusall course not found matching '{course.title}' (normalized: '{course_title_normalized}'). Available courses: {', '.join(available_courses) or 'None'}"
-                    )
-                
-                # get perusall course id from matched course
-                perusall_course_id = matched_course.get("_id") or matched_course.get("id")
-                if not perusall_course_id:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall course matched but no _id or id field found: {matched_course}"
-                    )
-                
-                print(f"[post_annotations_to_perusall] Matched Perusall course: {matched_course.get('name')} -> {perusall_course_id}")
-                
-                # Step 3: Get course library (readings) for this course
-                library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
-                print(f"[post_annotations_to_perusall] Fetching library from: {library_url}")
-                library_response = requests.get(library_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Library API response status: {library_response.status_code}")
-                library_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_readings = library_response.json()
-                except ValueError as json_error:
-                    response_text = library_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall library API returned invalid JSON. Status: {library_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_readings, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall library API: {type(perusall_readings)}. Expected list, got {type(perusall_readings)}"
-                    )
-                
-                # Step 4: Match reading by name to get perusall reading_id
-                matched_reading = None
-                reading_title_normalized = normalize_name(reading.title)
-                
-                print(f"[post_annotations_to_perusall] Looking for reading: '{reading.title}' (normalized: '{reading_title_normalized}')")
-                
-                # First try exact match (case-insensitive, trimmed)
-                reading_title_lower = reading.title.lower().strip()
+            
+            if not matched_course:
+                available_courses = [c.get("name", c.get("title", "Unknown")) for c in perusall_courses[:5]]
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Perusall course not found matching '{course.title}' (normalized: '{course_title_normalized}'). Available courses: {', '.join(available_courses) or 'None'}"
+                )
+            
+            # get perusall course id from matched course
+            perusall_course_id = matched_course.get("_id") or matched_course.get("id")
+            if not perusall_course_id:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall course matched but no _id or id field found: {matched_course}"
+                )
+            
+            print(f"[post_annotations_to_perusall] Matched Perusall course: {matched_course.get('name')} -> {perusall_course_id}")
+            
+            # Step 3: Get course library (readings) for this course
+            library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
+            print(f"[post_annotations_to_perusall] Fetching library from: {library_url}")
+            library_response = requests.get(library_url, headers=headers, timeout=30)
+            
+            print(f"[post_annotations_to_perusall] Library API response status: {library_response.status_code}")
+            library_response.raise_for_status()
+            
+            # Check if response is valid JSON
+            try:
+                perusall_readings = library_response.json()
+            except ValueError as json_error:
+                response_text = library_response.text[:500]  # First 500 chars
+                print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall library API returned invalid JSON. Status: {library_response.status_code}. Response: {response_text}"
+                )
+            
+            if not isinstance(perusall_readings, list):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unexpected response format from Perusall library API: {type(perusall_readings)}. Expected list, got {type(perusall_readings)}"
+                )
+            
+            # Step 4: Match reading by name to get perusall reading_id
+            matched_reading = None
+            reading_title_normalized = normalize_name(reading.title)
+            
+            print(f"[post_annotations_to_perusall] Looking for reading: '{reading.title}' (normalized: '{reading_title_normalized}')")
+            
+            # First try exact match (case-insensitive, trimmed)
+            reading_title_lower = reading.title.lower().strip()
+            for pr in perusall_readings:
+                if isinstance(pr, dict):
+                    perusall_reading_name = pr.get("name") or pr.get("title") or ""
+                    if perusall_reading_name.lower().strip() == reading_title_lower:
+                        matched_reading = pr
+                        print(f"[post_annotations_to_perusall] Exact match found: '{perusall_reading_name}'")
+                        break
+            
+            # If no exact match, try normalized match (ignoring spaces)
+            if not matched_reading:
                 for pr in perusall_readings:
                     if isinstance(pr, dict):
                         perusall_reading_name = pr.get("name") or pr.get("title") or ""
-                        if perusall_reading_name.lower().strip() == reading_title_lower:
+                        perusall_normalized = normalize_name(perusall_reading_name)
+                        if perusall_normalized == reading_title_normalized:
                             matched_reading = pr
-                            print(f"[post_annotations_to_perusall] Exact match found: '{perusall_reading_name}'")
+                            print(f"[post_annotations_to_perusall] Normalized match found: '{perusall_reading_name}' (normalized: '{perusall_normalized}')")
                             break
-                
-                # If no exact match, try normalized match (ignoring spaces)
-                if not matched_reading:
-                    for pr in perusall_readings:
-                        if isinstance(pr, dict):
-                            perusall_reading_name = pr.get("name") or pr.get("title") or ""
-                            perusall_normalized = normalize_name(perusall_reading_name)
-                            if perusall_normalized == reading_title_normalized:
-                                matched_reading = pr
-                                print(f"[post_annotations_to_perusall] Normalized match found: '{perusall_reading_name}' (normalized: '{perusall_normalized}')")
-                                break
-                
-                if not matched_reading:
-                    available_readings = [r.get("name", r.get("title", "Unknown")) for r in perusall_readings[:10]]
-                    available_normalized = [normalize_name(r.get("name", r.get("title", ""))) for r in perusall_readings[:10]]
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Perusall reading not found matching '{reading.title}' (normalized: '{reading_title_normalized}') in course '{course.title}'. Available readings: {', '.join(available_readings) or 'None'}"
-                    )
-                
-                perusall_reading_id = matched_reading.get("_id") or matched_reading.get("id")
-                if not perusall_reading_id:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall reading matched but no _id or id field found: {matched_reading}"
-                    )
-                
-                print(f"[post_annotations_to_perusall] Matched Perusall reading: {matched_reading.get('name')} -> {perusall_reading_id}")
-                
-                # Step 5: Get assignments for this course
-                assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
-                print(f"[post_annotations_to_perusall] Fetching assignments from: {assignments_url}")
-                assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Assignments API response status: {assignments_response.status_code}")
-                assignments_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_assignments = assignments_response.json()
-                except ValueError as json_error:
-                    response_text = assignments_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall assignments API returned invalid JSON. Status: {assignments_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_assignments, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall assignments API: {type(perusall_assignments)}. Expected list, got {type(perusall_assignments)}"
-                    )
-                
-                # Step 6: Find assignment that contains this reading_id
-                # Assignments may have a 'documents' array or 'document_id' field
-                matched_assignment = None
-                for pa in perusall_assignments:
-                    if isinstance(pa, dict):
-                        # Check if assignment has documents array containing the reading_id
-                        assignment_documents = pa.get("documents", [])
-                        if isinstance(assignment_documents, list):
-                            for doc in assignment_documents:
-                                doc_id = doc.get("_id") or doc.get("id") if isinstance(doc, dict) else doc
-                                if str(doc_id) == str(perusall_reading_id):
-                                    matched_assignment = pa
-                                    break
-                        
-                        # Also check direct document_id field
-                        if not matched_assignment:
-                            assignment_doc_id = pa.get("document_id") or pa.get("documentId")
-                            if assignment_doc_id and str(assignment_doc_id) == str(perusall_reading_id):
+            
+            if not matched_reading:
+                available_readings = [r.get("name", r.get("title", "Unknown")) for r in perusall_readings[:10]]
+                available_normalized = [normalize_name(r.get("name", r.get("title", ""))) for r in perusall_readings[:10]]
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Perusall reading not found matching '{reading.title}' (normalized: '{reading_title_normalized}') in course '{course.title}'. Available readings: {', '.join(available_readings) or 'None'}"
+                )
+            
+            perusall_reading_id = matched_reading.get("_id") or matched_reading.get("id")
+            if not perusall_reading_id:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall reading matched but no _id or id field found: {matched_reading}"
+                )
+            
+            print(f"[post_annotations_to_perusall] Matched Perusall reading: {matched_reading.get('name')} -> {perusall_reading_id}")
+            
+            # Step 5: Get assignments for this course
+            assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
+            print(f"[post_annotations_to_perusall] Fetching assignments from: {assignments_url}")
+            assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
+            
+            print(f"[post_annotations_to_perusall] Assignments API response status: {assignments_response.status_code}")
+            assignments_response.raise_for_status()
+            
+            # Check if response is valid JSON
+            try:
+                perusall_assignments = assignments_response.json()
+            except ValueError as json_error:
+                response_text = assignments_response.text[:500]  # First 500 chars
+                print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall assignments API returned invalid JSON. Status: {assignments_response.status_code}. Response: {response_text}"
+                )
+            
+            if not isinstance(perusall_assignments, list):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unexpected response format from Perusall assignments API: {type(perusall_assignments)}. Expected list, got {type(perusall_assignments)}"
+                )
+            
+            # Step 6: Find assignment that contains this reading_id
+            # Assignments may have a 'documents' array or 'document_id' field
+            matched_assignment = None
+            for pa in perusall_assignments:
+                if isinstance(pa, dict):
+                    # Check if assignment has documents array containing the reading_id
+                    assignment_documents = pa.get("documents", [])
+                    if isinstance(assignment_documents, list):
+                        for doc in assignment_documents:
+                            doc_id = doc.get("_id") or doc.get("id") if isinstance(doc, dict) else doc
+                            if str(doc_id) == str(perusall_reading_id):
                                 matched_assignment = pa
                                 break
-                        
-                        if matched_assignment:
+                    
+                    # Also check direct document_id field
+                    if not matched_assignment:
+                        assignment_doc_id = pa.get("document_id") or pa.get("documentId")
+                        if assignment_doc_id and str(assignment_doc_id) == str(perusall_reading_id):
+                            matched_assignment = pa
                             break
-                
-                if not matched_assignment:
-                    available_assignments = [a.get("name", a.get("title", "Unknown")) for a in perusall_assignments[:5]]
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Perusall assignment not found containing reading_id '{perusall_reading_id}' (reading: '{reading.title}') in course '{course.title}'. Available assignments: {', '.join(available_assignments) or 'None'}"
-                    )
-                
-                perusall_assignment_id = matched_assignment.get("_id") or matched_assignment.get("id")
-                if not perusall_assignment_id:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall assignment matched but no _id or id field found: {matched_assignment}"
-                    )
-                
-                print(f"[post_annotations_to_perusall] Matched Perusall assignment: {matched_assignment.get('name')} -> {perusall_assignment_id} (contains reading_id: {perusall_reading_id})")
-                
-                # Step 7: Use reading_id as document_id
-                # In Perusall, the reading_id from the library is the same as document_id
-                # We don't need to call the documents API - we can use the reading_id directly
-                perusall_document_id = perusall_reading_id
-                print(f"[post_annotations_to_perusall] Using reading_id as document_id: {perusall_document_id} (from reading: '{matched_reading.get('name')}')")
-                
-                # Step 7: Save mapping to database for future use
-                new_mapping = PerusallMapping(
-                    course_id=course.id,
-                    reading_id=reading.id,
-                    perusall_course_id=str(perusall_course_id),
-                    perusall_assignment_id=str(perusall_assignment_id),
-                    perusall_document_id=str(perusall_document_id),
+                    
+                    if matched_assignment:
+                        break
+            
+            if not matched_assignment:
+                available_assignments = [a.get("name", a.get("title", "Unknown")) for a in perusall_assignments[:5]]
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Perusall assignment not found containing reading_id '{perusall_reading_id}' (reading: '{reading.title}') in course '{course.title}'. Available assignments: {', '.join(available_assignments) or 'None'}"
                 )
-                db.add(new_mapping)
-                db.commit()
-                db.refresh(new_mapping)
-                print(f"[post_annotations_to_perusall] Saved Perusall mapping to database for future use")
-                
-            except requests.exceptions.RequestException as e:
-                error_msg = str(e)
-                response_text = None
-                status_code = None
-                if hasattr(e, "response") and e.response is not None:
-                    try:
-                        status_code = e.response.status_code
-                        response_text = e.response.text[:500]  # First 500 chars
-                        content_type = e.response.headers.get('Content-Type', 'unknown')
-                        print(f"[post_annotations_to_perusall] RequestException - Status: {status_code}, Content-Type: {content_type}")
-                        print(f"[post_annotations_to_perusall] Response text (first 500 chars): {response_text}")
-                        error_msg = f"HTTP {status_code}: {error_msg}. Response: {response_text}"
-                    except Exception as parse_error:
-                        print(f"[post_annotations_to_perusall] Failed to parse error response: {parse_error}")
+            
+            perusall_assignment_id = matched_assignment.get("_id") or matched_assignment.get("id")
+            if not perusall_assignment_id:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Failed to fetch Perusall mapping from API: {error_msg}"
+                    detail=f"Perusall assignment matched but no _id or id field found: {matched_assignment}"
                 )
-            except ValueError as json_error:
-                # JSON parsing error
-                print(f"[post_annotations_to_perusall] JSON parsing error: {json_error}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to parse Perusall API response as JSON: {str(json_error)}. This usually means the API returned HTML or an empty response instead of JSON."
-                )
-            except HTTPException:
-                raise
-            except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                print(f"[post_annotations_to_perusall] Error fetching Perusall mapping: {e}")
-                print(f"[post_annotations_to_perusall] Traceback: {error_trace}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to get Perusall mapping: {str(e)}"
-                )
-    else:
+            
+            print(f"[post_annotations_to_perusall] Matched Perusall assignment: {matched_assignment.get('name')} -> {perusall_assignment_id} (contains reading_id: {perusall_reading_id})")
+            
+            # Step 7: Use reading_id as document_id
+            # In Perusall, the reading_id from the library is the same as document_id
+            # We don't need to call the documents API - we can use the reading_id directly
+            perusall_document_id = perusall_reading_id
+            print(f"[post_annotations_to_perusall] Using reading_id as document_id: {perusall_document_id} (from reading: '{matched_reading.get('name')}')")
+            
+            # Step 7: Save mapping to database for future use
+            new_mapping = PerusallMapping(
+                course_id=course.id,
+                reading_id=reading.id,
+                perusall_course_id=str(perusall_course_id),
+                perusall_assignment_id=str(perusall_assignment_id),
+                perusall_document_id=str(perusall_document_id),
+            )
+            db.add(new_mapping)
+            db.commit()
+            db.refresh(new_mapping)
+            print(f"[post_annotations_to_perusall] Saved Perusall mapping to database for future use")
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            response_text = None
+            status_code = None
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    status_code = e.response.status_code
+                    response_text = e.response.text[:500]  # First 500 chars
+                    content_type = e.response.headers.get('Content-Type', 'unknown')
+                    print(f"[post_annotations_to_perusall] RequestException - Status: {status_code}, Content-Type: {content_type}")
+                    print(f"[post_annotations_to_perusall] Response text (first 500 chars): {response_text}")
+                    error_msg = f"HTTP {status_code}: {error_msg}. Response: {response_text}"
+                except Exception as parse_error:
+                    print(f"[post_annotations_to_perusall] Failed to parse error response: {parse_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch Perusall mapping from API: {error_msg}"
+            )
+        except ValueError as json_error:
+            # JSON parsing error
+            print(f"[post_annotations_to_perusall] JSON parsing error: {json_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to parse Perusall API response as JSON: {str(json_error)}. This usually means the API returned HTML or an empty response instead of JSON."
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"[post_annotations_to_perusall] Error fetching Perusall mapping: {e}")
+            print(f"[post_annotations_to_perusall] Traceback: {error_trace}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get Perusall mapping: {str(e)}"
+            )
+    
+    # If annotations were provided directly (not via annotation_ids), use environment variables
+    if not req.annotation_ids and req.annotations:
         # Fallback to environment variables if annotations provided directly
         perusall_course_id = COURSE_ID
         perusall_assignment_id = ASSIGNMENT_ID
@@ -597,8 +617,10 @@ def post_annotations_to_perusall(
 # ======================================================
 
 
-@router.post("/perusall/mapping", response_model=PerusallMappingResponse)
+@router.post("/courses/{course_id}/readings/{reading_id}/perusall/mapping", response_model=PerusallMappingResponse)
 def create_or_update_perusall_mapping(
+    course_id: str,
+    reading_id: str,
     req: PerusallMappingRequest,
     db: Session = Depends(get_db)
 ):
@@ -606,34 +628,55 @@ def create_or_update_perusall_mapping(
     Create or update Perusall mapping for a course-reading pair.
     Maps course_id and reading_id to Perusall course_id, assignment_id, and document_id.
     """
+    # Validate course_id and reading_id from path
     try:
-        course_id = uuid.UUID(req.course_id)
-        reading_id = uuid.UUID(req.reading_id)
-    except ValueError as e:
+        course_uuid = uuid.UUID(course_id)
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid UUID format: {str(e)}"
+            detail=f"Invalid course_id or reading_id format: course_id={course_id}, reading_id={reading_id}"
+        )
+    
+    # Verify payload course_id and reading_id match path parameters
+    if req.course_id != course_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"course_id in path ({course_id}) does not match course_id in body ({req.course_id})",
+        )
+    
+    if req.reading_id != reading_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"reading_id in path ({reading_id}) does not match reading_id in body ({req.reading_id})",
         )
     
     # Verify course and reading exist
-    course = get_course_by_id(db, course_id)
+    course = get_course_by_id(db, course_uuid)
     if not course:
         raise HTTPException(
             status_code=404,
-            detail=f"Course {req.course_id} not found"
+            detail=f"Course {course_id} not found"
         )
     
-    reading = get_reading_by_id(db, reading_id)
+    reading = get_reading_by_id(db, reading_uuid)
     if not reading:
         raise HTTPException(
             status_code=404,
-            detail=f"Reading {req.reading_id} not found"
+            detail=f"Reading {reading_id} not found"
+        )
+    
+    # Verify reading belongs to course
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
         )
     
     # Check if mapping already exists
     existing_mapping = db.query(PerusallMapping).filter(
-        PerusallMapping.course_id == course_id,
-        PerusallMapping.reading_id == reading_id
+        PerusallMapping.course_id == course_uuid,
+        PerusallMapping.reading_id == reading_uuid
     ).first()
     
     if existing_mapping:
