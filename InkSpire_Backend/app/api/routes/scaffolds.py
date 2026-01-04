@@ -31,8 +31,11 @@ from app.services.session_service import (
     get_session_by_id,
     get_session_readings,
     add_reading_to_session,
-    get_session_item_by_session_and_reading,
-    create_session_item,
+    get_latest_session_version,
+    get_session_version_by_id,
+    create_session_version,
+    get_next_version_number,
+    set_current_version,
 )
 from app.workflows.scaffold_workflow import (
     build_workflow as build_scaffold_workflow,
@@ -352,21 +355,36 @@ def generate_scaffolds_with_session(
             detail="Failed to parse class profile JSON from database",
         )
     
-    # Load or create session_item from database (by session_id and reading_id)
-    session_item = get_session_item_by_session_and_reading(db, session_uuid, reading_uuid)
-    if not session_item:
-        # Create a new session_item if it doesn't exist
-        session_item = create_session_item(
+    # Load or get current session version
+    # Get current version from session, or create one if it doesn't exist
+    session = get_session_by_id(db, session_uuid)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_uuid} not found",
+        )
+    
+    current_version = None
+    if session.current_version_id:
+        current_version = get_session_version_by_id(db, session.current_version_id)
+    
+    # If no current version exists, create version 1
+    if not current_version:
+        # Get reading IDs for this session
+        session_readings = get_session_readings(db, session_uuid)
+        reading_ids = [str(sr.reading_id) for sr in session_readings]
+        
+        current_version = create_session_version(
             db=db,
             session_id=session_uuid,
-            reading_id=reading_uuid,
-            instructor_id=instructor_uuid,
+            version_number=1,
             session_info_json=None,
             assignment_info_json=None,
             assignment_goals_json=None,
-            version=1,
+            reading_ids=reading_ids,
         )
-        print(f"[generate_scaffolds_with_session] Created new session_item for session {session_uuid} and reading {reading_uuid}")
+        session = set_current_version(db, session_uuid, current_version.id)
+        print(f"[generate_scaffolds_with_session] Created new session version 1 for session {session_uuid}")
     
     # Load reading_chunks from database
     chunks = get_reading_chunks_by_reading_id(db, reading_uuid)
@@ -390,20 +408,21 @@ def generate_scaffolds_with_session(
         ]
     }
     
-    # Build reading_info from reading and session_item
+    # Build reading_info from reading and session version
     reading_info = {
         "assignment_id": str(reading_uuid),
         "source": reading.file_path,
         "session_id": str(session_uuid),
         "reading_id": str(reading_uuid),
     }
-    # Add session_item data if available
-    if session_item.session_info_json:
-        reading_info["session_info"] = session_item.session_info_json
-    if session_item.assignment_info_json:
-        reading_info["assignment_info"] = session_item.assignment_info_json
-    if session_item.assignment_goals_json:
-        reading_info["assignment_goals"] = session_item.assignment_goals_json
+    # Add session version data if available
+    if current_version:
+        if current_version.session_info_json:
+            reading_info["session_info"] = current_version.session_info_json
+        if current_version.assignment_info_json:
+            reading_info["assignment_info"] = current_version.assignment_info_json
+        if current_version.assignment_goals_json:
+            reading_info["assignment_goals"] = current_version.assignment_goals_json
     
     print(f"[generate_scaffolds_with_session] Loaded {len(chunks)} chunks from database for reading {reading_uuid}")
     
