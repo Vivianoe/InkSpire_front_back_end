@@ -27,6 +27,16 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([])
   const [importedCourseIds, setImportedCourseIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [closeTimeoutId, setCloseTimeoutId] = useState<NodeJS.Timeout|null>(null)
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutId) {
+        clearTimeout(closeTimeoutId)
+      }
+    }
+  }, [closeTimeoutId])
 
   // Reset modal to initial state when closed
   useEffect(() => {
@@ -171,10 +181,11 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       }
 
       setStep('complete-integration')
-      // Auto-close after 1 second and trigger dashboard refresh
-      setTimeout(() => {
+      // Auto-close after 2 second and trigger dashboard refresh
+      const timeoutId = setTimeout(() => {
         onClose()
-      }, 1000)
+      }, 2000)
+      setCloseTimeoutId(timeoutId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setStep('select-courses')

@@ -57,6 +57,7 @@ export function CourseCard({ course, onClick }: CourseCardProps) {
 
       <div className={styles.classCardActions}>
         <button
+          type="button"
           className={styles.viewButton}
           onClick={handleClick}
         >

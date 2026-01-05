@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
@@ -246,15 +246,7 @@ export default function EditClassProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
 
-  useEffect(() => {
-    if (isEdit && profileId) {
-      loadProfile();
-    } else if (!isEdit) {
-      setFormData(createDefaultFormData('new'));
-    }
-  }, [profileId, isEdit]);
-
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -291,7 +283,15 @@ export default function EditClassProfilePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profileId]);
+
+  useEffect(() => {
+    if (isEdit && profileId) {
+      loadProfile();
+    } else if (!isEdit) {
+      setFormData(createDefaultFormData('new'));
+    }
+  }, [profileId, isEdit, loadProfile]);
 
   const handleInputChange = (section: keyof ClassProfile, field: string, value: string) => {
     setFormData(prev => {
