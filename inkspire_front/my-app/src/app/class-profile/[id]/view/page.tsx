@@ -1065,7 +1065,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     
     // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
     if (urlCourseId && formData.id) {
-      router.push(`/courses/${urlCourseId}/class-profiles/${formData.id}/reading`);
+      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${urlInstructorId}`);
     } else {
       // Fallback to old structure with query params
       const params = new URLSearchParams({

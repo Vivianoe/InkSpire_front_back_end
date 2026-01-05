@@ -295,6 +295,7 @@ def generate_scaffolds_with_session(
     
     # Handle session_id from path parameter
     # If session_id is "new", create a new session; otherwise use existing session
+    # need to handle the dirtystate existing session (as handled in sessions.py)
     if session_id.lower() == "new":
         # Create a new session (default week_number = 1, title = "Reading Session")
         session = create_session(
@@ -469,6 +470,7 @@ def generate_scaffolds_with_session(
                 )
         
         # Get PDF URL from Supabase Storage
+        # For frontend to display PDF
         pdf_url = None
         if reading.file_path:
             try:
@@ -770,6 +772,87 @@ def get_scaffolds_by_session(
     
     return {
         "scaffolds": scaffolds
+    }
+
+
+@router.get("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds")
+def get_scaffolds_by_session_and_reading(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all scaffold annotations for a specific session and reading with full details (status and history)
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading ID format: {reading_id}")
+    
+    # Verify session belongs to the course
+    from app.models.models import Session
+    session = db.query(Session).filter(Session.id == session_uuid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} does not belong to course {course_id}"
+        )
+    
+    # Verify reading belongs to the course
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
+    # Get all annotations for the session
+    annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    
+    # Filter by reading_id and convert to API format with status and history
+    scaffolds = []
+    for annotation in annotations:
+        if annotation.reading_id == reading_uuid:
+            annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+            scaffolds.append(annotation_dict)
+    
+    # Get PDF URL for the reading
+    pdf_url = None
+    if reading.file_path:
+        try:
+            supabase_client = get_supabase_client()
+            bucket_name = "readings"
+            
+            # Try to get signed URL (expires in 7 days)
+            signed_url_response = supabase_client.storage.from_(bucket_name).create_signed_url(
+                reading.file_path,
+                expires_in=604800  # 7 days
+            )
+            pdf_url = signed_url_response.get('signedURL') if isinstance(signed_url_response, dict) else signed_url_response
+        except Exception as url_error:
+            print(f"[get_scaffolds_by_session_and_reading] Warning: Failed to get PDF URL: {url_error}")
+    
+    return {
+        "scaffolds": scaffolds,
+        "pdfUrl": pdf_url
     }
 
 
