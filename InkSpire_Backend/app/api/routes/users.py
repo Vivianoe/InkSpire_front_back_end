@@ -34,11 +34,9 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
 
-        # Extract access token from session
-        supabase_session = supabase_response.get("session")
-        if not supabase_session:
-            raise AuthenticationError("Registration succeeded but no session was created")
-        access_token = supabase_session.access_token
+        # Extract tokens from response
+        access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
 
         # Create user record in our database
         user = create_user_from_supabase(
@@ -49,7 +47,7 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             role=req.role or "instructor",
         )
 
-        # Return LoginResponse with access token (like login endpoint does)
+        # Return LoginResponse with both access and refresh tokens
         return LoginResponse(
             user=UserResponse(
                 id=str(user.id),
@@ -59,6 +57,7 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
                 role=user.role,
             ),
             access_token=access_token,
+            refresh_token=refresh_token,
             message="Registration successful"
         )
     except AuthenticationError as e:
@@ -73,16 +72,17 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
     try:
         # Authenticate with Supabase
         supabase_response = supabase_login(req.email, req.password)
-        
-        # Extract JWT token from response
+
+        # Extract tokens from response
         access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
         supabase_user = supabase_response["user"]
-        
+
         # Get user from our database
         user = get_user_by_supabase_id(db, uuid.UUID(supabase_user.id))
         if not user:
             raise HTTPException(status_code=404, detail="User not found in database")
-        
+
         return LoginResponse(
             user=UserResponse(
                 id=str(user.id),
@@ -92,6 +92,7 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
                 role=user.role,
             ),
             access_token=access_token,
+            refresh_token=refresh_token,
         )
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=str(e))

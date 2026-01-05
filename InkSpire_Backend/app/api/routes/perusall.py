@@ -828,10 +828,20 @@ def get_perusall_courses(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[get_perusall_courses] Error: {str(e)}")
+        error_message = str(e)
+        print(f"[get_perusall_courses] Error: {error_message}")
+
+        # Determine appropriate status code based on error type
+        if "Invalid Perusall credentials" in error_message or "access forbidden" in error_message:
+            status_code = 401
+        elif "Invalid credential format" in error_message:
+            status_code = 400
+        else:
+            status_code = 500
+
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch Perusall courses: {str(e)}"
+            status_code=status_code,
+            detail=error_message  # Pass through the detailed error from service layer
         )
 
 

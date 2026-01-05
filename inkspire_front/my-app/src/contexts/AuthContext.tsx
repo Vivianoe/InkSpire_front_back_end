@@ -89,11 +89,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const data = await response.json()
       // console.log('✅ Login successful:', data.user.email)
 
-      // Set the session in Supabase client using the access token from backend
+      // Set the session in Supabase client using tokens from backend
       // This allows the auth state listener and session management to work seamlessly
       const { error: sessionError } = await supabase.auth.setSession({
         access_token: data.access_token,
-        refresh_token: data.access_token, // Backend doesn't provide refresh token yet
+        refresh_token: data.refresh_token,
       })
 
       if (sessionError) {
@@ -126,11 +126,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const data = await response.json()
       // console.log('✅ Signup successful:', data.user.email)
 
-      // Set the session in Supabase client using the access token from backend
+      // Set the session in Supabase client using tokens from backend
       // This allows the auth state listener and session management to work seamlessly
       const { error: sessionError } = await supabase.auth.setSession({
         access_token: data.access_token,
-        refresh_token: data.access_token, // Backend doesn't provide refresh token yet
+        refresh_token: data.refresh_token,
       })
 
       if (sessionError) {

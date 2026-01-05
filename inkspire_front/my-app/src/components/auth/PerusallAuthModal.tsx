@@ -97,7 +97,19 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
 
       if (!coursesResponse.ok) {
         const data = await coursesResponse.json()
-        throw new Error(data.detail || 'Failed to fetch Perusall courses')
+        const errorDetail = data.detail || 'Failed to fetch Perusall courses'
+
+        // Provide helpful hints based on error type
+        let errorMessage = errorDetail
+        if (errorDetail.includes('Invalid Perusall credentials')) {
+          errorMessage += '\n\nPlease check:\n• Institution ID is correct\n• API Token has not expired'
+        } else if (errorDetail.includes('access forbidden') || errorDetail.includes('expired or been revoked')) {
+          errorMessage += '\n\nYour API Token may have been revoked. Please generate a new one from Perusall.'
+        } else if (errorDetail.includes('Invalid credential format')) {
+          errorMessage += '\n\nPlease ensure your credentials are properly formatted.'
+        }
+
+        throw new Error(errorMessage)
       }
 
       const coursesData = await coursesResponse.json()
