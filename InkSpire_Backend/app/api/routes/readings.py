@@ -31,6 +31,7 @@ from app.api.models import (
     ReadingListResponse,
     ReadingResponse,
     ReadingUploadItem,
+    ReadingContentResponse,
 )
 
 router = APIRouter()
@@ -218,6 +219,85 @@ def batch_upload_readings(payload: BatchUploadReadingsRequest, db: Session = Dep
         readings=[ReadingResponse(**r) for r in created_readings],
         errors=errors,
     )
+
+
+@router.get("/readings/{reading_id}/content", response_model=ReadingContentResponse)
+def get_reading_content(reading_id: str, db: Session = Depends(get_db)):
+    """
+    Get reading content (PDF file) as base64 encoded string.
+    Downloads the file from Supabase Storage and returns it as base64.
+    """
+    # Validate reading_id format
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid reading_id format: {reading_id}",
+        )
+    
+    # Get reading from database
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reading {reading_id} not found",
+        )
+    
+    # Check if reading has a file_path
+    if not reading.file_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reading {reading_id} does not have a file path",
+        )
+    
+    # Get file from Supabase Storage
+    try:
+        supabase_client = get_supabase_client()
+        bucket_name = "readings"
+        
+        # Download file from Supabase Storage
+        file_response = supabase_client.storage.from_(bucket_name).download(reading.file_path)
+        
+        if not file_response:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found in storage: {reading.file_path}",
+            )
+        
+        # Convert to base64
+        file_bytes = file_response
+        if isinstance(file_bytes, bytes):
+            content_base64 = base64.b64encode(file_bytes).decode('utf-8')
+        else:
+            # If it's already a string or other format, try to convert
+            content_base64 = base64.b64encode(bytes(file_bytes)).decode('utf-8')
+        
+        # Calculate file size for size_label
+        file_size = len(file_bytes) if isinstance(file_bytes, bytes) else len(bytes(file_bytes))
+        size_kb = file_size / 1024
+        if size_kb < 1024:
+            size_label = f"{size_kb:.1f} KB"
+        else:
+            size_mb = size_kb / 1024
+            size_label = f"{size_mb:.1f} MB"
+        
+        return ReadingContentResponse(
+            id=str(reading.id),
+            mime_type="application/pdf",
+            size_label=size_label,
+            content_base64=content_base64,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error downloading reading content: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download reading content: {str(e)}",
+        )
 
 
 @router.get("/readings", response_model=ReadingListResponse)

@@ -90,6 +90,15 @@ class RunClassProfileRequest(BaseModel):
     class_input: Dict[str, Any]
 
 
+class UpdateClassProfileRequest(BaseModel):
+    instructor_id: str
+    title: str
+    course_code: str
+    description: str
+    class_input: Dict[str, Any]
+    generated_profile: Optional[str] = None  # Optional, for updating the profile content
+
+
 class RunClassProfileResponse(BaseModel):
     review: ReviewedProfileModel
     course_id: Optional[str] = None  # Course ID associated with this profile
@@ -150,8 +159,10 @@ class EditDesignConsiderationsRequest(BaseModel):
 
 class ReadingUploadItem(BaseModel):
     title: str
-    file_path: str
+    file_path: Optional[str] = None  # Optional if content_base64 is provided
     source_type: str = "uploaded"
+    content_base64: Optional[str] = None  # Base64 encoded PDF content
+    original_filename: Optional[str] = None  # Original filename with extension
 
 
 class BatchUploadReadingsRequest(BaseModel):
@@ -176,6 +187,13 @@ class BatchUploadReadingsResponse(BaseModel):
     created_count: int
     readings: List[ReadingResponse]
     errors: List[Dict[str, Any]]
+
+
+class ReadingContentResponse(BaseModel):
+    id: str
+    mime_type: str = "application/pdf"
+    size_label: Optional[str] = None
+    content_base64: str
 
 
 class ReadingListResponse(BaseModel):

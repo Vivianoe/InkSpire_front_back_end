@@ -76,6 +76,7 @@ class WorkflowState(TypedDict, total=False):
 def clean_json_output(raw: str) -> str:
     """
     Remove markdown fences like ```json ... ``` or ``` ... ``` and strip whitespace.
+    Also extracts only the first complete JSON object if there's extra text after it.
     """
     if raw is None:
         return ""
@@ -84,6 +85,48 @@ def clean_json_output(raw: str) -> str:
     raw = re.sub(r"^```[a-zA-Z]*\n", "", raw)
     # Remove trailing ```
     raw = re.sub(r"\n```$", "", raw)
+    raw = raw.strip()
+    
+    # If there's extra text after JSON (like explanations), extract only the JSON part
+    # Try to find the first complete JSON object/array by tracking braces/brackets
+    brace_count = 0
+    bracket_count = 0
+    in_string = False
+    escape_next = False
+    json_end = -1
+    
+    for i, char in enumerate(raw):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\':
+            escape_next = True
+            continue
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+            
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0 and bracket_count == 0:
+                json_end = i + 1
+                break
+        elif char == '[':
+            bracket_count += 1
+        elif char == ']':
+            bracket_count -= 1
+            if brace_count == 0 and bracket_count == 0:
+                json_end = i + 1
+                break
+    
+    # If we found a complete JSON object/array, extract only that part
+    if json_end > 0:
+        raw = raw[:json_end]
+    
     return raw.strip()
 
 

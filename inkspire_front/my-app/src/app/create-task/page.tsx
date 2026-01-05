@@ -727,10 +727,38 @@ export default function CreateNewReadingTaskPage() {
 
       console.log('[Frontend] Calling /api/generate-scaffolds with:', payload);
 
-      const res = await fetch('/api/generate-scaffolds', {
-        method: 'POST',
+      // TEST MODE: Use test endpoint or load from database to avoid API quota
+      // Set USE_TEST_ENDPOINT=true or USE_LOAD_FROM_DB=true in browser console
+      const useTestEndpoint = (window as any).USE_TEST_ENDPOINT === true;
+      const useLoadFromDb = (window as any).USE_LOAD_FROM_DB === true;
+      const testSessionId = (window as any).TEST_SESSION_ID; // Optional: specify session_id
+      
+      let endpoint = '/api/generate-scaffolds';
+      let method = 'POST';
+      
+      if (useLoadFromDb) {
+        // Load from database using existing session_id
+        const sessionIdToUse = testSessionId || sessionId;
+        if (sessionIdToUse) {
+          endpoint = '/api/load-scaffolds-from-session';
+          console.log('[Frontend] 📦 LOAD MODE: Loading scaffolds from database, session_id:', sessionIdToUse);
+        } else {
+          console.warn('[Frontend] ⚠️ USE_LOAD_FROM_DB is true but no session_id available. Using normal endpoint.');
+        }
+      } else if (useTestEndpoint) {
+        endpoint = '/api/test-scaffold-response';
+        console.log('[Frontend] 🧪 TEST MODE: Using test endpoint (no API calls)');
+      }
+
+      // For load-from-db mode, use session_id and reading_id
+      const requestPayload = useLoadFromDb && (testSessionId || sessionId)
+        ? { session_id: testSessionId || sessionId, reading_id: currentReading.id }
+        : payload;
+      
+      const res = await fetch(endpoint, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestPayload),
       });
       console.log('res:', res);
       
@@ -794,20 +822,32 @@ export default function CreateNewReadingTaskPage() {
       const cards = serverScaffolds.map((s: any, idx: number) => {
         try {
           console.log(`[Frontend] Processing scaffold ${idx + 1}:`, s);
-          const normalizedText = normalizeScaffoldText(s.text);
+          
+          // Defensive checks for data
+          const scaffoldText = s.text || s.current_content || '';
+          const scaffoldFragment = s.fragment || s.highlight_text || '';
+          
+          if (!scaffoldText && !scaffoldFragment) {
+            console.warn(`[Frontend] Scaffold ${idx + 1} has no text or fragment, skipping`);
+            return null; // Return null and filter later
+          }
+          
+          const normalizedText = normalizeScaffoldText(scaffoldText);
           const { title, texts } = extractTitleFromTexts(normalizedText);
+          
           // Backend returns 'id' field, not 'scaffold_id'
           const scaffoldId = s.id || s.scaffold_id || `scaffold_${idx}`;
+          
           const card = {
             id: scaffoldId,
             scaffold_id: scaffoldId, // Use same value for compatibility
             number: idx + 1,
             type: 'Scaffold',
-            title,
+            title: title || null,
             status: s.status === 'pending' ? 'NOT REVIEWED' : s.status === 'approved' ? 'ACCEPTED' : s.status === 'rejected' ? 'REJECTED' : 'NOT REVIEWED',
-            content: texts[0] || s.fragment || '',
-            fragment: s.fragment || '',
-            text: texts,
+            content: texts[0] || scaffoldFragment || '',
+            fragment: scaffoldFragment,
+            text: texts.length > 0 ? texts : [scaffoldFragment],
             history: Array.isArray(s.history) ? s.history : [],
             backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][idx % 5],
             borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][idx % 5],
@@ -816,20 +856,42 @@ export default function CreateNewReadingTaskPage() {
           return card;
         } catch (e) {
           console.error(`[Frontend] Error processing scaffold ${idx + 1}:`, e, s);
-          throw e;
+          // Return a fallback card instead of throwing to prevent page freeze
+          return {
+            id: s.id || `scaffold_${idx}`,
+            scaffold_id: s.id || `scaffold_${idx}`,
+            number: idx + 1,
+            type: 'Scaffold',
+            title: null,
+            status: 'NOT REVIEWED',
+            content: s.fragment || s.highlight_text || 'Error loading scaffold',
+            fragment: s.fragment || s.highlight_text || '',
+            text: [s.fragment || s.highlight_text || 'Error loading scaffold'],
+            history: [],
+            backgroundColor: '#f9fafb',
+            borderColor: '#6b7280',
+          };
         }
-      });
+      }).filter((card): card is NonNullable<typeof card> => card !== null); // Filter out null cards
       
       console.log('[Frontend] Total cards created:', cards.length);
-      setScaffolds(cards);
-      setManualEditOpenId(null);
-      setManualEditMap({});
-      setCurrentReviewIndex(0);
-      setReviewProgress({
-        review_cursor: 0,
-        scaffold_final: [],
-        scaffold_rejected: [],
-      });
+      
+      // Use setTimeout to prevent blocking the UI thread
+      setTimeout(() => {
+        try {
+          setScaffolds(cards);
+          setManualEditOpenId(null);
+          setManualEditMap({});
+          setCurrentReviewIndex(0);
+          setReviewProgress({
+            review_cursor: 0,
+            scaffold_final: [],
+            scaffold_rejected: [],
+          });
+        } catch (stateError) {
+          console.error('[Frontend] Error setting state:', stateError);
+        }
+      }, 0);
 
       const responseThreadId = data.thread_id || newThreadId;
       setThreadId(responseThreadId);
@@ -1518,15 +1580,20 @@ export default function CreateNewReadingTaskPage() {
                 <PdfPreviewComponent 
                   url={pdfUrl || undefined}
                   file={pdfUrl ? null : formData.uploadedFile}
+                  readingId={currentReading?.id || undefined}
                   onTextExtracted={handleTextExtracted} 
                   scrollToFragment={activeFragment || undefined}
                   scaffoldIndex={activeFragment ? scaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
-                  searchQueries={scaffolds.map(s => s.fragment).filter(f => f && f.trim())}
-                  scaffolds={scaffolds.map(s => ({
-                    id: s.id,
-                    fragment: s.fragment,
-                    history: s.history || [],
-                  }))}
+                  searchQueries={scaffolds
+                    .map(s => s?.fragment)
+                    .filter((f): f is string => !!f && typeof f === 'string' && f.trim().length > 0)}
+                  scaffolds={scaffolds
+                    .filter(s => s && s.id && s.fragment)
+                    .map(s => ({
+                      id: s.id,
+                      fragment: s.fragment || '',
+                      history: Array.isArray(s.history) ? s.history : [],
+                    }))}
                   sessionId={sessionId || undefined}
                 />
               </div>
