@@ -86,11 +86,8 @@ export default function DashboardPage() {
       courseId: course.id,
       instructorId: MOCK_INSTRUCTOR_ID,
     });
-    if (course.classProfileId) {
-      router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
-    } else {
-      router.push(`/class-profile/new/edit?${params.toString()}`);
-    }
+    // Navigate to course view page
+    router.push(`/courses/${course.id}/view?${params.toString()}`);
   };
 
   const handleNewClass = () => {
