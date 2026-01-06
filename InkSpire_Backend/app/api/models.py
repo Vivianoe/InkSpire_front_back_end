@@ -159,10 +159,10 @@ class EditDesignConsiderationsRequest(BaseModel):
 
 class ReadingUploadItem(BaseModel):
     title: str
-    file_path: Optional[str] = None  # Optional if content_base64 is provided
+    file_path: Optional[str] = None  # Optional for uploaded readings (will be generated)
     source_type: str = "uploaded"
-    content_base64: Optional[str] = None  # Base64 encoded PDF content
-    original_filename: Optional[str] = None  # Original filename with extension
+    content_base64: Optional[str] = None  # Base64 encoded PDF content for uploaded readings
+    original_filename: Optional[str] = None  # Original filename for uploaded readings
 
 
 class BatchUploadReadingsRequest(BaseModel):
@@ -207,6 +207,7 @@ class ReadingListResponse(BaseModel):
 class ReadingScaffoldsRequest(BaseModel):
     session_id: str
     reading_id: str
+    course_id: Optional[str] = None  # Optional course_id for filtering/verification
     class_profile: Dict[str, Any]
     reading_chunks: Dict[str, Any]
     reading_info: Dict[str, Any]
@@ -214,9 +215,7 @@ class ReadingScaffoldsRequest(BaseModel):
 
 class GenerateScaffoldsRequest(BaseModel):
     instructor_id: str  # UUID as string
-    course_id: str  # UUID as string
-    session_id: Optional[str] = None  # UUID as string, optional - will create new session if not provided
-    reading_id: str  # UUID as string
+    # course_id, session_id, and reading_id are now path parameters, not in request body
 
 # return value of reading-scaffolds endpoint
 class ReadingScaffoldsResponse(BaseModel):

@@ -71,9 +71,12 @@ interface PdfPreviewProps {
   scaffoldIndex?: number;
   // Session ID for mapping fragments to annotation_version_id
   sessionId?: string | null;
+  // Course ID, Session ID, and Reading ID for RESTful API calls
+  courseId?: string | null;
+  readingId?: string | null;
 }
 
-export default function PdfPreview({ file, url, readingId, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   
   // Debug logging
@@ -1741,17 +1744,28 @@ export default function PdfPreview({ file, url, readingId, searchQueries, scaffo
               // Backend will use annotation_id to find current_version_id if annotation_version_id is not provided
             }));
             const formattedReport = { coords: coordsWithMetadata };
-            const response = await fetch('/api/highlight-report', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' }, 
-              body: JSON.stringify(formattedReport) 
-            });
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
+            
+            // Build RESTful URL with course_id, session_id, and reading_id from props
+            if (!courseId || !readingId || !sessionId) {
+              console.warn('[PdfPreview] courseId, sessionId, or readingId missing, cannot save highlight coords');
             } else {
-              console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
-              coordsReportedRef.current = true; // Mark as reported to avoid duplicate uploads
+              const highlightUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/highlight-report`;
+              try {
+                const response = await fetch(highlightUrl, { 
+                  method: 'POST', 
+                  headers: { 'Content-Type': 'application/json' }, 
+                  body: JSON.stringify(formattedReport) 
+                });
+                if (!response.ok) {
+                  const errorData = await response.json().catch(() => ({}));
+                  console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
+                } else {
+                  console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
+                  coordsReportedRef.current = true; // Mark as reported to avoid duplicate uploads
+                }
+              } catch (e) {
+                console.warn('[PdfPreview] Error sending highlight report:', e);
+              }
             }
           } catch (e) {
             console.warn('[PdfPreview] Error sending highlight report:', e);

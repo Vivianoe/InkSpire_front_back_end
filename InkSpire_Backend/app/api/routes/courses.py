@@ -67,18 +67,30 @@ def get_courses_by_instructor_endpoint(instructor_id: str, db: Session = Depends
     return CourseListResponse(courses=items, total=len(items))
 
 
-@router.post("/basic_info/edit")
-def edit_basic_info(payload: EditBasicInfoRequest, db: Session = Depends(get_db)):
+@router.post("/courses/{course_id}/basic-info/edit")
+def edit_basic_info(
+    course_id: str,
+    payload: EditBasicInfoRequest,
+    db: Session = Depends(get_db)
+):
     """
     Edit course basic info (discipline_info_json, course_info_json, class_info_json).
     Creates a new version record.
     """
+    # Validate course_id from path
     try:
-        course_uuid = uuid.UUID(payload.course_id)
+        course_uuid = uuid.UUID(course_id)
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid course_id format: {payload.course_id}",
+            detail=f"Invalid course_id format: {course_id}",
+        )
+    
+    # Verify payload course_id matches path parameter
+    if payload.course_id != course_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"course_id in path ({course_id}) does not match course_id in body ({payload.course_id})",
         )
     
     # Get course basic info
@@ -86,7 +98,7 @@ def edit_basic_info(payload: EditBasicInfoRequest, db: Session = Depends(get_db)
     if not basic_info:
         raise HTTPException(
             status_code=404,
-            detail=f"Course basic info not found for course {payload.course_id}",
+            detail=f"Course basic info not found for course {course_id}",
         )
     
     # Update basic info (creates a new version)
@@ -102,22 +114,34 @@ def edit_basic_info(payload: EditBasicInfoRequest, db: Session = Depends(get_db)
     
     return {
         "message": "Course basic info updated successfully",
-        "course_id": str(payload.course_id),
+        "course_id": course_id,
     }
 
 
-@router.post("/design-considerations/edit")
-def edit_design_considerations(payload: EditDesignConsiderationsRequest, db: Session = Depends(get_db)):
+@router.post("/courses/{course_id}/design-considerations/edit")
+def edit_design_considerations(
+    course_id: str,
+    payload: EditDesignConsiderationsRequest,
+    db: Session = Depends(get_db)
+):
     """
     Edit design_consideration in the class profile.
     Updates the class_profile JSON in database and creates a new version.
     """
+    # Validate course_id from path
     try:
-        course_uuid = uuid.UUID(payload.course_id)
+        course_uuid = uuid.UUID(course_id)
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid course_id format: {payload.course_id}",
+            detail=f"Invalid course_id format: {course_id}",
+        )
+    
+    # Verify payload course_id matches path parameter
+    if payload.course_id != course_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"course_id in path ({course_id}) does not match course_id in body ({payload.course_id})",
         )
 
     # Find class profile by course_id using database query
@@ -125,7 +149,7 @@ def edit_design_considerations(payload: EditDesignConsiderationsRequest, db: Ses
     if not profile:
         raise HTTPException(
             status_code=404,
-            detail=f"Class profile not found for course {payload.course_id}",
+            detail=f"Class profile not found for course {course_id}",
         )
     
     # Get current content

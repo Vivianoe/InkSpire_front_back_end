@@ -204,14 +204,14 @@ CREATE INDEX IF NOT EXISTS idx_reading_chunks_reading_id ON reading_chunks(readi
 CREATE INDEX IF NOT EXISTS idx_reading_chunks_reading_id_index ON reading_chunks(reading_id, chunk_index);
 
 -- Create sessions table
+-- Stores session identity information
 CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     week_number INTEGER NOT NULL,
     title TEXT,
-    session_info_json JSONB,
-    assignment_info_json JSONB,
-    assignment_goals_json JSONB,
+    current_version_id UUID,  -- Points to the current active version in session_versions (FK added after table creation)
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',  -- draft, active, archived, etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -219,6 +219,42 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- Create indexes for sessions
 CREATE INDEX IF NOT EXISTS idx_sessions_course_id ON sessions(course_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_week_number ON sessions(course_id, week_number);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_current_version_id ON sessions(current_version_id);
+
+-- Create session_versions table
+-- Stores immutable version snapshots of session data
+CREATE TABLE IF NOT EXISTS session_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    version_number INTEGER NOT NULL,
+    session_info_json JSONB,  -- This week's teaching information (user filled)
+    assignment_info_json JSONB,  -- This week's assignment info
+    assignment_goals_json JSONB,  -- Assignment/task goals
+    reading_ids JSONB,  -- Array of reading IDs for this version
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_session_version UNIQUE (session_id, version_number)
+);
+
+-- Create indexes for session_versions
+CREATE INDEX IF NOT EXISTS idx_session_versions_session_id ON session_versions(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_versions_version_number ON session_versions(session_id, version_number);
+
+-- Add foreign key constraint for current_version_id (after session_versions table is created)
+-- This allows sessions.current_version_id to reference session_versions.id
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_sessions_current_version'
+    ) THEN
+        ALTER TABLE sessions 
+        ADD CONSTRAINT fk_sessions_current_version 
+        FOREIGN KEY (current_version_id) 
+        REFERENCES session_versions(id) 
+        ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- Create session_readings table (Many-to-Many)
 CREATE TABLE IF NOT EXISTS session_readings (
@@ -265,12 +301,12 @@ CREATE TRIGGER update_sessions_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create trigger for session_items table
-DROP TRIGGER IF EXISTS update_session_items_updated_at ON session_items;
-CREATE TRIGGER update_session_items_updated_at
-    BEFORE UPDATE ON session_items
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- Add foreign key constraint for current_version_id
+ALTER TABLE sessions 
+ADD CONSTRAINT fk_sessions_current_version 
+FOREIGN KEY (current_version_id) 
+REFERENCES session_versions(id) 
+ON DELETE SET NULL;
 
 -- Create annotation_highlight_coords table
 CREATE TABLE IF NOT EXISTS annotation_highlight_coords (

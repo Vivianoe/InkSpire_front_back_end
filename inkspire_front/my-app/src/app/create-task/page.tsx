@@ -80,8 +80,14 @@ const DEFAULT_COURSE_ID = '00000000-0000-4000-8000-000000000111';
 
 export default function CreateNewReadingTaskPage() {
   const router = useRouter();
+  // Query parameters (from URL: ?readingId=xxx&sessionId=yyy&courseId=zzz&...)
   const searchParams = useSearchParams();
   const profileFromQuery = searchParams?.get('from') || null;
+  // Get readingId, sessionId, readingIndex from query parameters (new flow)
+  const urlReadingId = searchParams?.get('readingId');
+  const urlSessionId = searchParams?.get('sessionId');
+  const urlReadingIndex = searchParams?.get('readingIndex');
+  const urlTotalReadings = searchParams?.get('totalReadings');
   const [formData, setFormData] = useState(createInitialFormState());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,6 +161,41 @@ export default function CreateNewReadingTaskPage() {
     if (typeof window === 'undefined') {
       return;
     }
+    
+    // New flow: Get session readings from sessionStorage (set by session creation page)
+    const sessionReadingsData = window.sessionStorage.getItem('inkspire:sessionReadings');
+    if (sessionReadingsData && urlSessionId && urlReadingId) {
+      try {
+        const parsed = JSON.parse(sessionReadingsData);
+        if (parsed.sessionId === urlSessionId && Array.isArray(parsed.readingIds)) {
+          // Convert reading IDs to SelectedReading format
+          const readings: SelectedReading[] = parsed.readingIds.map((id: string, index: number) => ({
+            id,
+            title: `Reading ${index + 1}`, // Will be loaded from API
+            filePath: '',
+            sourceType: 'uploaded',
+            order: index,
+          }));
+          setSelectedReadings(readings);
+          const readingIndex = urlReadingIndex ? parseInt(urlReadingIndex, 10) : parsed.currentIndex || 0;
+          setCurrentReadingIndex(readingIndex);
+          setSessionId(urlSessionId);
+          setSelectedCourseId(urlCourseId || null);
+          setSelectedInstructorId(urlInstructorId || null);
+          setReadingProfileId(profileFromQuery);
+          
+          // Load current reading details if we have readingId
+          if (urlReadingId && readings.some(r => r.id === urlReadingId)) {
+            // Reading ID is already in the list, we'll use it
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to parse session readings data', err);
+      }
+    }
+    
+    // Fallback to old flow: Get from SELECTED_READING_STORAGE_KEY
     try {
       const cached = window.sessionStorage.getItem(SELECTED_READING_STORAGE_KEY);
       if (cached) {
@@ -170,23 +211,23 @@ export default function CreateNewReadingTaskPage() {
         // Use URL params if available, otherwise use session storage
         setSelectedCourseId(urlCourseId || (parsed?.courseId ?? null));
         setSelectedInstructorId(urlInstructorId || (parsed?.instructorId ?? null));
-        setSessionId(parsed?.sessionId ?? null);
+        setSessionId(urlSessionId || (parsed?.sessionId ?? null));
       } else {
         setSelectedReadings([]);
         setReadingProfileId(profileFromQuery);
-        setSelectedCourseId(null);
-        setSelectedInstructorId(null);
-        setSessionId(null);
+        setSelectedCourseId(urlCourseId || null);
+        setSelectedInstructorId(urlInstructorId || null);
+        setSessionId(urlSessionId || null);
       }
     } catch (err) {
       console.error('Failed to load selected readings', err);
       setSelectedReadings([]);
       setReadingProfileId(profileFromQuery);
-      setSelectedCourseId(null);
-      setSelectedInstructorId(null);
-      setSessionId(null);
+      setSelectedCourseId(urlCourseId || null);
+      setSelectedInstructorId(urlInstructorId || null);
+      setSessionId(urlSessionId || null);
     }
-  }, [profileFromQuery]);
+  }, [profileFromQuery, urlSessionId, urlReadingId, urlReadingIndex, urlCourseId, urlInstructorId]);
   const acceptedScaffolds = useMemo(
     () => scaffolds.filter((s) => s.status === 'ACCEPTED'),
     [scaffolds]
@@ -698,8 +739,35 @@ export default function CreateNewReadingTaskPage() {
 */
 
   const handleGenerateScaffolds = async () => {
-    if (!currentReading) {
-      alert('Select a reading from the library before generating scaffolds.');
+    // Determine which reading to use: URL readingId (new flow) or currentReading (old flow)
+    let readingToUse: SelectedReading | null = null;
+    let readingIdToUse: string | null = null;
+    
+    if (urlReadingId && urlSessionId) {
+      // New flow: Use readingId from URL params
+      readingIdToUse = urlReadingId;
+      // Try to find reading in selectedReadings or fetch from API
+      const foundReading = selectedReadings.find(r => r.id === urlReadingId);
+      if (foundReading) {
+        readingToUse = foundReading;
+      } else {
+        // Reading not in selectedReadings, create a minimal reading object
+        readingToUse = {
+          id: urlReadingId,
+          title: `Reading ${(parseInt(urlReadingIndex || '0', 10) + 1)}`,
+          filePath: '',
+          sourceType: 'uploaded',
+          order: parseInt(urlReadingIndex || '0', 10),
+        };
+      }
+    } else if (currentReading) {
+      // Old flow: Use currentReading
+      readingToUse = currentReading;
+      readingIdToUse = currentReading.id;
+    }
+    
+    if (!readingToUse || !readingIdToUse) {
+      alert('No reading selected. Please select a reading or ensure readingId is provided in URL.');
       return;
     }
     
@@ -708,55 +776,36 @@ export default function CreateNewReadingTaskPage() {
       const newThreadId = `ui-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setThreadId(newThreadId);
 
-      const readingLabel = currentReading.title || currentReading.name;
+      const readingLabel = readingToUse.title || readingToUse.name;
+      const readingIndex = urlReadingIndex ? parseInt(urlReadingIndex, 10) : currentReadingIndex;
       const readingDescriptor = readingLabel
-        ? `Reading ${currentReading.order ?? currentReadingIndex + 1}: ${readingLabel}`
-        : `Reading ${currentReadingIndex + 1}`;
+        ? `Reading ${readingToUse.order ?? readingIndex + 1}: ${readingLabel}`
+        : `Reading ${readingIndex + 1}`;
 
-      const courseIdForRequest = currentReading.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID;
+      // Get course_id from URL params or reading, prioritize URL params
+      const courseIdForRequest = urlCourseId ?? readingToUse.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID;
       const instructorIdForRequest =
-        currentReading.instructorId ?? selectedInstructorId ?? DEFAULT_INSTRUCTOR_ID;
+        readingToUse.instructorId ?? selectedInstructorId ?? urlInstructorId ?? DEFAULT_INSTRUCTOR_ID;
 
-      // Simplified payload - session_id is optional (will be created by backend if not provided)
+      // Payload only contains instructor_id
+      // course_id, session_id, and reading_id are now in the URL path
+      // Use sessionId from URL if available, otherwise use state, otherwise "new"
+      const sessionIdForPath = urlSessionId || sessionId || 'new';
       const payload = {
         instructor_id: instructorIdForRequest,
-        course_id: courseIdForRequest,
-        session_id: sessionId || null,  // null if not set, backend will create new session
-        reading_id: currentReading.id,
       };
 
-      console.log('[Frontend] Calling /api/generate-scaffolds with:', payload);
+      console.log('[Frontend] Calling /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/generate');
+      console.log('[Frontend] Path params:', { 
+        course_id: courseIdForRequest, 
+        session_id: sessionIdForPath,
+        reading_id: readingIdToUse 
+      });
+      console.log('[Frontend] Payload:', payload);
 
-      // TEST MODE: Use test endpoint or load from database to avoid API quota
-      // Set USE_TEST_ENDPOINT=true or USE_LOAD_FROM_DB=true in browser console
-      const useTestEndpoint = (window as any).USE_TEST_ENDPOINT === true;
-      const useLoadFromDb = (window as any).USE_LOAD_FROM_DB === true;
-      const testSessionId = (window as any).TEST_SESSION_ID; // Optional: specify session_id
-      
-      let endpoint = '/api/generate-scaffolds';
-      let method = 'POST';
-      
-      if (useLoadFromDb) {
-        // Load from database using existing session_id
-        const sessionIdToUse = testSessionId || sessionId;
-        if (sessionIdToUse) {
-          endpoint = '/api/load-scaffolds-from-session';
-          console.log('[Frontend] 📦 LOAD MODE: Loading scaffolds from database, session_id:', sessionIdToUse);
-        } else {
-          console.warn('[Frontend] ⚠️ USE_LOAD_FROM_DB is true but no session_id available. Using normal endpoint.');
-        }
-      } else if (useTestEndpoint) {
-        endpoint = '/api/test-scaffold-response';
-        console.log('[Frontend] 🧪 TEST MODE: Using test endpoint (no API calls)');
-      }
-
-      // For load-from-db mode, use session_id and reading_id
-      const requestPayload = useLoadFromDb && (testSessionId || sessionId)
-        ? { session_id: testSessionId || sessionId, reading_id: currentReading.id }
-        : payload;
-      
-      const res = await fetch(endpoint, {
-        method: method,
+      const generateUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForPath}/readings/${readingIdToUse}/scaffolds/generate`;
+      const res = await fetch(generateUrl, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
       });
@@ -1098,7 +1147,14 @@ export default function CreateNewReadingTaskPage() {
       const scaffoldId = scaffold.scaffold_id || scaffold.id;
       console.log('[Frontend] Manual edit - calling API:', { scaffoldId, new_text: editedValue });
       
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/edit`, {
+      const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+      const sessionIdForRequest = sessionId || 'new';
+      const readingIdForRequest = currentReading?.id;
+      if (!readingIdForRequest) {
+        throw new Error('Reading ID is required for scaffold operations');
+      }
+      const editUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/edit`;
+      const res = await fetch(editUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1185,7 +1241,14 @@ export default function CreateNewReadingTaskPage() {
 
       if (action === 'accept') {
         console.log('[Frontend] Approving scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/approve`, {
+        const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+        const sessionIdForRequest = sessionId || 'new';
+        const readingIdForRequest = currentReading?.id;
+        if (!readingIdForRequest) {
+          throw new Error('Reading ID is required for scaffold operations');
+        }
+        const approveUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/approve`;
+        res = await fetch(approveUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1202,7 +1265,14 @@ export default function CreateNewReadingTaskPage() {
         console.log('[Frontend] Formatted data for processReviewResponse:', data);
       } else if (action === 'reject') {
         console.log('[Frontend] Rejecting scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/reject`, {
+        const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+        const sessionIdForRequest = sessionId || 'new';
+        const readingIdForRequest = currentReading?.id;
+        if (!readingIdForRequest) {
+          throw new Error('Reading ID is required for scaffold operations');
+        }
+        const rejectUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/reject`;
+        res = await fetch(rejectUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1251,8 +1321,15 @@ export default function CreateNewReadingTaskPage() {
     try {
       const scaffoldId = currentCard.scaffold_id || currentCard.id;
       console.log('[Frontend] LLM refine scaffold:', { scaffoldId, prompt: message });
+      const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+      const sessionIdForRequest = sessionId || 'new';
+      const readingIdForRequest = currentReading?.id;
+      if (!readingIdForRequest) {
+        throw new Error('Reading ID is required for scaffold operations');
+      }
+      const llmRefineUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/llm-refine`;
       
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/llm-refine`, {
+      const res = await fetch(llmRefineUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1507,6 +1584,56 @@ export default function CreateNewReadingTaskPage() {
 
       setShowPublishModal(false);
       setShowPostPublishModal(true);
+      
+      // After successful publish, navigate to next reading if available
+      if (urlSessionId && urlReadingIndex !== null && urlTotalReadings) {
+        const currentIndex = parseInt(urlReadingIndex, 10);
+        const totalReadings = parseInt(urlTotalReadings, 10);
+        const nextIndex = currentIndex + 1;
+        
+        if (nextIndex < totalReadings) {
+          // Get next reading ID from sessionStorage
+          const sessionReadingsData = window.sessionStorage.getItem('inkspire:sessionReadings');
+          if (sessionReadingsData) {
+            try {
+              const parsed = JSON.parse(sessionReadingsData);
+              if (Array.isArray(parsed.readingIds) && parsed.readingIds[nextIndex]) {
+                const nextReadingId = parsed.readingIds[nextIndex];
+                
+                // Update sessionStorage
+                window.sessionStorage.setItem(
+                  'inkspire:sessionReadings',
+                  JSON.stringify({
+                    ...parsed,
+                    currentIndex: nextIndex,
+                  })
+                );
+                
+                // Navigate to next reading after a short delay
+                setTimeout(() => {
+                  const navParams = new URLSearchParams();
+                  navParams.set('readingId', nextReadingId);
+                  navParams.set('sessionId', urlSessionId);
+                  navParams.set('readingIndex', nextIndex.toString());
+                  navParams.set('totalReadings', totalReadings.toString());
+                  if (urlCourseId) navParams.set('courseId', urlCourseId);
+                  if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+                  if (profileFromQuery) navParams.set('profileId', profileFromQuery);
+                  
+                  router.push(`/create-task?${navParams.toString()}`);
+                }, 2000); // Wait 2 seconds before navigating
+                return;
+              }
+            } catch (err) {
+              console.error('Failed to get next reading ID', err);
+            }
+          }
+        } else {
+          // All readings processed, show completion message
+          console.log('All readings processed!');
+          // Could show a completion modal or redirect to a completion page
+        }
+      }
     } catch (error) {
       console.error('[Frontend] Publish failed:', error);
       console.error('[Frontend] Error details:', {
@@ -1595,6 +1722,8 @@ export default function CreateNewReadingTaskPage() {
                       history: Array.isArray(s.history) ? s.history : [],
                     }))}
                   sessionId={sessionId || undefined}
+                  courseId={urlCourseId ?? currentReading?.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID}
+                  readingId={currentReading?.id}
                 />
               </div>
             ) : (

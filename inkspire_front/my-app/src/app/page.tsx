@@ -82,19 +82,19 @@ export default function DashboardPage() {
   };
 
   const openCourse = (course: CourseSummary) => {
-    const params = new URLSearchParams({
-      courseId: course.id,
-      instructorId: MOCK_INSTRUCTOR_ID,
-    });
-    // Navigate to course view page
-    router.push(`/courses/${course.id}/view?${params.toString()}`);
+    // RESTful URL structure: /courses/[courseId]/class-profiles/[profileId]/view
+    if (course.classProfileId) {
+      router.push(`/courses/${course.id}/class-profiles/${course.classProfileId}/view`);
+    } else {
+      // For new profiles, use "new" as profileId
+      router.push(`/courses/${course.id}/class-profiles/new/edit`);
+    }
   };
 
   const handleNewClass = () => {
-    const params = new URLSearchParams({
-      instructorId: MOCK_INSTRUCTOR_ID,
-    });
-    router.push(`/class-profile/new/edit?${params.toString()}`);
+    // For new class, we need to create course first, so use a temporary course ID
+    // In a real app, you might want to create the course first or use a different flow
+    router.push(`/courses/new/class-profiles/new/edit`);
   };
 
   if (loading) {
