@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
-import styles from './page.module.css';
+import styles from '@/app/class-profile/[id]/session/create/page.module.css';
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
-const MOCK_COURSE_ID = '00000000-0000-4000-8000-000000000111';
 
 type ReadingListItem = {
   id: string;
@@ -25,259 +24,58 @@ type ReadingListItem = {
   hasChunks?: boolean;
 };
 
-type SessionVersionData = {
-  id: string;
-  session_id: string;
-  version_number: number;
-  session_info_json?: { description?: string };
-  assignment_info_json?: { description?: string };
-  assignment_goals_json?: { goal?: string };
-  reading_ids: string[];
-  created_at?: string;
-};
-
 type SessionListItem = {
   id: string;
-  course_id: string;
-  week_number: number;
   title?: string;
-  current_version_id?: string;
+  weekNumber: number;
   status: string;
-  created_at?: string;
-  updated_at?: string;
-  current_version?: SessionVersionData;
-  reading_ids: string[];
+  createdAt?: string;
+  readingIds?: string[];
+  currentVersionId?: string;
 };
 
-const formatFileSize = (size: number) => {
-  if (!Number.isFinite(size)) return '0 KB';
-  if (size >= 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(size / 1024).toFixed(1)} KB`;
+type PersistedReadingSelection = {
+  id: string;
+  title: string;
+  name: string;
+  filePath?: string;
+  sourceType?: string;
+  instructorId?: string;
+  courseId?: string;
+  sizeLabel?: string;
+  mimeType?: string;
+  order: number;
 };
+
+const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
 
 export default function SessionCreationPage() {
-  // Path parameters (from route: /class-profile/[id]/session/create or /courses/[courseId]/sessions/create)
   const pathParams = useParams();
   const router = useRouter();
-  // Query parameters (from URL: ?instructorId=yyy - courseId and profileId are now in path)
   const searchParams = useSearchParams();
-  const profileId = pathParams?.profileId || pathParams?.id as string; // Support both old and new routes
-  const courseId = pathParams?.courseId as string | undefined; // New RESTful route
-  const [readings, setReadings] = useState<ReadingListItem[]>([]);
+  
+  const courseId = pathParams.courseId as string;
+  const profileId = searchParams.get('profileId') as string | undefined;
+  const urlSessionId = searchParams.get('sessionId') as string | undefined;
+  
+  const [mode, setMode] = useState<'create' | 'edit' | 'select'>('select');
+  const [weekNumber, setWeekNumber] = useState(1);
+  const [sessionTitle, setSessionTitle] = useState('');
+  const [sessionDescription, setSessionDescription] = useState('');
+  const [assignmentDescription, setAssignmentDescription] = useState('');
+  const [assignmentGoal, setAssignmentGoal] = useState('');
   const [selectedReadingIds, setSelectedReadingIds] = useState<string[]>([]);
+  const [readings, setReadings] = useState<ReadingListItem[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [loadingList, setLoadingList] = useState(false);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'select' | 'create'>('select'); // 'select' or 'create'
-  const [sessionTitle, setSessionTitle] = useState<string>('');
-  const [weekNumber, setWeekNumber] = useState<number>(1);
-  const [sessionDescription, setSessionDescription] = useState<string>('');
-  const [assignmentDescription, setAssignmentDescription] = useState<string>('');
-  const [assignmentGoal, setAssignmentGoal] = useState<string>('');
-
-  // Draft state management - store original values for dirty check
-  const [originalDraft, setOriginalDraft] = useState<{
-    sessionTitle: string;
-    weekNumber: number;
-    sessionDescription: string;
-    assignmentDescription: string;
-    assignmentGoal: string;
-    selectedReadingIds: string[];
-  } | null>(null);
-  const [currentVersion, setCurrentVersion] = useState<number | null>(null);
   const [isLoadingExistingSession, setIsLoadingExistingSession] = useState(false);
+  const [originalDraft, setOriginalDraft] = useState<any>(null);
+  const [currentVersion, setCurrentVersion] = useState<number>(1);
 
-  // Get course_id from path (new) or query params (old), and instructor_id from query params
-  const resolvedCourseId = courseId || searchParams?.get('courseId') || MOCK_COURSE_ID; // Path param takes priority
   const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
-  // Get session_id from URL if continuing existing session
-  const urlSessionId = searchParams?.get('sessionId') || null;
-
-  const toggleSelection = (id: string) => {
-    setSelectedReadingIds(prev =>
-      prev.includes(id) ? prev.filter(readingId => readingId !== id) : [...prev, id]
-    );
-  };
-
-  const displayReadings = useMemo(
-    () =>
-      readings.map(reading => ({
-        ...reading,
-        displaySize: reading.sizeLabel,
-        displayDate: reading.createdAt
-          ? new Date(reading.createdAt).toLocaleDateString(undefined, {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-            })
-          : undefined,
-        usageCount: reading.usageCount ?? 0,
-        lastUsedLabel: reading.lastUsedAt
-          ? new Date(reading.lastUsedAt).toLocaleDateString(undefined, {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-            })
-          : null,
-      })),
-    [readings]
-  );
-
-  const fetchReadings = useCallback(async () => {
-    setLoadingList(true);
-    setError(null);
-    try {
-      const query = new URLSearchParams({
-        course_id: resolvedCourseId,
-        instructor_id: resolvedInstructorId,
-      });
-      const response = await fetch(`/api/readings?${query.toString()}`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.detail || data?.message || 'Failed to load readings.');
-      }
-      const remoteReadings = Array.isArray(data?.readings)
-        ? data.readings.map((item: any) => ({
-            id: item.id,
-            title: item.title ?? 'Untitled reading',
-            instructorId: item.instructor_id,
-            courseId: item.course_id,
-            filePath: item.file_path,
-            sourceType: item.source_type,
-            createdAt: item.created_at,
-            readingChunks: item.reading_chunks,
-            hasChunks: Array.isArray(item.reading_chunks) && item.reading_chunks.length > 0,
-            sizeLabel: item.size_label,
-            usageCount: typeof item.usage_count === 'number' ? item.usage_count : 0,
-            lastUsedAt: item.last_used_at,
-            mimeType: item.mime_type,
-          }))
-        : [];
-      remoteReadings.sort((a: ReadingListItem, b: ReadingListItem) => {
-        const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return bDate - aDate;
-      });
-      setReadings(remoteReadings);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load readings.');
-    } finally {
-      setLoadingList(false);
-    }
-  }, [resolvedCourseId, resolvedInstructorId]);
-
-  const fetchSessions = useCallback(async () => {
-    setLoadingSessions(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/courses/${resolvedCourseId}/sessions`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.detail || data?.message || 'Failed to load sessions.');
-      }
-      const sessionsList = Array.isArray(data?.sessions)
-        ? data.sessions.map((item: any) => ({
-            id: item.id,
-            course_id: item.course_id,
-            week_number: item.week_number,
-            title: item.title,
-            current_version_id: item.current_version_id,
-            status: item.status || 'draft',
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            current_version: item.current_version,
-            reading_ids: Array.isArray(item.reading_ids) ? item.reading_ids : [],
-          }))
-        : [];
-      setSessions(sessionsList);
-      // If no sessions exist, switch to create mode
-      if (sessionsList.length === 0) {
-        setMode('create');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sessions.');
-      // If error loading sessions, allow creating new session
-      setMode('create');
-    } finally {
-      setLoadingSessions(false);
-    }
-  }, [resolvedCourseId]);
-
-  const handleSelectSession = useCallback(async (sessionId: string) => {
-    setSelectedSessionId(sessionId);
-    setError(null);
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.detail || data?.message || 'Failed to load session.');
-      }
-      // Load session data into form
-      setSessionTitle(data.title || '');
-      setWeekNumber(data.week_number || 1);
-      setSessionDescription(data.session_info_json?.description || '');
-      setAssignmentDescription(data.assignment_info_json?.description || '');
-      setAssignmentGoal(data.assignment_goals_json?.goal || '');
-      // Select readings that are in this session
-      setSelectedReadingIds(data.reading_ids || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load session.');
-    }
-  }, []);
-
-  const handleUseSession = async () => {
-    if (!selectedSessionId) {
-      setError('Please select a session.');
-      return;
-    }
-    // Navigate to same page with session_id in URL to trigger loading
-    const courseIdStr = Array.isArray(resolvedCourseId) ? resolvedCourseId[0] : resolvedCourseId;
-    const profileIdStr = Array.isArray(profileId) ? profileId[0] : profileId;
-    
-    const params = new URLSearchParams();
-    params.set('sessionId', selectedSessionId);
-    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-    if (courseIdStr) params.set('courseId', courseIdStr);
-    
-    // Use RESTful URL structure if courseId is available in path
-    if (courseIdStr && profileIdStr) {
-      router.push(`/courses/${courseIdStr}/sessions/create?${params.toString()}`);
-    } else {
-      router.push(`/class-profile/${profileIdStr}/session/create?${params.toString()}`);
-    }
-  };
-
-  const handleCreateNew = () => {
-    setSelectedSessionId(null);
-    setSessionTitle('');
-    setWeekNumber(1);
-    setSessionDescription('');
-    setAssignmentDescription('');
-    setAssignmentGoal('');
-    setSelectedReadingIds([]);
-    setOriginalDraft(null);
-    setCurrentVersion(null);
-    setMode('create');
-  };
-
-  // Check if draft is dirty (has changes)
-  const isDraftDirty = useMemo(() => {
-    if (!originalDraft) return false;
-    return (
-      sessionTitle !== originalDraft.sessionTitle ||
-      weekNumber !== originalDraft.weekNumber ||
-      sessionDescription !== originalDraft.sessionDescription ||
-      assignmentDescription !== originalDraft.assignmentDescription ||
-      assignmentGoal !== originalDraft.assignmentGoal ||
-      JSON.stringify(selectedReadingIds.sort()) !== JSON.stringify(originalDraft.selectedReadingIds.sort())
-    );
-  }, [originalDraft, sessionTitle, weekNumber, sessionDescription, assignmentDescription, assignmentGoal, selectedReadingIds]);
 
   // Load existing session from URL session_id
   const loadExistingSession = useCallback(async (sessionId: string) => {
@@ -338,20 +136,91 @@ export default function SessionCreationPage() {
     }
   }, []);
 
-  // Load existing session if session_id is in URL
+  // Load initial data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Load readings
+        const readingsQuery = new URLSearchParams({
+          course_id: courseId,
+          instructor_id: resolvedInstructorId,
+        });
+        const readingsResponse = await fetch(`/api/readings?${readingsQuery.toString()}`);
+        const readingsData = await readingsResponse.json().catch(() => ({}));
+        if (readingsResponse.ok && Array.isArray(readingsData?.readings)) {
+          setReadings(readingsData.readings.map((item: any) => ({
+            id: item.id,
+            title: item.title ?? 'Untitled reading',
+            instructorId: item.instructor_id,
+            courseId: item.course_id,
+            filePath: item.file_path,
+            sourceType: item.source_type,
+            createdAt: item.created_at,
+            readingChunks: item.reading_chunks,
+            hasChunks: Array.isArray(item.reading_chunks) && item.reading_chunks.length > 0,
+            sizeLabel: item.size_label,
+            usageCount: typeof item.usage_count === 'number' ? item.usage_count : 0,
+            lastUsedAt: item.last_used_at,
+            mimeType: item.mime_type,
+          })));
+        }
+
+        // Load sessions
+        const sessionsResponse = await fetch(`/api/courses/${courseId}/sessions`);
+        const sessionsData = await sessionsResponse.json().catch(() => ({}));
+        if (sessionsResponse.ok && Array.isArray(sessionsData?.sessions)) {
+          setSessions(sessionsData.sessions.map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            weekNumber: item.week_number,
+            status: item.status,
+            createdAt: item.created_at,
+            readingIds: item.reading_ids || [],
+            currentVersionId: item.current_version_id,
+          })));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data.');
+      }
+    };
+
+    if (courseId) {
+      loadData();
+    }
+  }, [courseId, resolvedInstructorId]);
+
+  // Load existing session if sessionId is in URL
   useEffect(() => {
     if (urlSessionId) {
       loadExistingSession(urlSessionId);
     }
   }, [urlSessionId, loadExistingSession]);
 
-  useEffect(() => {
-    fetchReadings();
-    if (!urlSessionId) {
-      // Only fetch sessions list if not loading existing session
-      fetchSessions();
-    }
-  }, [fetchReadings, fetchSessions, urlSessionId]);
+  // Check if draft is dirty (has changes)
+  const isDraftDirty = useMemo(() => {
+    if (!originalDraft) return false;
+    return (
+      sessionTitle !== originalDraft.sessionTitle ||
+      weekNumber !== originalDraft.weekNumber ||
+      sessionDescription !== originalDraft.sessionDescription ||
+      assignmentDescription !== originalDraft.assignmentDescription ||
+      assignmentGoal !== originalDraft.assignmentGoal ||
+      JSON.stringify(selectedReadingIds.sort()) !== JSON.stringify(originalDraft.selectedReadingIds.sort())
+    );
+  }, [originalDraft, sessionTitle, weekNumber, sessionDescription, assignmentDescription, assignmentGoal, selectedReadingIds]);
+
+  const handleCreateNew = () => {
+    setSelectedSessionId('');
+    setSessionTitle('');
+    setWeekNumber(1);
+    setSessionDescription('');
+    setAssignmentDescription('');
+    setAssignmentGoal('');
+    setSelectedReadingIds([]);
+    setOriginalDraft(null);
+    setCurrentVersion(1);
+    setMode('create');
+  };
 
   const handleCreateSession = async () => {
     if (!selectedReadingIds.length) {
@@ -363,9 +232,12 @@ export default function SessionCreationPage() {
       setCreating(true);
       setError(null);
 
+      let sessionId: string;
+      let shouldCreateNewVersion = false;
+
       // If continuing existing session, check if dirty and create new version if needed
       if (urlSessionId || selectedSessionId) {
-        const sessionId = urlSessionId || selectedSessionId;
+        sessionId = urlSessionId || selectedSessionId;
         
         if (isDraftDirty) {
           // Create new version with updated data
@@ -382,7 +254,7 @@ export default function SessionCreationPage() {
             reading_ids: selectedReadingIds,
           };
 
-          const response = await fetch(`/api/courses/${resolvedCourseId}/sessions/${sessionId}/versions`, {
+          const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/versions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -394,7 +266,7 @@ export default function SessionCreationPage() {
           }
 
           setError(null);
-          setSuccess('New version created successfully! Click "Start scaffolds generation" to proceed.');
+          setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
         } else {
           // No changes, just confirm session is ready
           setError(null);
@@ -411,7 +283,7 @@ export default function SessionCreationPage() {
           assignment_goal: assignmentGoal || undefined,
         };
 
-        const response = await fetch(`/api/courses/${resolvedCourseId}/sessions`, {
+        const response = await fetch(`/api/courses/${courseId}/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -422,18 +294,78 @@ export default function SessionCreationPage() {
           throw new Error(data?.detail || data?.message || 'Failed to create session.');
         }
 
-        // Store the created session ID
-        setSelectedSessionId(data.session_id);
-        setError(null);
-        setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
-        // Refresh sessions list
-        fetchSessions();
+        sessionId = data.session_id;
+        shouldCreateNewVersion = true; // New session always creates version 1
       }
+
+      // Navigate to first reading's scaffold page with full reading list for navigation
+      const firstReadingId = selectedReadingIds[0];
+      
+      // Store reading navigation data in sessionStorage
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          'inkspire:sessionReadingNavigation',
+          JSON.stringify({
+            sessionId,
+            readingIds: selectedReadingIds,
+            currentIndex: 0,
+            courseId: courseId,
+            profileId,
+            instructorId: resolvedInstructorId,
+          })
+        );
+      }
+      
+      // Check if scaffolds already exist for this session and reading
+      const existingScaffoldsResponse = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds`);
+      
+      if (existingScaffoldsResponse.ok) {
+        const existingScaffolds = await existingScaffoldsResponse.json();
+        if (existingScaffolds.scaffolds && existingScaffolds.scaffolds.length > 0) {
+          // Scaffolds already exist, navigate to display them with navigation context
+          router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
+          return;
+        }
+      }
+      
+      // No existing scaffolds, generate new ones
+      const payload = {
+        instructor_id: resolvedInstructorId,
+      };
+      
+      const generateResponse = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      
+      if (!generateResponse.ok) {
+        const errorData = await generateResponse.json().catch(() => ({}));
+        throw new Error(errorData?.detail || errorData?.message || 'Failed to generate scaffolds.');
+      }
+      
+      // Navigate to scaffold display page with navigation context
+      router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create session. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleContinueWithSession = async () => {
+    if (!selectedSessionId) {
+      setError('Please select a session.');
+      return;
+    }
+    // Navigate to same page with session_id in URL to load and edit
+    const params = new URLSearchParams();
+    params.set('sessionId', selectedSessionId);
+    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
+    if (profileId) params.set('profileId', profileId);
+    
+    // Use RESTful URL structure
+    router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
   };
 
   const handleStartScaffoldsGeneration = async () => {
@@ -467,7 +399,7 @@ export default function SessionCreationPage() {
             reading_ids: selectedReadingIds,
           };
 
-          const response = await fetch(`/api/courses/${resolvedCourseId}/sessions/${sessionId}/versions`, {
+          const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/versions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -479,11 +411,11 @@ export default function SessionCreationPage() {
           }
 
           setError(null);
-          setSuccess('New version created successfully! Navigating to first reading...');
+          setSuccess('New version created successfully! Click "Start scaffolds generation" to proceed.');
         } else {
           // No changes, just confirm session is ready
           setError(null);
-          setSuccess('Session ready. Navigating to first reading...');
+          setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
         }
       } else {
         // Create new session
@@ -496,7 +428,7 @@ export default function SessionCreationPage() {
           assignment_goal: assignmentGoal || undefined,
         };
 
-        const response = await fetch(`/api/courses/${resolvedCourseId}/sessions`, {
+        const response = await fetch(`/api/courses/${courseId}/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -509,9 +441,9 @@ export default function SessionCreationPage() {
 
         sessionId = data.session_id;
         setError(null);
-        setSuccess('Session created successfully! Navigating to first reading...');
+        setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
         // Refresh sessions list
-        fetchSessions();
+        // fetchSessions();
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -525,7 +457,7 @@ export default function SessionCreationPage() {
             sessionId,
             readingIds: selectedReadingIds,
             currentIndex: 0,
-            courseId: resolvedCourseId,
+            courseId: courseId,
             profileId,
             instructorId: resolvedInstructorId,
           })
@@ -534,7 +466,7 @@ export default function SessionCreationPage() {
       
       // Navigate to scaffold display page with navigation context (but don't generate scaffolds yet)
       setTimeout(() => {
-        router.push(`/courses/${resolvedCourseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
+        router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
       }, 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start scaffolds generation. Please try again.');
@@ -543,27 +475,61 @@ export default function SessionCreationPage() {
     }
   };
 
-  const handleContinueWithSession = async () => {
-    if (!selectedSessionId) {
-      setError('Please select a session.');
-      return;
-    }
-    // Navigate to same page with session_id in URL to load and edit
-    const courseIdStr = Array.isArray(resolvedCourseId) ? resolvedCourseId[0] : resolvedCourseId;
-    const profileIdStr = Array.isArray(profileId) ? profileId[0] : profileId;
-    
-    const params = new URLSearchParams();
-    params.set('sessionId', selectedSessionId);
-    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-    if (courseIdStr) params.set('courseId', courseIdStr);
-    
-    // Use RESTful URL structure if courseId is available in path
-    if (courseIdStr && profileIdStr) {
-      router.push(`/courses/${courseIdStr}/sessions/create?${params.toString()}`);
+  const handleReadingSelect = (readingId: string, isSelected: boolean) => {
+    if (isSelected) {
+      setSelectedReadingIds(prev => [...prev, readingId]);
     } else {
-      router.push(`/class-profile/${profileIdStr}/session/create?${params.toString()}`);
+      setSelectedReadingIds(prev => prev.filter(id => id !== readingId));
     }
   };
+
+  const displayReadings = useMemo(
+    () =>
+      readings.map(reading => ({
+        ...reading,
+        displaySize: reading.sizeLabel,
+        displayDate: reading.createdAt
+          ? new Date(reading.createdAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          : undefined,
+        usageCount: reading.usageCount ?? 0,
+        lastUsedLabel: reading.lastUsedAt
+          ? new Date(reading.lastUsedAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          : null,
+      })),
+    [readings]
+  );
+
+  const displaySessions = useMemo(
+    () =>
+      sessions.map(session => ({
+        ...session,
+        displayDate: session.createdAt
+          ? new Date(session.createdAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          : undefined,
+        readingCount: session.readingIds?.length || 0,
+      })),
+    [sessions]
+  );
+
+  if (isLoadingExistingSession) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading session...</div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>
@@ -581,16 +547,10 @@ export default function SessionCreationPage() {
           <div className={styles.headerActions}>
             <button
               onClick={() => {
-                // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
-                if (resolvedCourseId && profileId) {
-                  router.push(`/courses/${resolvedCourseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+                if (profileId) {
+                  router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
                 } else {
-                  // Fallback to old structure with query params
-                  const params = new URLSearchParams();
-                  if (resolvedCourseId) params.set('courseId', resolvedCourseId);
-                  if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-                  const queryString = params.toString();
-                  router.push(`/class-profile/${profileId}/reading${queryString ? `?${queryString}` : ''}`);
+                  router.push(`/courses/${courseId}/readings`);
                 }
               }}
               className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
@@ -610,7 +570,7 @@ export default function SessionCreationPage() {
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
               disabled={creating || !selectedReadingIds.length}
             >
-              {creating ? 'Starting...' : `Start scaffolds generation)`}
+              {creating ? 'Starting...' : `Start scaffolds generation`}
             </button>
           </div>
         </div>
@@ -648,9 +608,7 @@ export default function SessionCreationPage() {
             </div>
 
             <div className={styles.readingList}>
-              {loadingSessions ? (
-                <div className={styles.emptyState}>Loading sessions…</div>
-              ) : sessions.length === 0 ? (
+              {sessions.length === 0 ? (
                 <div className={styles.emptyState}>
                   No sessions found. Click "Create New Session" to get started.
                 </div>
@@ -667,20 +625,14 @@ export default function SessionCreationPage() {
                       <div className={styles.readingMeta}>
                         <div>
                           <p className={styles.readingName}>
-                            {session.title || `Week ${session.week_number} Session`}
+                            {session.title || `Week ${session.weekNumber} Session`}
                           </p>
                           <p className={styles.readingDetails}>
-                            Week {session.week_number} · {session.reading_ids.length} reading{session.reading_ids.length !== 1 ? 's' : ''}
-                            {session.created_at && (
-                              <> · {new Date(session.created_at).toLocaleDateString()}</>
+                            Week {session.weekNumber} · {session.readingIds?.length || 0} reading{(session.readingIds?.length || 0) !== 1 ? 's' : ''}
+                            {session.createdAt && (
+                              <> · {new Date(session.createdAt).toLocaleDateString()}</>
                             )}
                           </p>
-                          {session.current_version?.session_info_json?.description && (
-                            <p className={styles.readingSecondaryDetail} style={{ marginTop: '0.5rem' }}>
-                              {session.current_version.session_info_json.description.substring(0, 100)}
-                              {session.current_version.session_info_json.description.length > 100 ? '...' : ''}
-                            </p>
-                          )}
                         </div>
                       </div>
                       <div className={styles.readingActions}>
@@ -688,7 +640,7 @@ export default function SessionCreationPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleUseSession();
+                            handleContinueWithSession();
                           }}
                           className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
                           disabled={!isSelected}
@@ -706,29 +658,14 @@ export default function SessionCreationPage() {
 
         {!isLoadingExistingSession && mode === 'create' && (
           <>
-            {(sessions.length > 0 || urlSessionId) && (
+            {sessions.length > 0 && (
               <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <button
-                  onClick={() => {
-                    if (urlSessionId) {
-                      // If loading from URL, go back to readings page
-                      if (resolvedCourseId && profileId) {
-                        router.push(`/courses/${resolvedCourseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
-                      } else {
-                        const params = new URLSearchParams();
-                        if (resolvedCourseId) params.set('courseId', resolvedCourseId);
-                        if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-                        const queryString = params.toString();
-                        router.push(`/class-profile/${profileId}/reading${queryString ? `?${queryString}` : ''}`);
-                      }
-                    } else {
-                      setMode('select');
-                    }
-                  }}
+                  onClick={() => setMode('select')}
                   className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
                   disabled={creating}
                 >
-                  ← Back {urlSessionId ? 'to Readings' : 'to Session Selection'}
+                  ← Back to Session Selection
                 </button>
                 {urlSessionId && isDraftDirty && (
                   <div style={{ 
@@ -861,15 +798,13 @@ export default function SessionCreationPage() {
                 disabled={creating || !selectedReadingIds.length}
                 style={{ whiteSpace: 'nowrap' }}
               >
-                {creating ? 'Starting...' : `Start scaffolds generation${selectedReadingIds.length > 0 ? ` (${selectedReadingIds.length})` : ''}`}
+                {creating ? 'Starting...' : `Start scaffolds generation`}
               </button>
             </div>
           </div>
 
           <div className={styles.readingList}>
-            {loadingList ? (
-              <div className={styles.emptyState}>Loading readings…</div>
-            ) : displayReadings.length === 0 ? (
+            {readings.length === 0 ? (
               <div className={styles.emptyState}>
                 No readings available. Please upload readings first.
               </div>
@@ -914,7 +849,7 @@ export default function SessionCreationPage() {
                     <div className={styles.readingActions}>
                       <button
                         type="button"
-                        onClick={() => toggleSelection(reading.id)}
+                        onClick={() => handleReadingSelect(reading.id, !isSelected)}
                         className={`${styles.selectionButton} ${
                           isSelected ? styles.selectionButtonActive : ''
                         }`}
@@ -935,4 +870,3 @@ export default function SessionCreationPage() {
     </div>
   );
 }
-

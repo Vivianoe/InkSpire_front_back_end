@@ -1,0 +1,229 @@
+/* ===== Button Styles ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary action button */
+.btnPrimary {
+  background-color: #e1f2fd;
+  border: 1px solid #57adea;
+  color: #1e3a5f;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background-color: #cce7fa;
+}
+
+.btnStartSession {
+  border: 1px solid #cdb8e1;
+  background-color: #f6edff;
+  color: #4a1d73;
+}
+
+.btnStartSession:hover:not(:disabled) {
+  background-color: #ede0fb;
+}
+
+.btnRegenerateAi {
+  border: 1px solid #b3ce9d !important;
+  background-color: #eefae4 !important;
+  color: #2f4b16 !important;
+}
+
+.btnRegenerateAi:hover:not(:disabled) {
+  background-color: #e2f2d3 !important;
+}
+
+/* Secondary button */
+.btnNeutral {
+  background-color: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+.btnNeutral:hover:not(:disabled) {
+  background-color: #e5e7eb;
+}
+
+/* Accept button */
+.btnAccept {
+  background-color: #f0fae6;
+  color: #166534;
+  border: 1px solid #c9e0b3;
+}
+
+.btnAccept:hover:not(:disabled) {
+  background-color: #e6f5d9;
+}
+
+/* Reject button */
+.btnReject {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.btnReject:hover:not(:disabled) {
+  background-color: #fee2e2;
+}
+
+/* Neutral / outline buttons */
+.btnOutline,
+.btnModify {
+  background-color: transparent;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+}
+
+.btnOutline:hover:not(:disabled),
+.btnModify:hover:not(:disabled) {
+  background-color: #f3f4f6;
+}
+
+/* ===== Form Field Styles ===== */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.fieldLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #111827;
+}
+
+.fieldHint {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.fieldControl {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: #111827;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fieldControl::placeholder {
+  color: #9ca3af;
+}
+
+.fieldControl:focus {
+  outline: none;
+  border-color: #d1d5db;
+  box-shadow: 0 0 0 4px #f3f4f6;
+}
+
+.fieldTextarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.fieldActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* ===== Loading Spinner ===== */
+.loadingSpinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #f3f4f6;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ===== Modal Styles ===== */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 999;
+  padding: 1.5rem;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 0.75rem;
+  width: min(36rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modalHeader h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.modalBody {
+  padding: 1.5rem;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* ===== Responsive Design ===== */
+@media (max-width: 640px) {
+  .modal {
+    width: 100%;
+    max-height: 100vh;
+  }
+
+  .modalActions {
+    flex-direction: column-reverse;
+  }
+
+  .modalActions button {
+    width: 100%;
+  }
+}
