@@ -63,6 +63,8 @@ export default function ScaffoldPage() {
   const [modificationRequest, setModificationRequest] = useState('');
   const modificationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentReviewIndex, setCurrentReviewIndex] = useState<number>(-1);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
   
   // Form data for session info
   const [sessionInfo, setSessionInfo] = useState('');
@@ -131,6 +133,15 @@ export default function ScaffoldPage() {
     }
   }, [courseId, sessionId, readingId]);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   // Navigation functions
   const navigateToReading = (direction: 'prev' | 'next') => {
     if (!navigationData) return;
@@ -167,6 +178,18 @@ export default function ScaffoldPage() {
 
   const canGoPrev = navigationData && navigationData.currentIndex > 0;
   const canGoNext = navigationData && navigationData.currentIndex < navigationData.readingIds.length - 1;
+
+  // Toast functions； need to be modified for better user experience
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, 5000);
+  };
 
   // Helper functions for processing review response
   const keyForId = (value: number | string) => String(value);
@@ -374,6 +397,7 @@ export default function ScaffoldPage() {
         };
         processReviewResponse(scaffold.id, responseData);
         setModificationRequest('');
+        showToast('Refine with LLM succeeded.');
         return;
       }
 
@@ -457,6 +481,7 @@ export default function ScaffoldPage() {
 
       processReviewResponse(currentCard.id, responseData);
       setModificationRequest('');
+      showToast('Refine with LLM succeeded.');
     } catch (err) {
       console.error('Modification request failed:', err);
       alert('Failed to send modification request. Please try again.');
@@ -708,7 +733,31 @@ ${scaffold.text || 'No scaffold text available'}
   return (
     <div className={`${styles.page} ${styles.hasThreeColumnLayout}`}>
       <Navigation />
-      
+
+      {toastMessage ? (
+        <div
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            right: '1rem',
+            zIndex: 1000,
+            background: '#ecfdf5',
+            border: '1px solid #34d399',
+            color: '#065f46',
+            padding: '0.75rem 1rem',
+            borderRadius: '0.75rem',
+            boxShadow: '0 16px 32px rgba(15, 23, 42, 0.12)',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            maxWidth: '22rem',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          {toastMessage}
+        </div>
+      ) : null}
+
       {/* Three-column layout */}
       <div className={styles.layoutAfterGeneration}>
         {/* Left: Info Panel */}
