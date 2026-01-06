@@ -58,15 +58,19 @@ export default function ScaffoldPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
-  
-  // Modification request state
+  const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
+  const [manualEditMap, setManualEditMap] = useState<Record<string, string>>({});
   const [modificationRequest, setModificationRequest] = useState('');
   const modificationTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [currentReviewIndex, setCurrentReviewIndex] = useState<number>(-1);
   
   // Form data for session info
   const [sessionInfo, setSessionInfo] = useState('');
   const [assignmentDescription, setAssignmentDescription] = useState('');
   const [assignmentGoals, setAssignmentGoals] = useState('');
+  
+  // Generate scaffolds state
+  const [generating, setGenerating] = useState(false);
   
   // Publish states
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -164,40 +168,256 @@ export default function ScaffoldPage() {
   const canGoPrev = navigationData && navigationData.currentIndex > 0;
   const canGoNext = navigationData && navigationData.currentIndex < navigationData.readingIds.length - 1;
 
+  // Helper functions for processing review response
+  const keyForId = (value: number | string) => String(value);
+
+  const getScaffoldTextValue = (scaffold: ScaffoldData) => {
+    if (typeof scaffold.text === 'string') {
+      return scaffold.text;
+    }
+    return '';
+  };
+
+  const processReviewResponse = (
+    targetCardId: number | string | null,
+    data: any,
+    fallbackStatus?: 'ACCEPTED' | 'REJECTED'
+  ) => {
+    if (data?.__interrupt__ === null) {
+      setCurrentReviewIndex(-1);
+    } else if (typeof data?.__interrupt__?.index === 'number') {
+      setCurrentReviewIndex(data.__interrupt__.index);
+    }
+
+    const actionResult = data?.action_result;
+    const resolveTargetKey = (): string | null => {
+      if (targetCardId !== null && targetCardId !== undefined) {
+        return keyForId(targetCardId);
+      }
+      if (actionResult?.id) {
+        const match = scaffolds.find(
+          (s) =>
+            keyForId(s.id) === keyForId(actionResult.id)
+        );
+        if (match) {
+          return keyForId(match.id);
+        }
+      }
+      return null;
+    };
+
+    const targetKey = resolveTargetKey();
+    if (!targetKey) {
+      return;
+    }
+
+    if (actionResult) {
+      const normalizedResultText = typeof actionResult.text === 'string' ? actionResult.text : '';
+      const normalizedStatus = typeof actionResult.status === 'string' ? actionResult.status.toLowerCase() : '';
+
+      setScaffolds((prev) =>
+        prev.map((s) => {
+          if (keyForId(s.id) === targetKey) {
+            let nextStatus = s.status;
+            if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
+            else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
+            else if (normalizedStatus === 'pending' || normalizedStatus === 'draft' || normalizedStatus === 'edit_pending') nextStatus = 'IN PROGRESS';
+
+            return {
+              ...s,
+              status: nextStatus,
+              fragment: actionResult.fragment ?? s.fragment,
+              text: normalizedResultText || s.text,
+              history: Array.isArray(actionResult.history) ? actionResult.history : s.history ?? [],
+            };
+          }
+          return s;
+        })
+      );
+
+      setManualEditMap((prev) => {
+        const next = { ...prev };
+        next[targetKey] = normalizedResultText || next[targetKey] || '';
+        return next;
+      });
+
+      if (manualEditOpenId === targetKey && (normalizedStatus === 'approved' || normalizedStatus === 'rejected')) {
+        setManualEditOpenId(null);
+      }
+
+    } else if (fallbackStatus) {
+      setScaffolds((prev) =>
+        prev.map((s) => {
+          if (keyForId(s.id) === targetKey) {
+            return { ...s, status: fallbackStatus };
+          }
+          return s;
+        })
+      );
+
+      if (manualEditOpenId === targetKey) {
+        setManualEditOpenId(null);
+      }
+    }
+  };
+
+  const openManualEditForScaffold = (scaffold: ScaffoldData) => {
+    const key = keyForId(scaffold.id);
+    setManualEditOpenId(key);
+    setManualEditMap((prevMap) => ({
+      ...prevMap,
+      [key]: prevMap[key] ?? getScaffoldTextValue(scaffold),
+    }));
+
+    setScaffolds((prev) =>
+      prev.map((s) => {
+        if (keyForId(s.id) === key) {
+          if (s.status === 'ACCEPTED' || s.status === 'REJECTED') {
+            return { ...s, status: 'IN PROGRESS' };
+          }
+        }
+        return s;
+      })
+    );
+  };
+
+  const handleManualEditInputChange = (key: string, value: string) => {
+    setManualEditMap((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const submitManualEdit = async (scaffold: ScaffoldData, valueOverride?: string) => {
+    const key = keyForId(scaffold.id);
+    const editedValueRaw = valueOverride ?? manualEditMap[key] ?? '';
+    const editedValue = editedValueRaw.trim();
+    if (!editedValue) {
+      alert('Please enter the updated text before saving.');
+      return null;
+    }
+
+    const scaffoldIdForRequest = scaffold.id;
+
+    const editUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffoldIdForRequest}/edit`;
+    const res = await fetch(editUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_text: editedValue }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Manual edit failed: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const responseData = {
+      action_result: data.scaffold,
+      __interrupt__: null,
+    };
+    processReviewResponse(scaffold.id, responseData);
+    setManualEditMap((prev) => ({
+      ...prev,
+      [key]: valueOverride ?? editedValueRaw,
+    }));
+    return responseData;
+  };
+
   // Scaffold action handlers
-  const handleScaffoldAction = async (scaffoldId: string, action: 'approve' | 'reject' | 'edit') => {
-    setManualEditSubmittingId(scaffoldId);
-    
+  const handleScaffoldAction = async (scaffoldId: string, action: 'accept' | 'reject' | 'llm-edit' | 'edit') => {
+    const scaffoldIndex = scaffolds.findIndex((s) => keyForId(s.id) === keyForId(scaffoldId));
+    if (scaffoldIndex === -1) return;
+    const scaffold = scaffolds[scaffoldIndex];
+
+    if (scaffold?.fragment) {
+      setActiveFragment(scaffold.fragment);
+    }
+
     try {
-      const response = await fetch(
-        `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffoldId}/${action}`,
-        {
+      if (action === 'edit') {
+        setCurrentReviewIndex(scaffoldIndex);
+        openManualEditForScaffold(scaffold);
+        return;
+      }
+
+      if (action === 'llm-edit') {
+        const message = modificationRequest.trim();
+        setCurrentReviewIndex(scaffoldIndex);
+        if (!message) {
+          setTimeout(() => {
+            modificationTextareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            modificationTextareaRef.current?.focus();
+          }, 100);
+          return;
+        }
+
+        const scaffoldKey = keyForId(scaffold.id);
+        setManualEditSubmittingId(scaffoldKey);
+
+        const llmRefineUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffold.id}/llm-refine`;
+        const res = await fetch(llmRefineUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: message,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`LLM refine API failed: ${res.status}`);
         }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.detail || errorData?.message || `Failed to ${action} scaffold`);
+        const json = await res.json();
+        const responseData = {
+          action_result: json.scaffold,
+          __interrupt__: null,
+        };
+        processReviewResponse(scaffold.id, responseData);
+        setModificationRequest('');
+        return;
       }
 
-      console.log(`[ScaffoldPage] ${action} successful for scaffold ${scaffoldId}`);
-      
-      // Refresh scaffolds
-      const refreshResponse = await fetch(
-        `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
-      );
-      if (refreshResponse.ok) {
-        const data = await refreshResponse.json();
-        console.log('[ScaffoldPage] Refreshed scaffolds:', data.scaffolds);
-        setScaffolds(data.scaffolds || []);
-      } else {
-        console.error('[ScaffoldPage] Failed to refresh scaffolds');
+      const scaffoldKey = keyForId(scaffold.id);
+      if (action === 'accept') {
+        setManualEditSubmittingId(scaffoldKey);
       }
+
+      const originalBuffer = getScaffoldTextValue(scaffold).trim();
+      const editedRawValue = manualEditMap[scaffoldKey] ?? getScaffoldTextValue(scaffold);
+      const editedBuffer = editedRawValue.trim();
+
+      if (action === 'accept' && editedBuffer && editedBuffer !== originalBuffer) {
+        const manualEditResponse = await submitManualEdit(scaffold, editedRawValue);
+        if (!manualEditResponse) {
+          return;
+        }
+      }
+
+      const endpoint =
+        action === 'accept'
+          ? `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffold.id}/approve`
+          : `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffold.id}/reject`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        throw new Error(`${action} API failed: ${res.status}`);
+      }
+
+      const responseJson = await res.json();
+      const data = {
+        action_result: responseJson.scaffold,
+        __interrupt__: null,
+      };
+
+      processReviewResponse(scaffold.id, data, action === 'accept' ? 'ACCEPTED' : 'REJECTED');
     } catch (err) {
-      console.error(`Failed to ${action} scaffold:`, err);
-      alert(err instanceof Error ? err.message : `Failed to ${action} scaffold`);
+      console.error('Review action failed:', err);
+      alert('Failed to process review action. Please try again.');
     } finally {
       setManualEditSubmittingId(null);
     }
@@ -210,17 +430,83 @@ export default function ScaffoldPage() {
       return;
     }
 
+    const currentCard = scaffolds[currentReviewIndex] ?? null;
+    if (!currentCard) {
+      return;
+    }
+
     try {
-      console.log('[ScaffoldPage] Sending modification request:', message);
-      
-      // For now, just show an alert. In a full implementation, this would call the LLM refine API
-      alert(`Modification request sent: ${message}\n\nIn a full implementation, this would call the LLM refine API to modify scaffolds based on your request.`);
-      
-      // Clear the modification request
+      const llmRefineUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${currentCard.id}/llm-refine`;
+      const res = await fetch(llmRefineUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: message,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`LLM refine API failed: ${res.status}`);
+      }
+
+      const json = await res.json();
+      const responseData = {
+        action_result: json.scaffold,
+        __interrupt__: null,
+      };
+
+      processReviewResponse(currentCard.id, responseData);
       setModificationRequest('');
     } catch (err) {
-      console.error('Failed to send modification request:', err);
+      console.error('Modification request failed:', err);
       alert('Failed to send modification request. Please try again.');
+    }
+  };
+
+  // Handle generate scaffolds
+  const handleGenerateScaffolds = async () => {
+    try {
+      setGenerating(true);
+      setError(null);
+      
+      console.log('[ScaffoldPage] Generating scaffolds for session:', sessionId, 'reading:', readingId);
+      
+      const payload = {
+        instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
+      };
+      
+      const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData?.detail || errorData?.message || 'Failed to generate scaffolds.');
+      }
+      
+      console.log('[ScaffoldPage] Scaffolds generated successfully');
+      
+      // Refresh scaffolds
+      const refreshResponse = await fetch(
+        `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
+      );
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        console.log('[ScaffoldPage] Refreshed scaffolds:', data.scaffolds);
+        setScaffolds(data.scaffolds || []);
+      } else {
+        console.error('[ScaffoldPage] Failed to refresh scaffolds');
+      }
+      
+      alert('Scaffolds generated successfully!');
+    } catch (err) {
+      console.error('Failed to generate scaffolds:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
+      alert(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -515,6 +801,18 @@ ${scaffold.text || 'No scaffold text available'}
               </div>
             )}
 
+            {/* Generate Scaffolds Button */}
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+              <button
+                onClick={handleGenerateScaffolds}
+                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                disabled={generating}
+                style={{ width: '100%', maxWidth: '300px' }}
+              >
+                {generating ? 'Generating...' : 'Generate Scaffolds'}
+              </button>
+            </div>
+
             {/* Back button */}
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
               <button
@@ -615,6 +913,7 @@ ${scaffold.text || 'No scaffold text available'}
                   const scaffoldKey = scaffold.id;
                   const hasDecisionButtons = scaffold.status !== 'ACCEPTED' && scaffold.status !== 'REJECTED';
                   const actionClassName = `${styles.scaffoldActions} ${!hasDecisionButtons ? styles.scaffoldActionsCompact : ''}`;
+                  const isEditing = manualEditOpenId === scaffoldKey;
                   
                   return (
                     <div
@@ -694,14 +993,63 @@ ${scaffold.text || 'No scaffold text available'}
                             }}>
                               Scaffold Question:
                             </p>
-                            <p style={{ 
-                              margin: '0', 
-                              fontSize: '0.9rem', 
-                              color: '#1e3a8a',
-                              lineHeight: '1.5'
-                            }}>
-                              {scaffold.text}
-                            </p>
+                            {isEditing ? (
+                              <div>
+                                <textarea
+                                  className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
+                                  style={{ width: '100%', minHeight: '140px' }}
+                                  value={manualEditMap[scaffoldKey] ?? ''}
+                                  onChange={(e) => handleManualEditInputChange(scaffoldKey, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  autoFocus
+                                />
+                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setManualEditOpenId(null);
+                                    }}
+                                    disabled={manualEditSubmittingId === scaffoldKey}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        setManualEditSubmittingId(scaffoldKey);
+                                        const rawScaffold = scaffolds.find((s) => keyForId(s.id) === scaffoldKey);
+                                        if (!rawScaffold) {
+                                          throw new Error('Scaffold not found');
+                                        }
+                                        await submitManualEdit(rawScaffold, manualEditMap[scaffoldKey] ?? '');
+                                      } catch (err) {
+                                        console.error('Manual edit failed:', err);
+                                        alert('Manual edit failed. Please try again.');
+                                      } finally {
+                                        setManualEditSubmittingId(null);
+                                      }
+                                    }}
+                                    disabled={manualEditSubmittingId === scaffoldKey}
+                                  >
+                                    Save
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p style={{ 
+                                margin: '0', 
+                                fontSize: '0.9rem', 
+                                color: '#1e3a8a',
+                                lineHeight: '1.5'
+                              }}>
+                                {scaffold.text}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -714,7 +1062,7 @@ ${scaffold.text || 'No scaffold text available'}
                               disabled={manualEditSubmittingId === scaffoldKey}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleScaffoldAction(scaffold.id, 'approve');
+                                handleScaffoldAction(scaffold.id, 'accept');
                               }}
                             >
                               Accept
@@ -730,14 +1078,25 @@ ${scaffold.text || 'No scaffold text available'}
                             </button>
                           </>
                         )}
-                        <button 
+                        <button
+                          className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleScaffoldAction(scaffold.id, 'llm-edit');
+                          }}
+                          disabled={manualEditSubmittingId === scaffoldKey}
+                        >
+                          Refine with LLM
+                        </button>
+                        <button
                           className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleScaffoldAction(scaffold.id, 'edit');
                           }}
+                          disabled={manualEditSubmittingId === scaffoldKey}
                         >
-                          Modify
+                          Edit
                         </button>
                       </div>
                     </div>

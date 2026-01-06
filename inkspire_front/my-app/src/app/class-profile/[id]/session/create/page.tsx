@@ -394,11 +394,11 @@ export default function SessionCreationPage() {
           }
 
           setError(null);
-          setSuccess('New version created successfully! Click "Generate Scaffolds" to proceed.');
+          setSuccess('New version created successfully! Click "Start scaffolds generation" to proceed.');
         } else {
           // No changes, just confirm session is ready
           setError(null);
-          setSuccess('Session ready. Click "Generate Scaffolds" to proceed.');
+          setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
         }
       } else {
         // Create new session
@@ -425,7 +425,7 @@ export default function SessionCreationPage() {
         // Store the created session ID
         setSelectedSessionId(data.session_id);
         setError(null);
-        setSuccess('Session created successfully! Click "Generate Scaffolds" to proceed.');
+        setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
         // Refresh sessions list
         fetchSessions();
       }
@@ -436,7 +436,7 @@ export default function SessionCreationPage() {
     }
   };
 
-  const handleGenerateScaffolds = async () => {
+  const handleStartScaffoldsGeneration = async () => {
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -447,18 +447,46 @@ export default function SessionCreationPage() {
       setError(null);
 
       let sessionId: string;
-      let shouldCreateNewVersion = false;
 
       // If continuing existing session, check if we need to create new version
       if (urlSessionId || selectedSessionId) {
         sessionId = urlSessionId || selectedSessionId!;
         
-        // If draft is dirty, we'll create a new version when generating scaffolds
+        // If draft is dirty, we'll create a new version when navigating
         if (isDraftDirty) {
-          shouldCreateNewVersion = true;
+          const payload = {
+            session_info_json: {
+              description: sessionDescription || undefined,
+            },
+            assignment_info_json: {
+              description: assignmentDescription || undefined,
+            },
+            assignment_goals_json: {
+              goal: assignmentGoal || undefined,
+            },
+            reading_ids: selectedReadingIds,
+          };
+
+          const response = await fetch(`/api/courses/${resolvedCourseId}/sessions/${sessionId}/versions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.detail || data?.message || 'Failed to create new version.');
+          }
+
+          setError(null);
+          setSuccess('New version created successfully! Navigating to first reading...');
+        } else {
+          // No changes, just confirm session is ready
+          setError(null);
+          setSuccess('Session ready. Navigating to first reading...');
         }
       } else {
-        // Create new session first
+        // Create new session
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
@@ -480,7 +508,10 @@ export default function SessionCreationPage() {
         }
 
         sessionId = data.session_id;
-        shouldCreateNewVersion = true; // New session always creates version 1
+        setError(null);
+        setSuccess('Session created successfully! Navigating to first reading...');
+        // Refresh sessions list
+        fetchSessions();
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -501,38 +532,12 @@ export default function SessionCreationPage() {
         );
       }
       
-      // Check if scaffolds already exist for this session and reading
-      const existingScaffoldsResponse = await fetch(`/api/courses/${resolvedCourseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds`);
-      
-      if (existingScaffoldsResponse.ok) {
-        const existingScaffolds = await existingScaffoldsResponse.json();
-        if (existingScaffolds.scaffolds && existingScaffolds.scaffolds.length > 0) {
-          // Scaffolds already exist, navigate to display them with navigation context
-          router.push(`/courses/${resolvedCourseId}/sessions/${sessionId}/reading/${firstReadingId}/scaffolds?navigation=true`);
-          return;
-        }
-      }
-      
-      // No existing scaffolds, generate new ones
-      const payload = {
-        instructor_id: resolvedInstructorId,
-      };
-      
-      const generateResponse = await fetch(`/api/courses/${resolvedCourseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!generateResponse.ok) {
-        const errorData = await generateResponse.json().catch(() => ({}));
-        throw new Error(errorData?.detail || errorData?.message || 'Failed to generate scaffolds.');
-      }
-      
-      // Navigate to scaffold display page with navigation context
-      router.push(`/courses/${resolvedCourseId}/sessions/${sessionId}/reading/${firstReadingId}/scaffolds?navigation=true`);
+      // Navigate to scaffold display page with navigation context (but don't generate scaffolds yet)
+      setTimeout(() => {
+        router.push(`/courses/${resolvedCourseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
+      }, 1000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to start scaffolds generation. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -601,11 +606,11 @@ export default function SessionCreationPage() {
               {creating ? 'Creating...' : `Save Session (${selectedReadingIds.length} selected)`}
             </button>
             <button
-              onClick={handleGenerateScaffolds}
+              onClick={handleStartScaffoldsGeneration}
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
               disabled={creating || !selectedReadingIds.length}
             >
-              {creating ? 'Generating...' : `Generate Scaffolds (${selectedReadingIds.length} selected)`}
+              {creating ? 'Starting...' : `Start scaffolds generation)`}
             </button>
           </div>
         </div>
@@ -851,12 +856,12 @@ export default function SessionCreationPage() {
                 {creating ? 'Creating...' : 'Save Session'}
               </button>
               <button
-                onClick={handleGenerateScaffolds}
+                onClick={handleStartScaffoldsGeneration}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
                 disabled={creating || !selectedReadingIds.length}
                 style={{ whiteSpace: 'nowrap' }}
               >
-                {creating ? 'Generating...' : `Generate Scaffolds${selectedReadingIds.length > 0 ? ` (${selectedReadingIds.length})` : ''}`}
+                {creating ? 'Starting...' : `Start scaffolds generation${selectedReadingIds.length > 0 ? ` (${selectedReadingIds.length})` : ''}`}
               </button>
             </div>
           </div>
