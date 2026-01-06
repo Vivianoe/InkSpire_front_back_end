@@ -342,18 +342,24 @@ def generate_scaffolds_with_session(
     # Load class_profile from database (by course_id)
     class_profile_db = get_class_profile_by_course_id(db, course_uuid)
     if not class_profile_db:
+        print(f"[generate_scaffolds_with_session] ERROR: Class profile not found for course {payload.course_id}")
         raise HTTPException(
             status_code=404,
-            detail=f"Class profile not found for course {course_id}",
+            detail=f"Class profile not found for course {payload.course_id}. Please create a class profile first.",
         )
     
     # Parse class_profile JSON from description field
     try:
         class_profile_json = json_module.loads(class_profile_db.description)
-    except json_module.JSONDecodeError:
+        print(f"[generate_scaffolds_with_session] Successfully parsed class profile JSON")
+    except json_module.JSONDecodeError as json_error:
+        print(f"[generate_scaffolds_with_session] ERROR: Failed to parse class profile JSON: {json_error}")
+        print(f"[generate_scaffolds_with_session] Class profile description length: {len(class_profile_db.description) if class_profile_db.description else 0}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail="Failed to parse class profile JSON from database",
+            detail=f"Failed to parse class profile JSON from database: {str(json_error)}",
         )
     
     # Load or get current session version
@@ -506,6 +512,8 @@ def generate_scaffolds_with_session(
             print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
             print(f"[generate_scaffolds] Encoded content: {encoded}")
             return JSONResponse(content=encoded)
+        except HTTPException:
+            raise
         except Exception as response_error:
             print(f"[generate_scaffolds_with_session] ERROR building response: {response_error}")
             import traceback
@@ -513,16 +521,6 @@ def generate_scaffolds_with_session(
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to build response: {str(response_error)}",
-            )
-        except HTTPException:
-            raise
-        except Exception as final_error:
-            print(f"[generate_scaffolds_with_session] ERROR: Response cannot be serialized: {final_error}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Response serialization failed: {str(final_error)}",
             )
     except HTTPException:
         raise
@@ -773,6 +771,119 @@ def get_scaffolds_by_session(
     return {
         "scaffolds": scaffolds
     }
+
+# ======================================================
+# Load Scaffolds from Session (used for testing)
+# ======================================================
+
+@router.post("/load-scaffolds-from-session")
+def load_scaffolds_from_session(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Load existing scaffolds from database by session_id and reading_id.
+    Returns data in the same format as /api/generate-scaffolds.
+    Useful for testing without API calls.
+    """
+    session_id = payload.get("session_id")
+    reading_id = payload.get("reading_id")
+    
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    reading_uuid = None
+    if reading_id:
+        try:
+            reading_uuid = uuid.UUID(reading_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
+    # Get annotations from database
+    all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    
+    # Filter by reading_id if provided
+    if reading_uuid:
+        annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
+    else:
+        annotations = all_annotations
+    
+    if not annotations:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scaffolds found for session_id={session_id}" + 
+                   (f" and reading_id={reading_id}" if reading_id else "")
+        )
+    
+    print(f"[load_scaffolds_from_session] Found {len(annotations)} annotations")
+    
+    # Convert to full API format with status and history (same as generate-scaffolds)
+    full_scaffolds = []
+    for idx, annotation in enumerate(annotations):
+        try:
+            print(f"[load_scaffolds_from_session] Converting annotation {idx + 1}/{len(annotations)}: {annotation.id}")
+            annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+            
+            # Ensure fragment and text fields exist
+            if not annotation_dict.get('fragment') and annotation.highlight_text:
+                annotation_dict['fragment'] = annotation.highlight_text
+            if not annotation_dict.get('text') and annotation.current_content:
+                annotation_dict['text'] = annotation.current_content
+                
+            print(f"[load_scaffolds_from_session] Annotation {idx + 1} - fragment length: {len(annotation_dict.get('fragment', ''))}, text length: {len(annotation_dict.get('text', ''))}")
+            
+            scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**annotation_dict)
+            full_scaffolds.append(scaffold_model)
+            print(f"[load_scaffolds_from_session] Successfully converted annotation {idx + 1}")
+        except Exception as convert_error:
+            print(f"[load_scaffolds_from_session] ERROR converting annotation {idx + 1} ({annotation.id}): {convert_error}")
+            import traceback
+            traceback.print_exc()
+            continue  # Skip this annotation but continue with others
+    
+    # Get PDF URL from the first annotation's reading
+    pdf_url = None
+    if annotations:
+        first_annotation = annotations[0]
+        # Get reading from database
+        from app.models.models import Reading
+        reading = db.query(Reading).filter(Reading.id == first_annotation.reading_id).first()
+        if reading and reading.file_path:
+            try:
+                supabase = get_supabase_client()
+                bucket = supabase.storage.from_("readings")
+                signed_url = bucket.create_signed_url(reading.file_path, 60 * 60 * 24 * 7)  # 7 days
+                pdf_url = signed_url.get("signedURL") if signed_url else None
+            except Exception as url_error:
+                print(f"[load_scaffolds_from_session] Warning: Failed to get PDF URL: {url_error}")
+    
+    # Build response in same format as generate-scaffolds
+    try:
+        full_response = GenerateScaffoldsResponse(
+            annotation_scaffolds_review=full_scaffolds,
+            session_id=str(session_uuid),
+            reading_id=str(annotations[0].reading_id) if annotations else reading_id or "",
+            pdf_url=pdf_url,
+        )
+        
+        response_dict = full_response.model_dump(mode='json')
+        encoded = jsonable_encoder(response_dict)
+        
+        print(f"[load_scaffolds_from_session] Returning {len(full_scaffolds)} scaffolds")
+        return JSONResponse(content=encoded)
+    except Exception as response_error:
+        print(f"[load_scaffolds_from_session] ERROR building response: {response_error}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to build response: {str(response_error)}",
+        )
 
 
 @router.get("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds")

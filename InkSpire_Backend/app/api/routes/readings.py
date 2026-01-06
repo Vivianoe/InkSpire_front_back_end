@@ -33,6 +33,7 @@ from app.api.models import (
     ReadingListResponse,
     ReadingResponse,
     ReadingUploadItem,
+    ReadingContentResponse,
 )
 
 router = APIRouter()
