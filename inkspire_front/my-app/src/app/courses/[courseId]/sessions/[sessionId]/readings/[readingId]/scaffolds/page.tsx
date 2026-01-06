@@ -637,7 +637,7 @@ ${scaffold.text || 'No scaffold text available'}
       setPublishLoading(true);
       setPublishError(null);
       console.log('[ScaffoldPage] Publishing annotations with IDs:', annotationIds);
-      const response = await fetch(`/api/perusall/annotations`, {
+      const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ annotation_ids: annotationIds }),
@@ -653,6 +653,24 @@ ${scaffold.text || 'No scaffold text available'}
         ok: response.ok,
         data: data
       });
+
+      if (!response.ok) {
+        const detail = (data as any)?.detail;
+        if (
+          typeof detail === 'string' &&
+          detail.includes('No annotations found to post')
+        ) {
+          const nextMessage =
+            'Publish failed: highlight coordinates are missing for these scaffolds. Please wait for the PDF highlights to finish loading (coords are saved automatically), then try again. If the PDF never highlights, open the reading again and make sure fragments can be found.';
+          setPublishError(nextMessage);
+          showToast('Publish failed: missing highlight coordinates.');
+          return;
+        }
+
+        const fallback = typeof detail === 'string' ? detail : `Publish failed: ${response.status}`;
+        setPublishError(fallback);
+        return;
+      }
 
       if (!response.ok) {
         const errorMessage =

@@ -127,14 +127,15 @@ def post_annotations_to_perusall(
                     print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} not found")
                     continue
                 
-                # Verify annotation belongs to the specified course and reading
-                if annotation.course_id != course_uuid:
-                    print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} does not belong to course {course_id}")
-                    continue
-                
+                # Verify annotation belongs to the specified reading.
+                # Note: scaffold_annotations table does NOT store course_id; course ownership is implied by reading_id.
                 if annotation.reading_id != reading_uuid:
                     print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} does not belong to reading {reading_id}")
                     continue
+
+                print(
+                    f"[post_annotations_to_perusall] Using annotation {annotation_id_str} with current_version_id={annotation.current_version_id}"
+                )
                 
                 # Store first annotation for Perusall mapping lookup
                 if first_annotation is None:
@@ -149,6 +150,31 @@ def post_annotations_to_perusall(
                     AnnotationHighlightCoords.annotation_version_id == annotation.current_version_id,
                     AnnotationHighlightCoords.valid == True
                 ).all()
+
+                # Fallback: if current_version_id has no coords (e.g., after approve/edit/llm-refine creates new version),
+                # try older versions and use the most recent version that has coords.
+                if (not coords_list) and getattr(annotation, 'versions', None):
+                    try:
+                        versions_sorted = sorted(
+                            list(annotation.versions),
+                            key=lambda v: getattr(v, 'version_number', 0),
+                            reverse=True,
+                        )
+                        for v in versions_sorted:
+                            v_id = getattr(v, 'id', None)
+                            if not v_id:
+                                continue
+                            coords_list = db.query(AnnotationHighlightCoords).filter(
+                                AnnotationHighlightCoords.annotation_version_id == v_id,
+                                AnnotationHighlightCoords.valid == True
+                            ).all()
+                            if coords_list:
+                                print(
+                                    f"[post_annotations_to_perusall] Fallback: using highlight_coords from older version for annotation {annotation_id_str} (version_number={getattr(v, 'version_number', None)})"
+                                )
+                                break
+                    except Exception as e:
+                        print(f"[post_annotations_to_perusall] Fallback version scan failed for annotation {annotation_id_str}: {e}")
                 
                 if not coords_list:
                     print(f"[post_annotations_to_perusall] No highlight_coords found for annotation {annotation_id_str}")
