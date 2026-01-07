@@ -59,9 +59,14 @@ def batch_upload_readings(
         )
     
     # Validate and parse instructor_id from payload
+    if not payload.instructor_id:
+        raise HTTPException(
+            status_code=400,
+            detail="instructor_id is required and cannot be null",
+        )
     try:
         instructor_uuid = uuid.UUID(payload.instructor_id)
-    except ValueError:
+    except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid instructor_id format: {payload.instructor_id}",
@@ -259,7 +264,7 @@ def batch_upload_readings(
 
 
 @router.delete("/courses/{course_id}/readings/{reading_id}")
-def delete_reading(
+def delete_reading_endpoint(
     course_id: str,
     reading_id: str,
     db: Session = Depends(get_db)
@@ -308,7 +313,8 @@ def delete_reading(
         )
     
     # Delete reading using service function (cascade will handle reading_chunks)
-    delete_reading(db, reading_uuid)
+    from app.services.reading_service import delete_reading as delete_reading_service
+    delete_reading_service(db, reading_uuid)
     
     return {"success": True, "message": f"Reading {reading_id} deleted successfully"}
 

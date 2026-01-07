@@ -213,6 +213,7 @@ export default function ScaffoldPage() {
     }
 
     const actionResult = data?.action_result;
+    
     const resolveTargetKey = (): string | null => {
       if (targetCardId !== null && targetCardId !== undefined) {
         return keyForId(targetCardId);
@@ -238,9 +239,10 @@ export default function ScaffoldPage() {
       const normalizedResultText = typeof actionResult.text === 'string' ? actionResult.text : '';
       const normalizedStatus = typeof actionResult.status === 'string' ? actionResult.status.toLowerCase() : '';
 
-      setScaffolds((prev) =>
-        prev.map((s) => {
-          if (keyForId(s.id) === targetKey) {
+      setScaffolds((prev) => {
+        return prev.map((s) => {
+          const sKey = keyForId(s.id);
+          if (sKey === targetKey) {
             let nextStatus = s.status;
             if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
             else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
@@ -255,8 +257,8 @@ export default function ScaffoldPage() {
             };
           }
           return s;
-        })
-      );
+        });
+      });
 
       setManualEditMap((prev) => {
         const next = { ...prev };
@@ -348,15 +350,19 @@ export default function ScaffoldPage() {
 
   // Scaffold action handlers
   const handleScaffoldAction = async (scaffoldId: string, action: 'accept' | 'reject' | 'llm-edit' | 'edit') => {
-    const scaffoldIndex = scaffolds.findIndex((s) => keyForId(s.id) === keyForId(scaffoldId));
-    if (scaffoldIndex === -1) return;
-    const scaffold = scaffolds[scaffoldIndex];
-
-    if (scaffold?.fragment) {
-      setActiveFragment(scaffold.fragment);
-    }
-
     try {
+      const scaffoldIndex = scaffolds.findIndex((s) => keyForId(s.id) === keyForId(scaffoldId));
+      
+      if (scaffoldIndex === -1) {
+        return;
+      }
+      const scaffold = scaffolds[scaffoldIndex];
+
+      if (scaffold?.fragment) {
+        setActiveFragment(scaffold.fragment);
+      }
+
+      try {
       if (action === 'edit') {
         setCurrentReviewIndex(scaffoldIndex);
         openManualEditForScaffold(scaffold);
@@ -429,10 +435,17 @@ export default function ScaffoldPage() {
       });
 
       if (!res.ok) {
-        throw new Error(`${action} API failed: ${res.status}`);
+        const errorText = await res.text().catch(() => '');
+        throw new Error(`${action} API failed: ${res.status} - ${errorText}`);
       }
 
-      const responseJson = await res.json();
+      const responseText = await res.text();
+      const responseJson = JSON.parse(responseText);
+      
+      if (!responseJson.scaffold) {
+        throw new Error('Response missing scaffold field');
+      }
+      
       const data = {
         action_result: responseJson.scaffold,
         __interrupt__: null,
@@ -444,6 +457,10 @@ export default function ScaffoldPage() {
       alert('Failed to process review action. Please try again.');
     } finally {
       setManualEditSubmittingId(null);
+    }
+    } catch (outerErr) {
+      console.error('Error in handleScaffoldAction:', outerErr);
+      alert('An error occurred. Please try again.');
     }
   };
 
@@ -494,35 +511,70 @@ export default function ScaffoldPage() {
       setGenerating(true);
       setError(null);
       
-      console.log('[ScaffoldPage] Generating scaffolds for session:', sessionId, 'reading:', readingId);
-      
       const payload = {
         instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
       };
       
-      const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`, {
+      const generateUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`;
+      
+      const response = await fetch(generateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.detail || errorData?.message || 'Failed to generate scaffolds.');
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { detail: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        const errorMessage = errorData?.detail || errorData?.message || `Failed to generate scaffolds (HTTP ${response.status})`;
+        throw new Error(errorMessage);
       }
       
-      console.log('[ScaffoldPage] Scaffolds generated successfully');
+      // Try to use data from generate response first
+      const generateData = await response.json();
       
-      // Refresh scaffolds
-      const refreshResponse = await fetch(
-        `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
-      );
-      if (refreshResponse.ok) {
-        const data = await refreshResponse.json();
-        console.log('[ScaffoldPage] Refreshed scaffolds:', data.scaffolds);
-        setScaffolds(data.scaffolds || []);
+      // Check if response contains scaffolds
+      if (generateData.annotation_scaffolds_review && generateData.annotation_scaffolds_review.length > 0) {
+        // Convert to ScaffoldData format
+        const convertedScaffolds = generateData.annotation_scaffolds_review.map((scaffold: any) => ({
+          id: scaffold.id || scaffold.annotation_id || String(Math.random()),
+          fragment: scaffold.fragment || scaffold.highlight_text || '',
+          text: scaffold.text || scaffold.current_content || '',
+          status: scaffold.status || 'draft',
+          history: scaffold.history || [],
+        }));
+        setScaffolds(convertedScaffolds);
+        
+        // Update PDF URL if provided
+        if (generateData.pdf_url) {
+          setPdfUrl(generateData.pdf_url);
+        }
       } else {
-        console.error('[ScaffoldPage] Failed to refresh scaffolds');
+        // If no scaffolds in response, refresh from API
+        const refreshResponse = await fetch(
+          `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
+        );
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json();
+          setScaffolds(data.scaffolds || []);
+          
+          // Update PDF URL if provided
+          if (data.pdfUrl) {
+            setPdfUrl(data.pdfUrl);
+          }
+          
+          // If still no scaffolds, show a warning
+          if (!data.scaffolds || data.scaffolds.length === 0) {
+            setError('Scaffolds were not generated. Please check the backend logs for details.');
+          }
+        } else {
+          const errorData = await refreshResponse.json().catch(() => ({}));
+          throw new Error(errorData?.detail || errorData?.message || 'Failed to refresh scaffolds after generation.');
+        }
       }
       
       alert('Scaffolds generated successfully!');
@@ -537,6 +589,21 @@ export default function ScaffoldPage() {
 
   // Process scaffolds for display
   const processedScaffolds = scaffolds.map((scaffold, index) => {
+    // Map status: preserve ACCEPTED/REJECTED, convert pending/approved/rejected to display format
+    let displayStatus: string;
+    if (scaffold.status === 'ACCEPTED' || scaffold.status === 'REJECTED' || scaffold.status === 'IN PROGRESS') {
+      // Already in display format, use as-is
+      displayStatus = scaffold.status;
+    } else if (scaffold.status === 'pending' || scaffold.status === 'draft' || scaffold.status === 'edit_pending') {
+      displayStatus = 'IN PROGRESS';
+    } else if (scaffold.status === 'approved') {
+      displayStatus = 'ACCEPTED';
+    } else if (scaffold.status === 'rejected') {
+      displayStatus = 'REJECTED';
+    } else {
+      displayStatus = 'IN PROGRESS';
+    }
+    
     const processed = {
       ...scaffold,
       number: index + 1,
@@ -544,11 +611,8 @@ export default function ScaffoldPage() {
       type: 'Scaffold',
       backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][index % 5],
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
-      status: scaffold.status === 'pending' ? 'IN PROGRESS' : 
-              scaffold.status === 'approved' ? 'ACCEPTED' : 
-              scaffold.status === 'rejected' ? 'REJECTED' : 'IN PROGRESS'
+      status: displayStatus
     };
-    console.log(`[ScaffoldPage] Scaffold ${scaffold.id}: ${scaffold.status} -> ${processed.status}`);
     return processed;
   });
 
@@ -636,7 +700,6 @@ ${scaffold.text || 'No scaffold text available'}
     try {
       setPublishLoading(true);
       setPublishError(null);
-      console.log('[ScaffoldPage] Publishing annotations with IDs:', annotationIds);
       const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -644,14 +707,8 @@ ${scaffold.text || 'No scaffold text available'}
       });
 
       const data = await response.json().catch((e) => {
-        console.error('[ScaffoldPage] Failed to parse response JSON:', e);
+        console.error('Failed to parse response JSON:', e);
         return {};
-      });
-
-      console.log('[ScaffoldPage] Perusall API response:', {
-        status: response.status,
-        ok: response.ok,
-        data: data
       });
 
       if (!response.ok) {
@@ -679,7 +736,7 @@ ${scaffold.text || 'No scaffold text available'}
           data?.message ||
           (data?.errors && JSON.stringify(data.errors)) ||
           `Publish failed with status ${response.status}: ${response.statusText}`;
-        console.error('[ScaffoldPage] Perusall API error:', errorMessage);
+        console.error('Perusall API error:', errorMessage);
         throw new Error(errorMessage);
       }
 
@@ -689,25 +746,20 @@ ${scaffold.text || 'No scaffold text available'}
           data?.message ||
           (data?.errors && JSON.stringify(data.errors)) ||
           'Publish failed: Unknown error';
-        console.error('[ScaffoldPage] Perusall API returned success=false:', data);
+        console.error('Perusall API returned success=false:', data);
         throw new Error(errorMessage);
       }
 
       setShowPublishModal(false);
       alert('Scaffolds published successfully!');
     } catch (error) {
-      console.error('[ScaffoldPage] Publish failed:', error);
-      console.error('[ScaffoldPage] Error details:', {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      console.error('Publish failed:', error);
       
       const errorMessage = error instanceof Error 
         ? error.message 
         : 'Failed to publish scaffolds. Please try again.';
       
       setPublishError(errorMessage);
-      console.error('[ScaffoldPage] Error message displayed to user:', errorMessage);
     } finally {
       setPublishLoading(false);
     }
@@ -978,9 +1030,10 @@ ${scaffold.text || 'No scaffold text available'}
               ) : (
                 processedScaffolds.map((scaffold) => {
                   const scaffoldKey = scaffold.id;
-                  const hasDecisionButtons = scaffold.status !== 'ACCEPTED' && scaffold.status !== 'REJECTED';
-                  const actionClassName = `${styles.scaffoldActions} ${!hasDecisionButtons ? styles.scaffoldActionsCompact : ''}`;
+                  // Show decision buttons if status is not ACCEPTED/REJECTED, OR if currently editing (to allow re-review)
                   const isEditing = manualEditOpenId === scaffoldKey;
+                  const hasDecisionButtons = (scaffold.status !== 'ACCEPTED' && scaffold.status !== 'REJECTED') || isEditing;
+                  const actionClassName = `${styles.scaffoldActions} ${!hasDecisionButtons ? styles.scaffoldActionsCompact : ''}`;
                   
                   return (
                     <div
@@ -1126,8 +1179,10 @@ ${scaffold.text || 'No scaffold text available'}
                           <>
                             <button
                               className={`${uiStyles.btn} ${uiStyles.btnAccept}`}
+                              type="button"
                               disabled={manualEditSubmittingId === scaffoldKey}
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleScaffoldAction(scaffold.id, 'accept');
                               }}
@@ -1136,7 +1191,9 @@ ${scaffold.text || 'No scaffold text available'}
                             </button>
                             <button
                               className={`${uiStyles.btn} ${uiStyles.btnReject}`}
+                              type="button"
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleScaffoldAction(scaffold.id, 'reject');
                               }}

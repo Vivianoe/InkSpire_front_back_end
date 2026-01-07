@@ -51,7 +51,7 @@ const loadRangy = async () => {
 interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
-  readingId?: string | null;  // Reading ID for fallback when URL fails
+  readingId?: string | null;  // Reading ID for fallback when URL fails and for RESTful API calls
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -71,9 +71,8 @@ interface PdfPreviewProps {
   scaffoldIndex?: number;
   // Session ID for mapping fragments to annotation_version_id
   sessionId?: string | null;
-  // Course ID, Session ID, and Reading ID for RESTful API calls
+  // Course ID for RESTful API calls
   courseId?: string | null;
-  readingId?: string | null;
 }
 
 export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
@@ -214,7 +213,8 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   }, []);
 
   useEffect(() => {
-    if (!file && !url) {
+    // If no file and no url, but readingId is provided, use readingId to fetch PDF
+    if (!file && !url && !readingId) {
       setPdfDoc(null);
       setRenderedPages(new Set());
       setPageElements(new Map());
@@ -231,7 +231,43 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         if (!pdfjs || cancelled) return;
 
         let pdf;
-        if (url) {
+        // If no url but readingId is provided, fetch from API directly
+        if (!url && readingId) {
+          console.log('[PdfPreview] No URL provided, fetching PDF from API using readingId:', readingId);
+          try {
+            const response = await fetch(`/api/readings/${readingId}/content`);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch reading content: ${response.status}`);
+            }
+            const data = await response.json();
+            if (data?.content_base64) {
+              // Convert base64 to File object
+              const base64 = data.content_base64 as string;
+              const byteCharacters = atob(base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i += 1) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const mimeType = data?.mime_type || 'application/pdf';
+              const fileName = `reading_${readingId}.pdf`;
+              const blob = new Blob([byteArray], { type: mimeType });
+              const fallbackFile = new File([blob], fileName, { type: mimeType });
+              
+              // Load PDF from File object
+              const arrayBuffer = await fallbackFile.arrayBuffer();
+              pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+              console.log('[PdfPreview] PDF document loaded from API successfully');
+            } else {
+              throw new Error('No content_base64 in API response');
+            }
+          } catch (apiError: any) {
+            console.error('[PdfPreview] Error fetching PDF from API:', apiError);
+            setError(apiError?.message || 'Failed to load PDF');
+            setLoading(false);
+            return;
+          }
+        } else if (url) {
           // Load PDF from URL
           console.log('[PdfPreview] Loading PDF from URL:', url);
           try {
@@ -324,7 +360,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     loadPdf();
 
     return () => { cancelled = true; };
-  }, [file, url]);
+  }, [file, url, readingId]);
 
   /**
    * Calculates the optimal scale factor for PDF pages based on container width
@@ -1018,6 +1054,11 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     
     // Scroll to center highlight in viewport
+    if (!containerRef.current) {
+      console.warn('[PdfPreview] Container ref is not available, cannot scroll to highlight');
+      return;
+    }
+    
     const containerRect = containerRef.current.getBoundingClientRect();
     const containerHeight = containerRect.height;
     const pageHeight = pageEl.clientHeight;
@@ -1605,17 +1646,25 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
         }
 
-        // Fallback: If no searchQueries provided, try fetching from API； needs to be changed to fetch from backend
-        if (list.length === 0) {
+        // Fallback: If no searchQueries provided, try fetching from API using sessionId and readingId
+        if (list.length === 0 && sessionId && readingId) {
           try {
-            console.log('[PdfPreview] Fetching queries from API');
-            const qRes = await fetch('/api/queries');
+            console.log('[PdfPreview] Fetching queries from API (fallback)', { sessionId, readingId });
+            const params = new URLSearchParams();
+            if (sessionId) params.set('sessionId', sessionId);
+            if (readingId) params.set('readingId', readingId);
+            const qRes = await fetch(`/api/queries?${params.toString()}`);
             if (qRes.ok) {
               const { queries } = await qRes.json();
               list = Array.isArray(queries) ? queries : [];
+              console.log('[PdfPreview] Fetched', list.length, 'queries from API');
+            } else if (qRes.status === 404) {
+              // Endpoint doesn't exist, which is fine - just skip this fallback
+              console.log('[PdfPreview] /api/queries endpoint not found, skipping fallback');
             }
           } catch (e) {
-            console.warn('[PdfPreview] Failed to fetch queries from API:', e);
+            // Silently ignore errors - this is just a fallback
+            console.log('[PdfPreview] Could not fetch queries from API:', e);
           }
         }
 
@@ -1624,8 +1673,14 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           return;
         }
 
+        // Check if containerRef is available before accessing it
+        if (!containerRef.current) {
+          console.warn('[PdfPreview] Container ref is not available, skipping highlight processing');
+          return;
+        }
+
         clearHighlights();
-        const layers = Array.from(containerRef.current!.querySelectorAll('.textLayer')) as Element[];
+        const layers = Array.from(containerRef.current.querySelectorAll('.textLayer')) as Element[];
         console.log('[PdfPreview] Found', layers.length, 'text layers');
         if (layers.length > 0) {
           const firstLayerText = layers[0].textContent || '';
