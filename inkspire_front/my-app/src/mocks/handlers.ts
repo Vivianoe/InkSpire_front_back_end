@@ -1,6 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - types provided by msw at runtime after install
-import { http, HttpResponse, delay } from 'msw';
+import { http, HttpResponse, delay, passthrough } from 'msw';
 import {
   createDefaultDesignConsiderations,
   normalizeDesignConsiderations,
@@ -469,6 +469,210 @@ const ensureSession = (courseId: string, instructorId: string, requestedId?: str
   }
   return baseId;
 };
+
+// Load real scaffold data from JSON file
+const loadRealScaffolds = () => {
+  try {
+    // Import the JSON data (will be bundled at build time)
+    const scaffoldsData = {
+      course_id: "0ec4d82d-3484-40a7-a737-a6281d29e974",
+      session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+      reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+      scaffolds: [
+        {
+          id: "2ba28ea9-2b20-4c75-8b1e-e391a1b9868f",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "In summary , drawing on cultural historical activity theory , democratizing forms of inquiry , and a resilience thinking frame - work ( Walker & Salt , 2006 ) , design principles of a social design experiment include the following : ( a ) deep attention to history and historicity, ( b ) a focus on re - mediating activity, ( c ) employing a dynamic model of culture, ( d ) a persistent emphasis on equity, ( e ) an emphasis on resilience and change, and ( f ) an end goal of transformation and sustainability .",
+          text: "Consider these six design principles. How could you apply one or two of them as a framework or checklist when designing a Python-based data analysis project for social good in your education research?",
+          status: "draft",
+        },
+        {
+          id: "3f5ba8a3-cf65-4b59-b001-5157a1c9ed31",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "Social design methodology combines traditions of design - based research ( Design - Based Research Collective , 2003 ) , for - mative experiments ( Engeström , 2008 ) , and equity - oriented forms of inquiry to develop an approach that seeks to transform social institutions and their practices through mutual relations of exchange with constituent people as valued stakeholders and partners .",
+          text: "This methodology emphasizes iterative design and 'mutual relations of exchange.' How does this compare to agile or iterative software development methodologies in computational practice, particularly when collaborating on Python projects?",
+          status: "draft",
+        },
+        {
+          id: "958c7d53-18ea-4592-9396-4b0f38113278",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "I discuss an approach to design - based research , social design experiments , that privileges a social scientific inquiry organized around a new sociocultural imagination , with an expansive understanding of how people can learn resonantly , as they live together productively and interculturally .",
+          text: "What does it mean for a 'social scientific inquiry' to be 'organized around a new sociocultural imagination'? How might this concept influence how you frame a data analysis problem in education using Python?",
+          status: "draft",
+        },
+        {
+          id: "97d80b47-75cd-4008-a299-76dcbcfd8039",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "The paradox of efficiency and optimization from this perspective is that \" optimization ( in the sense of maximizing efficiency through tight control ) is a large part of the problem , not the solution \" ( Walker & Salt , 2006 , p . 141 ) . This certainly characterizes current educational reform in which schools , teach - ers , and students increasingly operate in tight - tight cultures , that is , cultures with top - down control and few degrees of freedom for teachers and students ( Gutiérrez , 2004 ) , cultures that under - mine resilience and sustainability .",
+          text: "In computational work, efficiency is often a goal. How might prioritizing 'resilience' or 'adaptability' over strict 'efficiency' change how you design a Python program or data analysis workflow for education research?",
+          status: "draft",
+        },
+        {
+          id: "a4f72df2-32db-4b93-9ac3-4196c1e41cf2",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "My interest in the notion of resilience , however , lies in its potential as a design principle for creating and sustain - ing learning environments where mind in action is privileged rather than mind as simply bounded in the individual .",
+          text: "Consider the distinction between 'mind in action' and 'mind as simply bounded in the individual.' How does this relate to collaborative programming or leveraging shared computational resources (like libraries) in Python?",
+          status: "draft",
+        },
+        {
+          id: "c04224d7-4051-4056-b237-2b373ff1ccff",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "I turn to the work of Marx Wartofsky ( 1979 ) to understand the impor - tance of a historical epistemology replacing traditional philosophical characterizations of epistemology ( e . g . , realist , empiricist ) as ahistorical and universal . \" The structures of per - ception are a historical variant \" — Wartofsky argues — \" they change in relation to historical changes in the modes of human action \" ( Wartofsky , 1979 , p . 189 ) .",
+          text: "Wartofsky argues that 'perception has a history.' How does understanding the historical context and 'provenance' of a dataset you might analyze with Python influence your interpretation of the data and the models you build?",
+          status: "draft",
+        },
+        {
+          id: "edfcf532-b907-445f-9ec2-053cb42f39ac",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "In 1921 , Charles T upper began the reform of education in Miami to address the \" Mexican problem \" ( T upper , 1923 ) . Appointed by the first Miami School Board , T upper \" convinced the school board to establish a segregated elementary school for the Mexican children solely on the basis of intelligence tests ( Marin , 2005 , p . 41 ) .",
+          text: "This historical example shows intelligence tests misused to justify segregation. As you learn Python for education data analysis, how can you critically examine datasets and algorithms to prevent perpetuating biases or inequalities?",
+          status: "draft",
+        },
+        {
+          id: "f9c07c32-1762-4256-84d8-20d37903ffce",
+          session_id: "33bb55af-d090-454e-9b0a-2e985b8a0742",
+          reading_id: "7800c7e2-837a-49dc-84f3-dfb8eb959a05",
+          fragment: "This article is about designing for educational possibilities — designs that in their inception, social organization, and implementation squarely address issues of cultural diversity, social inequality, and robust learning. For this discussion, I draw, in part, on a human science of learning framework to discuss the development of sustainable and resilient learning ecologies for students from nondominant communities.",
+          text: "The author introduces 'resilient learning ecologies.' How might you conceptualize a 'learning ecology' in the context of a computational research toolkit or a Python-based workflow? What elements would make it 'sustainable and resilient'?",
+          status: "draft",
+        },
+      ],
+    };
+
+    const { course_id, session_id, reading_id, scaffolds } = scaffoldsData;
+    const threadId = session_id; // Use session_id as threadId
+
+    // Convert scaffolds to AnnotationScaffold format
+    const annotation_scaffolds: AnnotationScaffold[] = scaffolds.map((s) => ({
+      fragment: s.fragment,
+      text: s.text,
+    }));
+
+    const now = new Date().toISOString();
+    const nowTs = Date.now() / 1000;
+
+    // Create scaffold histories and IDs
+    const scaffoldsWithIds = scaffolds.map((scaffold, idx) => {
+      const scaffoldId = scaffold.id;
+      const historyKey = `${threadId}:${scaffoldId}`;
+
+      const initialState = scaffold.status === 'accepted' ? 'approved' : 
+                          scaffold.status === 'rejected' ? 'rejected' : 'draft';
+
+      const initialEvent: HistoryEvent = {
+        event_id: generateEventId(),
+        ts: nowTs + idx * 0.001,
+        actor: 'assistant',
+        action: 'generate',
+        state_after: initialState === 'approved' ? 'approved' : initialState === 'rejected' ? 'rejected' : 'draft',
+        version: 1,
+        payload: {
+          fragment: scaffold.fragment,
+          text: scaffold.text,
+        },
+      };
+
+      const scaffoldHistory: ScaffoldHistory = {
+        thread_id: threadId,
+        scaffold_id: scaffoldId,
+        history: [initialEvent],
+        current: {
+          version: 1,
+          state: initialState === 'approved' ? 'approved' : initialState === 'rejected' ? 'rejected' : 'draft',
+          fragment: scaffold.fragment,
+          text: scaffold.text,
+        },
+      };
+
+      db.scaffoldHistories.set(historyKey, scaffoldHistory);
+
+      return { ...scaffold, scaffold_id: scaffoldId };
+    });
+
+    // Create thread state
+    const threadState: ThreadState = {
+      thread_id: threadId,
+      annotation_scaffolds,
+      review_cursor: 0,
+      scaffold_final: scaffolds.filter(s => s.status === 'accepted').map(s => ({
+        fragment: s.fragment,
+        text: s.text,
+        scaffold_id: s.id,
+      })),
+      scaffold_rejected: scaffolds.filter(s => s.status === 'rejected').map(s => ({
+        item: {
+          fragment: s.fragment,
+          text: s.text,
+          scaffold_id: s.id,
+        },
+        feedback: undefined,
+      })),
+      scaffold_draft: scaffolds.filter(s => s.status === 'draft').map(s => ({
+        fragment: s.fragment,
+        text: s.text,
+        scaffold_id: s.id,
+      })),
+      created_at: now,
+      updated_at: now,
+    };
+
+    const scaffoldIds = scaffoldsWithIds.map(s => s.scaffold_id);
+    (threadState as any).scaffold_ids = scaffoldIds;
+    (threadState as any).scaffold_lookup = scaffoldsWithIds.reduce<Record<string, number>>(
+      (acc, scaffold, index) => {
+        acc[scaffold.scaffold_id] = index;
+        return acc;
+      },
+      {}
+    );
+
+    db.threads.set(threadId, threadState);
+
+    // Ensure session exists
+    ensureSession(course_id, MOCK_INSTRUCTOR_ID, session_id);
+    recordSessionReading(session_id, reading_id);
+
+    console.log('[MSW] Loaded real scaffolds:', {
+      threadId,
+      courseId: course_id,
+      sessionId: session_id,
+      readingId: reading_id,
+      scaffoldCount: scaffolds.length,
+      scaffoldIds: scaffoldIds,
+      historyKeys: Array.from(db.scaffoldHistories.keys()),
+    });
+    
+    // Verify data is loaded
+    const verifyThread = db.threads.get(threadId);
+    if (verifyThread) {
+      console.log('[MSW] Verification - Thread exists:', {
+        threadId,
+        scaffoldIds: (verifyThread as any).scaffold_ids,
+        annotationScaffoldsCount: verifyThread.annotation_scaffolds.length,
+      });
+    } else {
+      console.error('[MSW] ERROR - Thread not found after loading!');
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('[MSW] Failed to load real scaffolds:', error);
+    return false;
+  }
+};
+
+// Initialize real scaffolds on module load
+if (typeof window !== 'undefined') {
+  // Load in browser environment
+  loadRealScaffolds();
+}
 
 const recordSessionReading = (sessionId: string, readingId: string) => {
   const session = db.sessions.get(sessionId);
@@ -978,6 +1182,17 @@ export const handlers = [
       return HttpResponse.json({ status: 'bad_request' }, { status: 400 });
     }
   }),
+  
+  // Frontend reports highlight coordinates with RESTful path
+  http.post('/api/courses/*/sessions/*/readings/*/scaffolds/highlight-report', async ({ request }) => {
+    try {
+      const data = await request.json() as { coords?: unknown[] };
+      logEvent('highlight-report', data);
+      return HttpResponse.json({ status: 'ok', received: Array.isArray(data?.coords) ? data.coords.length : 0 });
+    } catch {
+      return HttpResponse.json({ status: 'bad_request' }, { status: 400 });
+    }
+  }),
 
   // GET: backend-provided queries to search in the PDF text layer
   http.get('/api/queries', () => {
@@ -990,6 +1205,12 @@ export const handlers = [
     const body = await request.json().catch(() => ({}));
     const records = Array.isArray(body?.records) ? body.records : [];
     return HttpResponse.json({ ok: true, received: records.length });
+  }),
+
+  // GET: mock highlights endpoint (fallback for PdfPreview)
+  http.get('/api/mock-highlights', () => {
+    // Return empty highlights array - frontend will handle highlighting locally
+    return HttpResponse.json({ highlights: [] });
   }),
 
   // Example: upload PDF (mock)
@@ -1065,6 +1286,191 @@ export const handlers = [
     }
   }),
 
+  // RESTful path for generating scaffolds
+  // DISABLED: Let requests pass through to real Gemini API
+  // Set USE_MOCK_GENERATE_SCAFFOLDS to true to re-enable mock generation
+  ...(process.env.USE_MOCK_GENERATE_SCAFFOLDS === 'true' ? [
+  http.post('/api/courses/*/sessions/*/readings/*/scaffolds/generate', async ({ request }) => {
+    console.log('[MSW] ===== Generate scaffolds (RESTful path) =====');
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    // Path structure: ['api', 'courses', courseId, 'sessions', sessionId, 'readings', readingId, 'scaffolds', 'generate']
+    // Index:           0      1         2         3          4         5          6         7           8
+    // Example: ['api', 'courses', '0ec4d82d-...', 'sessions', '17d9eba7-...', 'readings', '7800c7e2-...', 'scaffolds', 'generate']
+    const courseId = pathParts[2];   // 'courses' is at index 1, courseId is at index 2
+    const sessionId = pathParts[4];  // 'sessions' is at index 3, sessionId is at index 4
+    const readingId = pathParts[6];   // 'readings' is at index 5, readingId is at index 6
+    
+    console.log('[MSW] Request URL:', request.url);
+    console.log('[MSW] Path parts:', pathParts);
+    console.log('[MSW] Extracted IDs from URL:', { courseId, sessionId, readingId });
+    
+    try {
+      const body = await request.json().catch(() => ({}));
+      const anyBody = body as Record<string, any>;
+      const rawInstructorId = anyBody.instructor_id;
+      const instructorId =
+        typeof rawInstructorId === 'string' && rawInstructorId.trim().length > 0
+          ? rawInstructorId.trim()
+          : MOCK_INSTRUCTOR_ID;
+
+      // Check if real scaffolds are already loaded for this session
+      // First, try to find thread by sessionId
+      let existingThread = db.threads.get(sessionId);
+      
+      // If not found, check if we have the real data loaded (it uses session_id as threadId)
+      if (!existingThread) {
+        console.log('[MSW] Thread not found by sessionId, checking all threads...');
+        console.log('[MSW] Available thread IDs:', Array.from(db.threads.keys()));
+        
+        // Try to find thread that matches the readingId or has scaffolds
+        for (const [threadId, thread] of db.threads.entries()) {
+          if (thread.annotation_scaffolds && thread.annotation_scaffolds.length > 0) {
+            console.log('[MSW] Found thread with scaffolds:', threadId);
+            existingThread = thread;
+            // Update sessionId to match the threadId if it's the real data
+            if (threadId === '33bb55af-d090-454e-9b0a-2e985b8a0742') {
+              console.log('[MSW] Using real data thread, sessionId will be:', threadId);
+              // Don't change sessionId, but use the thread's data
+            }
+            break;
+          }
+        }
+      }
+      
+      if (existingThread && existingThread.annotation_scaffolds.length > 0) {
+        console.log('[MSW] Using existing scaffolds from loaded data, threadId:', (existingThread as any).thread_id);
+        const scaffoldIds = (existingThread as any).scaffold_ids || [];
+        const fullScaffolds = scaffoldIds.map((scaffoldId: string, index: number) => {
+          const scaffoldData = existingThread.annotation_scaffolds[index];
+          const threadId = (existingThread as any).thread_id || sessionId;
+          const historyKey = `${threadId}:${scaffoldId}`;
+          const scaffoldHistory = db.scaffoldHistories.get(historyKey);
+          const historySummary = scaffoldHistory ? summarizeHistory(scaffoldHistory.history) : [];
+          
+          return {
+            id: scaffoldId,
+            fragment: scaffoldData?.fragment || '',
+            text: scaffoldData?.text || '',
+            status: scaffoldHistory?.current.state === 'approved' ? 'approved' : 
+                   scaffoldHistory?.current.state === 'rejected' ? 'rejected' : 'pending',
+            history: historySummary,
+          };
+        }).filter((s: any) => s.fragment && s.text);
+
+        // Use the thread's sessionId if available, otherwise use the extracted sessionId
+        const actualSessionId = (existingThread as any).thread_id || sessionId;
+        console.log('[MSW] Returning scaffolds, using sessionId:', actualSessionId);
+
+        return HttpResponse.json({
+          session_id: actualSessionId,
+          reading_id: readingId,
+          pdf_url: `https://example.com/pdf/${readingId}.pdf`,
+          annotation_scaffolds_review: fullScaffolds,
+        });
+      }
+
+      // If no existing scaffolds, use the real loaded data or generate new ones
+      console.log('[MSW] No existing scaffolds, loading real data or generating new ones...');
+      
+      // Try to load real scaffolds if not already loaded
+      if (db.threads.size === 0) {
+        console.log('[MSW] No threads found, loading real scaffolds...');
+        loadRealScaffolds();
+      }
+      
+      // Check again after loading - look for any thread with scaffolds
+      let threadAfterLoad: ThreadState | undefined;
+      for (const [threadId, thread] of db.threads.entries()) {
+        if (thread.annotation_scaffolds && thread.annotation_scaffolds.length > 0) {
+          threadAfterLoad = thread;
+          console.log('[MSW] Found thread after loading:', threadId);
+          break;
+        }
+      }
+      
+      if (threadAfterLoad && threadAfterLoad.annotation_scaffolds.length > 0) {
+        console.log('[MSW] Using real scaffolds after loading');
+        const scaffoldIds = (threadAfterLoad as any).scaffold_ids || [];
+        const fullScaffolds = scaffoldIds.map((scaffoldId: string, index: number) => {
+          const scaffoldData = threadAfterLoad.annotation_scaffolds[index];
+          const threadId = (threadAfterLoad as any).thread_id;
+          const historyKey = `${threadId}:${scaffoldId}`;
+          const scaffoldHistory = db.scaffoldHistories.get(historyKey);
+          const historySummary = scaffoldHistory ? summarizeHistory(scaffoldHistory.history) : [];
+          
+          return {
+            id: scaffoldId,
+            fragment: scaffoldData?.fragment || '',
+            text: scaffoldData?.text || '',
+            status: scaffoldHistory?.current.state === 'approved' ? 'approved' : 
+                   scaffoldHistory?.current.state === 'rejected' ? 'rejected' : 'pending',
+            history: historySummary,
+          };
+        }).filter((s: any) => s.fragment && s.text);
+
+        const actualSessionId = (threadAfterLoad as any).thread_id || sessionId;
+        console.log('[MSW] Returning scaffolds after load, using sessionId:', actualSessionId);
+
+        return HttpResponse.json({
+          session_id: actualSessionId,
+          reading_id: readingId,
+          pdf_url: `https://example.com/pdf/${readingId}.pdf`,
+          annotation_scaffolds_review: fullScaffolds,
+        });
+      }
+
+      // Fallback: generate new mock scaffolds
+      console.log('[MSW] Generating new mock scaffolds...');
+      ensureSession(courseId, instructorId, sessionId);
+      recordSessionReading(sessionId, readingId);
+      incrementReadingUsage(courseId, instructorId, readingId);
+
+      const { scaffoldsWithIds, threadId } = await generateMockThreadResponse({
+        courseDescription: 'Reading session',
+        assignmentDescription: 'Assignment description',
+        readingMaterial: `Reading payload for ${readingId}`,
+        incomingThreadId: sessionId,
+      });
+
+      const fullScaffolds = scaffoldsWithIds.map(({ scaffold_id, ...rest }) => {
+        const historyKey = `${threadId}:${scaffold_id}`;
+        const scaffoldHistory = db.scaffoldHistories.get(historyKey);
+        const historySummary = scaffoldHistory ? summarizeHistory(scaffoldHistory.history) : [];
+        
+        return {
+          id: scaffold_id,
+          fragment: rest.fragment,
+          text: rest.text,
+          status: scaffoldHistory?.current.state === 'approved' ? 'approved' : 
+                 scaffoldHistory?.current.state === 'rejected' ? 'rejected' : 'pending',
+          history: historySummary,
+        };
+      });
+
+        // Return a relative API URL that frontend can use to load the PDF
+        // If this fails, PdfPreview will use readingId fallback
+        const pdfUrl = `/api/readings/${readingId}/content`;
+        
+        return HttpResponse.json({
+          session_id: sessionId,
+          reading_id: readingId,
+          pdf_url: pdfUrl,
+          annotation_scaffolds_review: fullScaffolds,
+        });
+    } catch (error) {
+      console.error('[MSW] Error in POST /api/courses/*/sessions/*/readings/*/scaffolds/generate', error);
+      return err(
+        'INTERNAL_ERROR',
+        `Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        500
+      );
+    }
+  }),
+  ] : []),
+  // END DISABLED: Generate scaffolds handler - requests will use real Gemini API
+
+  // Legacy path (keeping for backward compatibility)
   http.post('/api/generate-scaffolds', async ({ request }) => {
     try {
       const body = await request.json().catch(() => ({}));
@@ -1125,15 +1531,32 @@ export const handlers = [
         incomingThreadId: anyBody.thread_id,
       });
 
-      return HttpResponse.json({
-        session_id: sessionId,
-        reading_id: readingId,
-        thread_id: threadId,
-        annotation_scaffolds_review: scaffoldsWithIds.map(({ scaffold_id, ...rest }) => ({
-          ...rest,
-          scaffold_id,
-        })),
+      // Build full scaffold objects with id, status, and history
+      const fullScaffolds = scaffoldsWithIds.map(({ scaffold_id, ...rest }) => {
+        const historyKey = `${threadId}:${scaffold_id}`;
+        const scaffoldHistory = db.scaffoldHistories.get(historyKey);
+        const historySummary = scaffoldHistory ? summarizeHistory(scaffoldHistory.history) : [];
+        
+        return {
+          id: scaffold_id,
+          fragment: rest.fragment,
+          text: rest.text,
+          status: scaffoldHistory?.current.state === 'approved' ? 'approved' : 
+                 scaffoldHistory?.current.state === 'rejected' ? 'rejected' : 'pending',
+          history: historySummary,
+        };
       });
+
+        // Return a relative API URL that frontend can use to load the PDF
+        // If this fails, PdfPreview will use readingId fallback
+        const pdfUrl = `/api/readings/${readingId}/content`;
+        
+        return HttpResponse.json({
+          session_id: sessionId,
+          reading_id: readingId,
+          pdf_url: pdfUrl,
+          annotation_scaffolds_review: fullScaffolds,
+        });
     } catch (error) {
       console.error('[MSW] Error in POST /api/generate-scaffolds', error);
       return err(
@@ -1142,6 +1565,367 @@ export const handlers = [
         500
       );
     }
+  }),
+
+  // GET Scaffolds by Session and Reading
+  http.get('/api/courses/:courseId/sessions/:sessionId/readings/:readingId/scaffolds', async ({ params }) => {
+    const { sessionId, readingId } = params as { courseId: string; sessionId: string; readingId: string };
+    
+    // Find thread by sessionId (in mock, sessionId might be the threadId)
+    // Try to find thread that matches sessionId or has scaffolds for this reading
+    let matchingThread: ThreadState | undefined;
+    let matchingThreadId: string | undefined;
+    
+    for (const [threadId, thread] of db.threads.entries()) {
+      // Check if this thread has scaffolds
+      if (thread.annotation_scaffolds && thread.annotation_scaffolds.length > 0) {
+        matchingThread = thread;
+        matchingThreadId = threadId;
+        break;
+      }
+    }
+    
+    // If no thread found, return empty scaffolds
+    if (!matchingThread || !matchingThreadId) {
+      return HttpResponse.json({
+        scaffolds: [],
+        pdfUrl: null,
+      });
+    }
+
+    // Build full scaffold objects with id, status, and history
+    const scaffoldIds = (matchingThread as any).scaffold_ids || [];
+    const scaffolds = scaffoldIds.map((scaffoldId: string, index: number) => {
+      const scaffoldData = matchingThread.annotation_scaffolds[index];
+      const historyKey = `${matchingThreadId}:${scaffoldId}`;
+      const scaffoldHistory = db.scaffoldHistories.get(historyKey);
+      const historySummary = scaffoldHistory ? summarizeHistory(scaffoldHistory.history) : [];
+      
+      return {
+        id: scaffoldId,
+        fragment: scaffoldData?.fragment || '',
+        text: scaffoldData?.text || '',
+        status: scaffoldHistory?.current.state === 'approved' ? 'approved' : 
+               scaffoldHistory?.current.state === 'rejected' ? 'rejected' : 'pending',
+        history: historySummary,
+      };
+    }).filter((s: any) => s.fragment && s.text); // Filter out invalid scaffolds
+
+    // Return null for pdfUrl to let PdfPreview use readingId fallback
+    // This ensures the PDF is loaded via /api/readings/:id/content endpoint
+    // which will return the actual PDF content from the database or mock
+    return HttpResponse.json({
+      scaffolds,
+      pdfUrl: null,
+    });
+  }),
+
+  // Scaffold Accept/Reject Endpoints (matching backend API routes)
+  // Using wildcard pattern to ensure matching works
+  http.post('/api/courses/*/sessions/*/readings/*/scaffolds/*/approve', async ({ request }) => {
+    // Ensure real scaffolds are loaded
+    if (db.threads.size === 0) {
+      console.log('[MSW] No threads found, loading real scaffolds...');
+      loadRealScaffolds();
+    }
+    
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const scaffoldId = pathParts[pathParts.length - 2]; // Second to last part (before 'approve')
+    const readingId = pathParts[pathParts.length - 4];
+    const sessionId = pathParts[pathParts.length - 6];
+    const courseId = pathParts[pathParts.length - 8];
+    
+    console.log('[MSW] ===== Approve scaffold request (wildcard) =====');
+    console.log('[MSW] Request URL:', request.url);
+    console.log('[MSW] Path parts:', pathParts);
+    console.log('[MSW] Extracted IDs:', { courseId, sessionId, readingId, scaffoldId });
+    console.log('[MSW] Available threads:', Array.from(db.threads.keys()));
+    console.log('[MSW] Available scaffold histories:', Array.from(db.scaffoldHistories.keys()));
+    
+    if (!scaffoldId) {
+      return err('VALIDATION_ERROR', 'scaffoldId is required', 400);
+    }
+
+    // Find scaffold in thread (try sessionId as threadId first, then search all threads)
+    let scaffoldHistory: ScaffoldHistory | undefined;
+    let scaffoldData: AnnotationScaffold | undefined;
+    let foundThreadId: string | undefined;
+    
+    // First try sessionId as threadId
+    let thread = db.threads.get(sessionId);
+    console.log('[MSW] Thread found by sessionId:', !!thread, 'sessionId:', sessionId);
+    if (thread) {
+      const scaffoldIds = (thread as any).scaffold_ids || [];
+      console.log('[MSW] Thread scaffold IDs:', scaffoldIds);
+      console.log('[MSW] Looking for scaffoldId:', scaffoldId);
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      console.log('[MSW] Scaffold index in thread:', scaffoldIndex);
+      if (scaffoldIndex >= 0) {
+        scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+        const historyKey = `${sessionId}:${scaffoldId}`;
+        scaffoldHistory = db.scaffoldHistories.get(historyKey);
+        foundThreadId = sessionId;
+        console.log('[MSW] Found scaffold in thread by sessionId');
+        console.log('[MSW] Scaffold data:', { fragment: scaffoldData?.fragment?.substring(0, 50), text: scaffoldData?.text?.substring(0, 50) });
+        console.log('[MSW] Scaffold history:', !!scaffoldHistory);
+      } else {
+        console.log('[MSW] Scaffold ID not found in thread scaffold_ids array');
+        console.log('[MSW] scaffoldIds array:', scaffoldIds);
+        console.log('[MSW] Looking for:', scaffoldId);
+        console.log('[MSW] Type check - scaffoldId type:', typeof scaffoldId, 'array item type:', typeof scaffoldIds[0]);
+      }
+    } else {
+      console.log('[MSW] No thread found with sessionId:', sessionId);
+      console.log('[MSW] All thread IDs:', Array.from(db.threads.keys()));
+    }
+    
+    // If not found, search all threads
+    if (!scaffoldHistory || !scaffoldData) {
+      console.log('[MSW] Searching all threads...');
+      for (const [threadId, thread] of db.threads.entries()) {
+        const scaffoldIds = (thread as any).scaffold_ids || [];
+        const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+        
+        console.log('[MSW] Checking thread:', threadId, 'scaffoldIds:', scaffoldIds, 'index:', scaffoldIndex);
+        
+        if (scaffoldIndex >= 0) {
+          scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+          const historyKey = `${threadId}:${scaffoldId}`;
+          scaffoldHistory = db.scaffoldHistories.get(historyKey);
+          foundThreadId = threadId;
+          console.log('[MSW] Found scaffold in thread:', threadId);
+          break;
+        }
+      }
+    }
+
+    if (!scaffoldHistory || !scaffoldData || !foundThreadId) {
+      // Scaffold not found in mock DB - likely generated by real API
+      // Let the request pass through to the real backend API
+      console.log('[MSW] Scaffold not found in mock DB, letting request pass through to real API', {
+        hasHistory: !!scaffoldHistory,
+        hasData: !!scaffoldData,
+        foundThreadId,
+        searchedScaffoldId: scaffoldId,
+      });
+      // Scaffold not found in mock DB - let request pass through to real API
+      // Use passthrough() to forward the request to the real backend
+      return passthrough();
+    }
+    
+    console.log('[MSW] Found scaffold:', {
+      scaffoldId,
+      foundThreadId,
+      currentState: scaffoldHistory.current.state,
+      fragment: scaffoldData.fragment?.substring(0, 50),
+    });
+
+    // Update status to approved
+    const nowTs = Date.now() / 1000;
+    const newVersion = scaffoldHistory.current.version + 1;
+    
+    const approveEvent: HistoryEvent = {
+      event_id: generateEventId(),
+      ts: nowTs,
+      actor: 'user',
+      action: 'approve',
+      state_after: 'approved',
+      version: newVersion,
+    };
+
+    scaffoldHistory.history.push(approveEvent);
+    scaffoldHistory.current = {
+      version: newVersion,
+      state: 'approved',
+      fragment: scaffoldData.fragment,
+      text: scaffoldData.text,
+    };
+
+    // Update history in database
+    const historyKey = `${foundThreadId}:${scaffoldId}`;
+    db.scaffoldHistories.set(historyKey, scaffoldHistory);
+
+    // Update thread state
+    const threadToUpdate = db.threads.get(foundThreadId);
+    if (threadToUpdate) {
+      const scaffoldIds = (threadToUpdate as any).scaffold_ids || [];
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      if (scaffoldIndex >= 0) {
+        threadToUpdate.scaffold_final.push({ ...scaffoldData, scaffold_id: scaffoldId });
+        db.threads.set(foundThreadId, threadToUpdate);
+      }
+    }
+
+    const historySummary = summarizeHistory(scaffoldHistory.history);
+
+    const response = {
+      scaffold: {
+        id: scaffoldId,
+        fragment: scaffoldHistory.current.fragment,
+        text: scaffoldHistory.current.text,
+        status: 'approved', // Frontend expects 'approved' not 'accepted'
+        history: historySummary,
+      },
+    };
+    
+    console.log('[MSW] Approve scaffold response:', JSON.stringify(response, null, 2));
+    console.log('[MSW] Response structure check:', {
+      hasScaffold: !!response.scaffold,
+      scaffoldId: response.scaffold?.id,
+      scaffoldStatus: response.scaffold?.status,
+      scaffoldFragment: response.scaffold?.fragment?.substring(0, 50),
+      scaffoldText: response.scaffold?.text?.substring(0, 50),
+    });
+    return HttpResponse.json(response);
+  }),
+
+  http.post('/api/courses/*/sessions/*/readings/*/scaffolds/*/reject', async ({ request, params }) => {
+    // Ensure real scaffolds are loaded
+    if (db.threads.size === 0) {
+      console.log('[MSW] No threads found, loading real scaffolds...');
+      loadRealScaffolds();
+    }
+    
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const scaffoldId = pathParts[pathParts.length - 2];
+    const readingId = pathParts[pathParts.length - 4];
+    const sessionId = pathParts[pathParts.length - 6];
+    const courseId = pathParts[pathParts.length - 8];
+    
+    console.log('[MSW] ===== Reject scaffold request (wildcard) =====');
+    console.log('[MSW] Extracted from URL:', { courseId, sessionId, readingId, scaffoldId });
+    
+    const extractedParams = { scaffoldId, sessionId, courseId, readingId };
+    console.log('[MSW] Available threads:', Array.from(db.threads.keys()));
+    console.log('[MSW] Available scaffold histories:', Array.from(db.scaffoldHistories.keys()));
+    
+    if (!scaffoldId) {
+      return err('VALIDATION_ERROR', 'scaffoldId is required', 400);
+    }
+
+    // Find scaffold in thread (try sessionId as threadId first, then search all threads)
+    let scaffoldHistory: ScaffoldHistory | undefined;
+    let scaffoldData: AnnotationScaffold | undefined;
+    let foundThreadId: string | undefined;
+    
+    // First try sessionId as threadId
+    let thread = db.threads.get(sessionId);
+    console.log('[MSW] Thread found by sessionId:', !!thread);
+    if (thread) {
+      const scaffoldIds = (thread as any).scaffold_ids || [];
+      console.log('[MSW] Thread scaffold IDs:', scaffoldIds);
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      console.log('[MSW] Scaffold index in thread:', scaffoldIndex);
+      if (scaffoldIndex >= 0) {
+        scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+        const historyKey = `${sessionId}:${scaffoldId}`;
+        scaffoldHistory = db.scaffoldHistories.get(historyKey);
+        foundThreadId = sessionId;
+        console.log('[MSW] Found scaffold in thread by sessionId');
+      }
+    }
+    
+    // If not found, search all threads
+    if (!scaffoldHistory || !scaffoldData) {
+      console.log('[MSW] Searching all threads...');
+      for (const [threadId, thread] of db.threads.entries()) {
+        const scaffoldIds = (thread as any).scaffold_ids || [];
+        const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+        
+        if (scaffoldIndex >= 0) {
+          scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+          const historyKey = `${threadId}:${scaffoldId}`;
+          scaffoldHistory = db.scaffoldHistories.get(historyKey);
+          foundThreadId = threadId;
+          console.log('[MSW] Found scaffold in thread:', threadId);
+          break;
+        }
+      }
+    }
+
+    if (!scaffoldHistory || !scaffoldData || !foundThreadId) {
+      // Scaffold not found in mock DB - likely generated by real API
+      // Let the request pass through to the real backend API
+      console.log('[MSW] Scaffold not found in mock DB, letting request pass through to real API', {
+        hasHistory: !!scaffoldHistory,
+        hasData: !!scaffoldData,
+        foundThreadId,
+        searchedScaffoldId: scaffoldId,
+      });
+      // Scaffold not found in mock DB - let request pass through to real API
+      // Use passthrough() to forward the request to the real backend
+      return passthrough();
+    }
+    
+    console.log('[MSW] Found scaffold:', {
+      scaffoldId,
+      foundThreadId,
+      currentState: scaffoldHistory.current.state,
+      fragment: scaffoldData.fragment?.substring(0, 50),
+    });
+
+    // Update status to rejected
+    const nowTs = Date.now() / 1000;
+    const newVersion = scaffoldHistory.current.version + 1;
+    
+    const rejectEvent: HistoryEvent = {
+      event_id: generateEventId(),
+      ts: nowTs,
+      actor: 'user',
+      action: 'reject',
+      state_after: 'rejected',
+      version: newVersion,
+    };
+
+    scaffoldHistory.history.push(rejectEvent);
+    scaffoldHistory.current = {
+      version: newVersion,
+      state: 'rejected',
+      fragment: scaffoldData.fragment,
+      text: scaffoldData.text,
+    };
+
+    // Update history in database
+    const historyKey = `${foundThreadId}:${scaffoldId}`;
+    db.scaffoldHistories.set(historyKey, scaffoldHistory);
+
+    // Update thread state
+    const threadToUpdate = db.threads.get(foundThreadId);
+    if (threadToUpdate) {
+      const scaffoldIds = (threadToUpdate as any).scaffold_ids || [];
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      if (scaffoldIndex >= 0) {
+        threadToUpdate.scaffold_rejected.push({
+          item: { ...scaffoldData, scaffold_id: scaffoldId },
+          feedback: undefined,
+        });
+        db.threads.set(foundThreadId, threadToUpdate);
+      }
+    }
+
+    const historySummary = summarizeHistory(scaffoldHistory.history);
+
+    const response = {
+      scaffold: {
+        id: scaffoldId,
+        fragment: scaffoldHistory.current.fragment,
+        text: scaffoldHistory.current.text,
+        status: 'rejected', // Frontend expects 'rejected'
+        history: historySummary,
+      },
+    };
+    
+    console.log('[MSW] Reject scaffold response:', JSON.stringify(response, null, 2));
+    console.log('[MSW] Response structure check:', {
+      hasScaffold: !!response.scaffold,
+      scaffoldId: response.scaffold?.id,
+      scaffoldStatus: response.scaffold?.status,
+      scaffoldFragment: response.scaffold?.fragment?.substring(0, 50),
+      scaffoldText: response.scaffold?.text?.substring(0, 50),
+    });
+    return HttpResponse.json(response);
   }),
 
   // 2) Review Scaffolds (New thread-based review flow)
@@ -1790,6 +2574,102 @@ export const handlers = [
     console.log('[MSW] Test endpoint called - MSW is working!');
     return HttpResponse.json({ status: 'ok', message: 'MSW is working', timestamp: new Date().toISOString() });
   }),
+  
+  // Test endpoint for scaffold approve (to verify path matching)
+  http.post('/api/courses/*/sessions/*/readings/*/scaffolds/*/approve', async ({ request, params }) => {
+    console.log('[MSW] ===== Approve scaffold request (wildcard match) =====');
+    console.log('[MSW] Request URL:', request.url);
+    console.log('[MSW] Params:', params);
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/');
+    const scaffoldId = pathParts[pathParts.length - 2]; // Second to last part
+    const readingId = pathParts[pathParts.length - 4];
+    const sessionId = pathParts[pathParts.length - 6];
+    const courseId = pathParts[pathParts.length - 8];
+    
+    console.log('[MSW] Extracted IDs:', { courseId, sessionId, readingId, scaffoldId });
+    
+    // Try to find the scaffold using the same logic as the specific handler
+    let scaffoldHistory: ScaffoldHistory | undefined;
+    let scaffoldData: AnnotationScaffold | undefined;
+    let foundThreadId: string | undefined;
+    
+    let thread = db.threads.get(sessionId);
+    if (thread) {
+      const scaffoldIds = (thread as any).scaffold_ids || [];
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      if (scaffoldIndex >= 0) {
+        scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+        const historyKey = `${sessionId}:${scaffoldId}`;
+        scaffoldHistory = db.scaffoldHistories.get(historyKey);
+        foundThreadId = sessionId;
+      }
+    }
+    
+    if (!scaffoldHistory || !scaffoldData) {
+      for (const [threadId, thread] of db.threads.entries()) {
+        const scaffoldIds = (thread as any).scaffold_ids || [];
+        const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+        if (scaffoldIndex >= 0) {
+          scaffoldData = thread.annotation_scaffolds[scaffoldIndex];
+          const historyKey = `${threadId}:${scaffoldId}`;
+          scaffoldHistory = db.scaffoldHistories.get(historyKey);
+          foundThreadId = threadId;
+          break;
+        }
+      }
+    }
+    
+    if (!scaffoldHistory || !scaffoldData || !foundThreadId) {
+      console.error('[MSW] Scaffold not found in wildcard handler');
+      return err('SCAFFOLD_NOT_FOUND', 'Scaffold not found', 404);
+    }
+    
+    const nowTs = Date.now() / 1000;
+    const newVersion = scaffoldHistory.current.version + 1;
+    
+    const approveEvent: HistoryEvent = {
+      event_id: generateEventId(),
+      ts: nowTs,
+      actor: 'user',
+      action: 'approve',
+      state_after: 'approved',
+      version: newVersion,
+    };
+    
+    scaffoldHistory.history.push(approveEvent);
+    scaffoldHistory.current = {
+      version: newVersion,
+      state: 'approved',
+      fragment: scaffoldData.fragment,
+      text: scaffoldData.text,
+    };
+    
+    const historyKey = `${foundThreadId}:${scaffoldId}`;
+    db.scaffoldHistories.set(historyKey, scaffoldHistory);
+    
+    const threadToUpdate = db.threads.get(foundThreadId);
+    if (threadToUpdate) {
+      const scaffoldIds = (threadToUpdate as any).scaffold_ids || [];
+      const scaffoldIndex = scaffoldIds.indexOf(scaffoldId);
+      if (scaffoldIndex >= 0) {
+        threadToUpdate.scaffold_final.push({ ...scaffoldData, scaffold_id: scaffoldId });
+        db.threads.set(foundThreadId, threadToUpdate);
+      }
+    }
+    
+    const historySummary = summarizeHistory(scaffoldHistory.history);
+    
+    return HttpResponse.json({
+      scaffold: {
+        id: scaffoldId,
+        fragment: scaffoldHistory.current.fragment,
+        text: scaffoldHistory.current.text,
+        status: 'approved',
+        history: historySummary,
+      },
+    });
+  }),
 
   // ======================================
   // Reading APIs (spec parity: main.py /api/readings, /api/readings/batch-upload)
@@ -1820,11 +2700,49 @@ export const handlers = [
         );
       }
 
-      const readings = listReadingsFor(courseId, instructorId).map(toReadingResponse);
-      logEvent('readings:list', { courseId, instructorId, total: readings.length });
+      let readings = listReadingsFor(courseId, instructorId);
+      
+      // If no readings exist, create some default mock readings for testing
+      if (readings.length === 0) {
+        const now = new Date().toISOString();
+        const defaultReadings: MockReadingRecord[] = [
+          {
+            id: '7800c7e2-837a-49dc-84f3-dfb8eb959a05', // Use the real reading ID from loaded scaffolds
+            instructor_id: instructorId,
+            course_id: courseId,
+            title: 'Sample Reading 1',
+            file_path: '/storage/uploads/sample1.pdf',
+            source_type: 'uploaded',
+            created_at: now,
+            size_label: '2.5 MB',
+            usage_count: 0,
+            mime_type: 'application/pdf',
+            content_base64: undefined,
+          },
+          {
+            id: `read_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            instructor_id: instructorId,
+            course_id: courseId,
+            title: 'Sample Reading 2',
+            file_path: '/storage/uploads/sample2.pdf',
+            source_type: 'uploaded',
+            created_at: now,
+            size_label: '1.8 MB',
+            usage_count: 0,
+            mime_type: 'application/pdf',
+            content_base64: undefined,
+          },
+        ];
+        saveReadingsFor(courseId, instructorId, defaultReadings);
+        readings = defaultReadings;
+        logEvent('readings:list:mock-created', { courseId, instructorId, count: readings.length });
+      }
+
+      const responseReadings = readings.map(toReadingResponse);
+      logEvent('readings:list', { courseId, instructorId, total: responseReadings.length });
       return HttpResponse.json({
-        readings,
-        total: readings.length,
+        readings: responseReadings,
+        total: responseReadings.length,
       });
     } catch (error) {
       console.error('[MSW] Error fetching readings', error);
@@ -1838,13 +2756,25 @@ export const handlers = [
   http.get('/api/readings/:id/content', async ({ params }) => {
     try {
       const { id } = params as { id: string };
+      console.log('[MSW] GET /api/readings/:id/content, readingId:', id);
       if (!id) {
         return err('VALIDATION_ERROR', 'Reading ID is required');
       }
       const reading = findReadingById(id);
       if (!reading || !reading.content_base64) {
-        return err('READING_NOT_FOUND', 'Reading content not available', 404);
+        console.log('[MSW] Reading not found in mock DB, returning valid minimal PDF content');
+        // Return a complete, valid minimal PDF as base64
+        // This is a properly formatted PDF with all required sections including endstream
+        // Generated from a minimal PDF: %PDF-1.4 with proper structure
+        const minimalPdfBase64 = 'JVBERi0xLjQKJdPr6eEKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPD4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9GMSA0IDAgUgo+Pgo+PgovQ29udGVudHMgNSAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iagoxIDAgb2JqCjw8Ci9UeXBlIC9DYXRhbG9nCi9QYWdlcyAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovTGVuZ3RoIDQ0Cj4+CnN0cmVhbQpCVAovRjEgMTIgVGYKNzAgNzIwIFRkCihNb2NrIFBERiBDb250ZW50KSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI3OCAwMDAwMCBuIAowMDAwMDAwMzQxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKNDI3CiUlRU9G';
+        return HttpResponse.json({
+          id: id,
+          mime_type: 'application/pdf',
+          size_label: '0 KB',
+          content_base64: minimalPdfBase64,
+        });
       }
+      console.log('[MSW] Reading found, returning content');
       return HttpResponse.json({
         id: reading.id,
         mime_type: reading.mime_type || 'application/pdf',
@@ -2019,12 +2949,46 @@ export const handlers = [
       return HttpResponse.json({ profile: null }, { status: 404 });
     }
 
-    const profile = db.classProfiles.get(id);
+    let profile = db.classProfiles.get(id);
     if (!profile) {
-      return HttpResponse.json(
-        { message: 'Class profile not found' },
-        { status: 404 }
-      );
+      // Return a default mock profile for testing instead of 404
+      const now = new Date().toISOString();
+      profile = {
+        id: id,
+        disciplineInfo: {
+          disciplineName: 'Computer Science',
+          department: 'Education',
+          fieldDescription: 'Computing and software engineering',
+        },
+        courseInfo: {
+          courseName: 'Introduction to Python',
+          courseCode: 'CS101',
+          description: 'An introductory course to Python programming',
+          credits: '3',
+          prerequisites: 'None',
+          learningObjectives: 'Learn Python basics',
+          assessmentMethods: 'Assignments and exams',
+          deliveryMode: 'In-person',
+        },
+        classInfo: {
+          semester: 'Fall',
+          year: '2024',
+          section: '001',
+          meetingDays: 'Monday, Wednesday',
+          meetingTime: '10:00 AM - 11:30 AM',
+          location: 'TBD',
+          enrollment: '30',
+          background: 'Graduate students from education disciplines',
+          priorKnowledge: 'Basic computer literacy',
+        },
+        generatedProfile: defaultClassProfileText,
+        designConsiderations: createDefaultDesignConsiderations(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      // Store it so subsequent requests can find it
+      db.classProfiles.set(id, profile);
+      logEvent('class-profile:get:mock-created', { id });
     }
 
     logEvent('class-profile:get', { id });

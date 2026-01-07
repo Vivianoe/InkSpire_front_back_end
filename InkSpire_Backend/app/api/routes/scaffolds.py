@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.database import get_db, get_supabase_client
 from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
@@ -238,6 +239,13 @@ def generate_scaffolds_with_session(
     Generate scaffolds - all data loaded from database.
     Requires: course_id (path), session_id (path, use "new" to create new session), reading_id (path), instructor_id (body)
     """
+    print(f"[generate_scaffolds_with_session] ===== ENTRY POINT ======")
+    print(f"[generate_scaffolds_with_session] Received request:")
+    print(f"  course_id: {course_id}")
+    print(f"  session_id: {session_id}")
+    print(f"  reading_id: {reading_id}")
+    print(f"  payload.instructor_id: {payload.instructor_id}")
+    
     # Validate and parse IDs from path
     try:
         course_uuid = uuid.UUID(course_id)
@@ -342,10 +350,10 @@ def generate_scaffolds_with_session(
     # Load class_profile from database (by course_id)
     class_profile_db = get_class_profile_by_course_id(db, course_uuid)
     if not class_profile_db:
-        print(f"[generate_scaffolds_with_session] ERROR: Class profile not found for course {payload.course_id}")
+        print(f"[generate_scaffolds_with_session] ERROR: Class profile not found for course {course_id}")
         raise HTTPException(
             status_code=404,
-            detail=f"Class profile not found for course {payload.course_id}. Please create a class profile first.",
+            detail=f"Class profile not found for course {course_id}. Please create a class profile first.",
         )
     
     # Parse class_profile JSON from description field
@@ -453,10 +461,21 @@ def generate_scaffolds_with_session(
         # This ensures we return complete information including status and history
         # Filter by both session_id and reading_id to ensure we only return annotations for this reading
         print(f"[generate_scaffolds_with_session] Re-fetching annotations with full status and history...")
+        print(f"[generate_scaffolds_with_session] Session UUID: {session_uuid}, Reading UUID: {reading_uuid}")
         all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
+        print(f"[generate_scaffolds_with_session] Found {len(all_annotations)} total annotations for session {session_uuid}")
         # Filter by reading_id to only return annotations for this specific reading
         annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
         print(f"[generate_scaffolds_with_session] Found {len(annotations)} annotations in database for reading {reading_uuid}")
+        
+        # If no annotations found, check if run_material_focus_scaffold returned any
+        if len(annotations) == 0:
+            print(f"[generate_scaffolds_with_session] WARNING: No annotations found in database after generation!")
+            print(f"[generate_scaffolds_with_session] Response from run_material_focus_scaffold had {len(response.annotation_scaffolds_review) if hasattr(response, 'annotation_scaffolds_review') else 0} scaffolds")
+            # Check if response has scaffolds that weren't saved
+            if hasattr(response, 'annotation_scaffolds_review') and len(response.annotation_scaffolds_review) > 0:
+                print(f"[generate_scaffolds_with_session] ERROR: Response has scaffolds but database query returned empty!")
+                print(f"[generate_scaffolds_with_session] This may indicate a database transaction issue or ID mismatch")
         
         # Convert to full API format with status and history
         full_scaffolds = []
@@ -505,12 +524,20 @@ def generate_scaffolds_with_session(
             )
             print(f"[generate_scaffolds_with_session] Built GenerateScaffoldsResponse with {len(full_scaffolds)} scaffolds")
             
+            # Warn if no scaffolds were found
+            if len(full_scaffolds) == 0:
+                print(f"[generate_scaffolds_with_session] WARNING: Returning empty scaffolds list!")
+                print(f"[generate_scaffolds_with_session] This may indicate:")
+                print(f"  1. Workflow did not generate any scaffolds")
+                print(f"  2. Scaffolds were generated but not saved to database")
+                print(f"  3. Database query returned empty (session_id or reading_id mismatch)")
+            
             # Convert to dict and encode
             response_dict = full_response.model_dump(mode='json')
             encoded = jsonable_encoder(response_dict)
             
             print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
-            print(f"[generate_scaffolds] Encoded content: {encoded}")
+            print(f"[generate_scaffolds] Response contains {len(full_scaffolds)} scaffolds")
             return JSONResponse(content=encoded)
         except HTTPException:
             raise
@@ -555,9 +582,14 @@ def run_material_focus_scaffold(
     session_id_str = payload.session_id or reading_info.get("session_id")
     reading_id_str = payload.reading_id or reading_info.get("reading_id")
     
+    print(f"[run_material_focus_scaffold] Received session_id_str: {session_id_str}, reading_id_str: {reading_id_str}")
+    print(f"[run_material_focus_scaffold] payload.session_id: {payload.session_id}, payload.reading_id: {payload.reading_id}")
+    print(f"[run_material_focus_scaffold] reading_info.get('session_id'): {reading_info.get('session_id')}, reading_info.get('reading_id'): {reading_info.get('reading_id')}")
+    
     # Validate and parse UUIDs
     try:
         session_id = uuid.UUID(session_id_str) if session_id_str else uuid.uuid4()
+        print(f"[run_material_focus_scaffold] Parsed session_id: {session_id}")
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
@@ -566,6 +598,7 @@ def run_material_focus_scaffold(
     
     try:
         reading_id = uuid.UUID(reading_id_str) if reading_id_str else uuid.uuid4()
+        print(f"[run_material_focus_scaffold] Parsed reading_id: {reading_id}")
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
@@ -635,6 +668,36 @@ def run_material_focus_scaffold(
         )
 
     # Save scaffolds to database
+    # First, refresh the database connection to avoid timeout issues
+    # (workflow may have taken a long time, causing connection to timeout)
+    try:
+        print(f"[run_material_focus_scaffold] Refreshing database connection before saving scaffolds...")
+        # Try to ping the connection - if it fails, invalidate and reconnect
+        try:
+            db.execute(text("SELECT 1"))
+            db.commit()
+            print(f"[run_material_focus_scaffold] Database connection is valid")
+        except Exception as ping_error:
+            print(f"[run_material_focus_scaffold] Connection ping failed: {ping_error}, attempting to reconnect...")
+            # Invalidate the connection to force a new one from the pool
+            try:
+                db.connection().invalidate()
+            except:
+                pass
+            # Try again with a new connection
+            db.execute(text("SELECT 1"))
+            db.commit()
+            print(f"[run_material_focus_scaffold] Database connection reconnected successfully")
+    except Exception as conn_error:
+        print(f"[run_material_focus_scaffold] ERROR: Failed to refresh/reconnect database connection: {conn_error}")
+        import traceback
+        traceback.print_exc()
+        # Try to rollback and continue - connection pool should handle reconnection
+        try:
+            db.rollback()
+        except:
+            pass
+    
     saved_annotations = []
     try:
         for idx, scaf in enumerate(review_list):
@@ -643,25 +706,63 @@ def run_material_focus_scaffold(
             end_offset = scaf.get("end_offset")
             page_number = scaf.get("page_number")
             
-            try:
-                annotation = create_scaffold_annotation(
-                    db=db,
-                    session_id=session_id,
-                    reading_id=reading_id,
-                    highlight_text=scaf.get("fragment", ""),
-                    current_content=scaf.get("text", ""),
-                    start_offset=start_offset,
-                    end_offset=end_offset,
-                    page_number=page_number,
-                    status="draft",
-                )
-                saved_annotations.append(annotation)
-                print(f"[run_material_focus_scaffold] Successfully saved scaffold {idx + 1}")
-            except Exception as e:
-                print(f"[run_material_focus_scaffold] ERROR saving scaffold {idx + 1}: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+            # Retry logic for database operations
+            max_retries = 3
+            retry_count = 0
+            annotation = None
+            
+            while retry_count < max_retries:
+                try:
+                    print(f"[run_material_focus_scaffold] Saving scaffold {idx + 1} with session_id={session_id}, reading_id={reading_id} (attempt {retry_count + 1}/{max_retries})")
+                    annotation = create_scaffold_annotation(
+                        db=db,
+                        session_id=session_id,
+                        reading_id=reading_id,
+                        highlight_text=scaf.get("fragment", ""),
+                        current_content=scaf.get("text", ""),
+                        start_offset=start_offset,
+                        end_offset=end_offset,
+                        page_number=page_number,
+                        status="draft",
+                    )
+                    saved_annotations.append(annotation)
+                    print(f"[run_material_focus_scaffold] Successfully saved scaffold {idx + 1} with annotation_id={annotation.id}")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    error_str = str(e)
+                    print(f"[run_material_focus_scaffold] ERROR saving scaffold {idx + 1} (attempt {retry_count}/{max_retries}): {e}")
+                    
+                    # Check if it's a connection error
+                    if "SSL SYSCALL error" in error_str or "EOF detected" in error_str or "connection" in error_str.lower() or "OperationalError" in str(type(e)):
+                        if retry_count < max_retries:
+                            print(f"[run_material_focus_scaffold] Connection error detected, attempting to reconnect...")
+                            try:
+                                db.rollback()
+                                # Invalidate the connection to force a new one from the pool
+                                try:
+                                    db.connection().invalidate()
+                                    print(f"[run_material_focus_scaffold] Connection invalidated")
+                                except Exception as invalidate_error:
+                                    print(f"[run_material_focus_scaffold] Could not invalidate connection: {invalidate_error}")
+                                
+                                # Test the new connection
+                                db.execute(text("SELECT 1"))
+                                db.commit()
+                                print(f"[run_material_focus_scaffold] Connection reconnected successfully, retrying...")
+                                continue
+                            except Exception as refresh_error:
+                                print(f"[run_material_focus_scaffold] Failed to reconnect: {refresh_error}")
+                                if retry_count >= max_retries:
+                                    raise
+                    else:
+                        # Not a connection error, don't retry
+                        import traceback
+                        traceback.print_exc()
+                        raise
+            
+            if annotation is None:
+                raise Exception(f"Failed to save scaffold {idx + 1} after {max_retries} attempts")
 
         print(f"[run_material_focus_scaffold] Saved {len(saved_annotations)} annotations to database")
     except Exception as e:
@@ -1723,4 +1824,61 @@ def save_highlight_coords(
         created_count=created_count,
         errors=errors
     )
+
+
+# ======================================================
+# Queries Endpoint (for PDF highlighting fallback)
+# ======================================================
+
+@router.get("/queries")
+def get_queries(
+    sessionId: Optional[str] = None,
+    readingId: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get scaffold fragments (queries) for PDF highlighting.
+    Used as a fallback when searchQueries prop is not provided to PdfPreview component.
+    
+    Query parameters:
+    - sessionId: Session ID to get scaffolds from
+    - readingId: Optional reading ID to filter scaffolds
+    
+    Returns:
+    - queries: Array of fragment strings from scaffolds
+    """
+    print(f"[get_queries] Called with sessionId={sessionId}, readingId={readingId}")
+    
+    if not sessionId:
+        print(f"[get_queries] No sessionId provided, returning empty queries")
+        return {"queries": []}
+    
+    try:
+        session_uuid = uuid.UUID(sessionId)
+        print(f"[get_queries] Parsed session_uuid: {session_uuid}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid sessionId format: {sessionId}")
+    
+    reading_uuid = None
+    if readingId:
+        try:
+            reading_uuid = uuid.UUID(readingId)
+            print(f"[get_queries] Parsed reading_uuid: {reading_uuid}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid readingId format: {readingId}")
+    
+    # Get scaffold annotations for the session
+    annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    print(f"[get_queries] Found {len(annotations)} total annotations for session {session_uuid}")
+    
+    # Filter by reading_id if provided
+    if reading_uuid:
+        annotations = [a for a in annotations if a.reading_id == reading_uuid]
+        print(f"[get_queries] After filtering by reading_id {reading_uuid}: {len(annotations)} annotations")
+    
+    # Extract fragments (highlight_text) from annotations
+    queries = [ann.highlight_text for ann in annotations if ann.highlight_text and ann.highlight_text.strip()]
+    print(f"[get_queries] Extracted {len(queries)} queries from {len(annotations)} annotations")
+    
+    return {"queries": queries}
 

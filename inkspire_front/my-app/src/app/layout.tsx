@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import "@/app/ui/ui.module.css";
-// import MswInit from "@/components/MswInit"; // MSW disabled - connecting to FastAPI backend
+import MswInit from "@/components/MswInit"; // MSW enabled for testing
 // PDF.js CSS is loaded via CDN in <head> below - local import causes image path resolution issues
 
 export const metadata: Metadata = {
@@ -33,8 +33,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Script>
       </head>
       <body>
-        {/* MSW disabled - connecting to FastAPI backend */}
-        {/* {process.env.NODE_ENV === 'development' ? <MswInit /> : null} */}
+        {/* MSW enabled for testing - will mock API calls when backend is unavailable */}
+        {process.env.NODE_ENV === 'development' ? <MswInit /> : null}
         <main>{children}</main>
       </body>
     </html>
