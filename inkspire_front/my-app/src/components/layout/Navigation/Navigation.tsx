@@ -12,7 +12,7 @@ import { AuthModal } from '@/components/auth/AuthModal';
 
 const NAVIGATION_LINKS = [
   { name: 'Dashboard', href: '/' },
-  { name: 'History', href: '/history' },
+  // { name: 'History', href: '/history' },
 ];
 
 export default function Navigation() {

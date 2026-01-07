@@ -10,10 +10,12 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   showPerusallModal: boolean
+  coursesRefreshTrigger: number
   signIn: (email: string, password: string) => Promise<{ error?: AuthError }>
   signUp: (email: string, password: string, name: string) => Promise<{ error?: AuthError }>
   signOut: () => Promise<{ error?: AuthError }>
   closePerusallModal: () => void
+  triggerCoursesRefresh: () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -35,6 +37,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPerusallModal, setShowPerusallModal] = useState(false)
+  const [coursesRefreshTrigger, setCoursesRefreshTrigger] = useState(0)
 
   useEffect(() => {
     // Get initial session
@@ -153,6 +156,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setShowPerusallModal(false)
   }
 
+  const triggerCoursesRefresh = () => {
+    setCoursesRefreshTrigger(prev => prev + 1)
+  }
+
   const signOut = async () => {
     try {
       const { error } = await supabase.auth.signOut()
@@ -181,10 +188,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     session,
     loading,
     showPerusallModal,
+    coursesRefreshTrigger,
     signIn,
     signUp,
     signOut,
     closePerusallModal,
+    triggerCoursesRefresh,
   }
 
 

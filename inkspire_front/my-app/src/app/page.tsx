@@ -31,7 +31,7 @@ interface ApiCourse {
 export default function DashboardPage() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, showPerusallModal } = useAuth();
+  const { user, showPerusallModal, coursesRefreshTrigger } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function DashboardPage() {
     if (user && !showPerusallModal) {
       loadCourses();
     }
-  }, [pathname, user, showPerusallModal]); // Reload when pathname changes, user becomes available, or modal closes
+  }, [pathname, user, showPerusallModal, coursesRefreshTrigger]); // Reload when pathname changes, user becomes available, modal closes, or trigger changes
 
   const testBackendConnection = async () => {
     try {

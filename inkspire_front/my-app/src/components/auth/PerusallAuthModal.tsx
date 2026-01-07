@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { Checkbox, Field, Label } from '@headlessui/react'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -19,6 +20,7 @@ interface PerusallCourse {
 type Step = 'set-credentials' | 'validate-credentials' | 'select-courses' | 'import-courses' | 'complete-integration'
 
 export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProps) {
+  const { triggerCoursesRefresh } = useAuth()
   const [step, setStep] = useState<Step>('set-credentials')
   const [institutionId, setInstitutionId] = useState('')
   const [apiToken, setApiToken] = useState('')
@@ -193,6 +195,10 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       }
 
       setStep('complete-integration')
+
+      // Refresh courses on dashboard
+      triggerCoursesRefresh()
+
       // Auto-close after 2 second and trigger dashboard refresh
       const timeoutId = setTimeout(() => {
         onClose()
@@ -207,7 +213,7 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
   if (!isOpen) return null
 
   return (
-    <div className={`fixed inset-0 ${allowClose ? 'bg-black bg-opacity-60' : 'bg-black'} flex items-center justify-center z-[9999]`}>
+    <div className={`fixed inset-0 ${allowClose ? 'bg-black bg-opacity-60 backdrop-blur-sm' : 'bg-black'} flex items-center justify-center z-[9999]`}>
       <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">
