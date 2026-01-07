@@ -33,7 +33,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user, showPerusallModal, coursesRefreshTrigger } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [instructorId, setInstructorId] = useState<string | null>(null);
@@ -62,9 +62,16 @@ export default function DashboardPage() {
   // Test backend connection and load courses when the component mounts
   useEffect(() => {
     testBackendConnection();
-    // Only load courses if user exists AND Perusall modal is closed
+
     if (user && !showPerusallModal) {
+      // User is signed in - load their courses
       loadCourses();
+    } else if (!user) {
+      // User signed out - clear all course-related state
+      setCourses([]);
+      setInstructorId(null);
+      setError(null);
+      setLoading(false);
     }
   }, [pathname, user, showPerusallModal, coursesRefreshTrigger]); // Reload when pathname changes, user becomes available, modal closes, or trigger changes
 
@@ -164,32 +171,16 @@ export default function DashboardPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <AuthGuard>
-        <div className={styles.container}>
-          <Navigation />
-          <div className={styles.dashboard}>
-            <div className={styles.dashboardHeader}>
-              <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
-            </div>
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <p>Loading your courses...</p>
-            </div>
-          </div>
-        </div>
-      </AuthGuard>
-    );
-  }
-
   return (
     <AuthGuard>
       <div className={styles.container}>
         <Navigation />
         <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
-            <h1 className={styles.welcomeTitle}>Welcome Back, {getUserFirstName()}</h1>
-            {process.env.NODE_ENV === 'development' && (
+            <h1 className={styles.welcomeTitle}>
+              {user ? `Welcome Back, ${getUserFirstName()}` : 'Welcome to InkSpire!'}
+            </h1>
+            {process.env.NODE_ENV === 'development' && !loading && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -225,49 +216,57 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {error ? (
-            <div style={{
-              gridColumn: '1 / -1',
-              textAlign: 'center',
-              padding: '2rem',
-              backgroundColor: '#fee2e2',
-              borderRadius: '0.5rem',
-              border: '1px solid #fca5a5',
-              marginBottom: '2rem'
-            }}>
-              <p style={{ color: '#991b1b', margin: 0 }}>{error}</p>
-              <button
-                onClick={() => loadCourses()}
-                style={{
-                  marginTop: '1rem',
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#dc2626',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.375rem',
-                  cursor: 'pointer',
-                  fontWeight: 500
-                }}
-              >
-                Retry
-              </button>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p>Loading your courses...</p>
             </div>
           ) : (
-            <div className={styles.classCardsGrid}>
-              {courses.length === 0 ? (
-                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-                  <p>No courses yet. Import your first one from Perusall!</p>
+            <>
+              {error ? (
+                <div style={{
+                  gridColumn: '1 / -1',
+                  textAlign: 'center',
+                  padding: '2rem',
+                  backgroundColor: '#fee2e2',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #fca5a5',
+                  marginBottom: '2rem'
+                }}>
+                  <p style={{ color: '#991b1b', margin: 0 }}>{error}</p>
+                  <button
+                    onClick={() => loadCourses()}
+                    style={{
+                      marginTop: '1rem',
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#dc2626',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '0.375rem',
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    Retry
+                  </button>
                 </div>
               ) : (
-                courses.map((course) => (
-                  <CourseCard
-                    key={course.id}
-                    course={course}
-                    onClick={handleCourseClick}
-                  />
-                ))
+                <div className={styles.classCardsGrid}>
+                  {courses.length === 0 ? (
+                    <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+                      {user ? 'No courses yet. Import your first one from Perusall!' : 'Please sign in to view your courses.'}
+                    </div>
+                  ) : (
+                    courses.map((course) => (
+                      <CourseCard
+                        key={course.id}
+                        course={course}
+                        onClick={handleCourseClick}
+                      />
+                    ))
+                  )}
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {/* <div className={styles.newClassButtonContainer}>
