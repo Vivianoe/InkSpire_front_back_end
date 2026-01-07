@@ -55,40 +55,43 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
   { value: 'mixed', label: 'Mixed proficiency cohort' },
 ];
 
-const DEFAULT_CLASS_BACKGROUND = '';
+// const DEFAULT_CLASS_BACKGROUND = '';
+
+// const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
+//   disciplineInfo: {
+//     disciplineName: '',
+//     department: '',
+//     fieldDescription: '',
+//   },
+//   courseInfo: {
+//     courseName: '',
+//     courseCode: '',
+//     description: '',
+//     credits: '',
+//     prerequisites: '',
+//     learningObjectives: '',
+//     assessmentMethods: '',
+//     deliveryMode: '',
+//   },
+//   classInfo: {
+//     semester: '',
+//     year: '',
+//     section: '',
+//     meetingDays: '',
+//     meetingTime: '',
+//     location: '',
+//     enrollment: '',
+//     background: DEFAULT_CLASS_BACKGROUND,
+//     priorKnowledge: '',
+//   },
+//   generatedProfile: undefined,
+//   designConsiderations: createDefaultDesignConsiderations(),
+// };
+
+const DEFAULT_CLASS_BACKGROUND =
+  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
-  disciplineInfo: {
-    disciplineName: '',
-    department: '',
-    fieldDescription: '',
-  },
-  courseInfo: {
-    courseName: '',
-    courseCode: '',
-    description: '',
-    credits: '',
-    prerequisites: '',
-    learningObjectives: '',
-    assessmentMethods: '',
-    deliveryMode: '',
-  },
-  classInfo: {
-    semester: '',
-    year: '',
-    section: '',
-    meetingDays: '',
-    meetingTime: '',
-    location: '',
-    enrollment: '',
-    background: DEFAULT_CLASS_BACKGROUND,
-    priorKnowledge: '',
-  },
-  generatedProfile: undefined,
-  designConsiderations: createDefaultDesignConsiderations(),
-};
-
-const TEST_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
     disciplineName: 'Computer Science',
     department: 'Department of Computer and Information Science',
@@ -375,8 +378,6 @@ export default function EditClassProfilePage() {
         throw new Error(data?.message || 'Failed to generate profile');
       }
 
-
-      console.log('data:', data);
       const review = data.review ?? null;
 
       const { profileText, design } = extractProfileFromReview(review);

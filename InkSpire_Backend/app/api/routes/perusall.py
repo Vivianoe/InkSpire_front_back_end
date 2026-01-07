@@ -90,6 +90,10 @@ def post_annotations_to_perusall(
     perusall_assignment_id = None
     perusall_document_id = None
 
+    # Check for mock mode
+    import os
+    mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+
     # If annotation_ids provided, fetch highlight_coords from database
     annotations_to_post = []
     first_annotation = None  # Store first annotation to get course_id and reading_id
@@ -214,31 +218,36 @@ def post_annotations_to_perusall(
                     "Content-Type": "application/json",
                 }
                 
-                courses_url = f"{PERUSALL_BASE_URL}/courses"
-                print(f"[post_annotations_to_perusall] Fetching courses from: {courses_url}")
-                courses_response = requests.get(courses_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Courses API response status: {courses_response.status_code}")
-                print(f"[post_annotations_to_perusall] Courses API response headers: {dict(courses_response.headers)}")
-                
-                courses_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_courses = courses_response.json()
-                except ValueError as json_error:
-                    response_text = courses_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall courses API returned invalid JSON. Status: {courses_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_courses, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall courses API: {type(perusall_courses)}. Expected list, got {type(perusall_courses)}"
-                    )
+                if mock_mode:
+                    from app.mocks.perusall_mock_data import MOCK_COURSES
+                    perusall_courses = MOCK_COURSES.copy()
+                    print(f"[post_annotations_to_perusall] MOCK MODE: Using {len(perusall_courses)} mock courses")
+                else:
+                    courses_url = f"{PERUSALL_BASE_URL}/courses"
+                    print(f"[post_annotations_to_perusall] Fetching courses from: {courses_url}")
+                    courses_response = requests.get(courses_url, headers=headers, timeout=30)
+
+                    print(f"[post_annotations_to_perusall] Courses API response status: {courses_response.status_code}")
+                    print(f"[post_annotations_to_perusall] Courses API response headers: {dict(courses_response.headers)}")
+
+                    courses_response.raise_for_status()
+
+                    # Check if response is valid JSON
+                    try:
+                        perusall_courses = courses_response.json()
+                    except ValueError as json_error:
+                        response_text = courses_response.text[:500]  # First 500 chars
+                        print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Perusall courses API returned invalid JSON. Status: {courses_response.status_code}. Response: {response_text}"
+                        )
+
+                    if not isinstance(perusall_courses, list):
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Unexpected response format from Perusall courses API: {type(perusall_courses)}. Expected list, got {type(perusall_courses)}"
+                        )
                 
                 # Step 2: Match course by name
                 matched_course = None
@@ -285,29 +294,34 @@ def post_annotations_to_perusall(
                 print(f"[post_annotations_to_perusall] Matched Perusall course: {matched_course.get('name')} -> {perusall_course_id}")
                 
                 # Step 3: Get course library (readings) for this course
-                library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
-                print(f"[post_annotations_to_perusall] Fetching library from: {library_url}")
-                library_response = requests.get(library_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Library API response status: {library_response.status_code}")
-                library_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_readings = library_response.json()
-                except ValueError as json_error:
-                    response_text = library_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall library API returned invalid JSON. Status: {library_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_readings, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall library API: {type(perusall_readings)}. Expected list, got {type(perusall_readings)}"
-                    )
+                if mock_mode:
+                    from app.mocks.perusall_mock_data import get_mock_library_for_course
+                    perusall_readings = get_mock_library_for_course(perusall_course_id)
+                    print(f"[post_annotations_to_perusall] MOCK MODE: Using {len(perusall_readings)} mock readings for course {perusall_course_id}")
+                else:
+                    library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
+                    print(f"[post_annotations_to_perusall] Fetching library from: {library_url}")
+                    library_response = requests.get(library_url, headers=headers, timeout=30)
+
+                    print(f"[post_annotations_to_perusall] Library API response status: {library_response.status_code}")
+                    library_response.raise_for_status()
+
+                    # Check if response is valid JSON
+                    try:
+                        perusall_readings = library_response.json()
+                    except ValueError as json_error:
+                        response_text = library_response.text[:500]  # First 500 chars
+                        print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Perusall library API returned invalid JSON. Status: {library_response.status_code}. Response: {response_text}"
+                        )
+
+                    if not isinstance(perusall_readings, list):
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Unexpected response format from Perusall library API: {type(perusall_readings)}. Expected list, got {type(perusall_readings)}"
+                        )
                 
                 # Step 4: Match reading by name to get perusall reading_id
                 matched_reading = None
@@ -354,29 +368,34 @@ def post_annotations_to_perusall(
                 print(f"[post_annotations_to_perusall] Matched Perusall reading: {matched_reading.get('name')} -> {perusall_reading_id}")
                 
                 # Step 5: Get assignments for this course
-                assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
-                print(f"[post_annotations_to_perusall] Fetching assignments from: {assignments_url}")
-                assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
-                
-                print(f"[post_annotations_to_perusall] Assignments API response status: {assignments_response.status_code}")
-                assignments_response.raise_for_status()
-                
-                # Check if response is valid JSON
-                try:
-                    perusall_assignments = assignments_response.json()
-                except ValueError as json_error:
-                    response_text = assignments_response.text[:500]  # First 500 chars
-                    print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Perusall assignments API returned invalid JSON. Status: {assignments_response.status_code}. Response: {response_text}"
-                    )
-                
-                if not isinstance(perusall_assignments, list):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unexpected response format from Perusall assignments API: {type(perusall_assignments)}. Expected list, got {type(perusall_assignments)}"
-                    )
+                if mock_mode:
+                    from app.mocks.perusall_mock_data import get_mock_assignments_for_course
+                    perusall_assignments = get_mock_assignments_for_course(perusall_course_id)
+                    print(f"[post_annotations_to_perusall] MOCK MODE: Using {len(perusall_assignments)} mock assignments for course {perusall_course_id}")
+                else:
+                    assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
+                    print(f"[post_annotations_to_perusall] Fetching assignments from: {assignments_url}")
+                    assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
+
+                    print(f"[post_annotations_to_perusall] Assignments API response status: {assignments_response.status_code}")
+                    assignments_response.raise_for_status()
+
+                    # Check if response is valid JSON
+                    try:
+                        perusall_assignments = assignments_response.json()
+                    except ValueError as json_error:
+                        response_text = assignments_response.text[:500]  # First 500 chars
+                        print(f"[post_annotations_to_perusall] Failed to parse JSON response. Response text (first 500 chars): {response_text}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Perusall assignments API returned invalid JSON. Status: {assignments_response.status_code}. Response: {response_text}"
+                        )
+
+                    if not isinstance(perusall_assignments, list):
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Unexpected response format from Perusall assignments API: {type(perusall_assignments)}. Expected list, got {type(perusall_assignments)}"
+                        )
                 
                 # Step 6: Find assignment that contains this reading_id
                 # Assignments may have a 'documents' array or 'document_id' field
@@ -513,43 +532,50 @@ def post_annotations_to_perusall(
                     "text": f"<p>{item.fragment}</p>"
                 }
 
-                url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments/{perusall_assignment_id}/annotations"
-
                 try:
-                    print(f"[post_annotations_to_perusall] Posting annotation {idx + 1}/{len(annotations_to_post)} to: {url}")
-                    print(f"[post_annotations_to_perusall] Payload: {payload}")
-                    
-                    # Try form-encoded first (as Perusall API typically expects this)
-                    response = session.post(url, data=payload, headers=headers, timeout=30)
-                    
-                    print(f"[post_annotations_to_perusall] Response status: {response.status_code}")
-                    print(f"[post_annotations_to_perusall] Response headers: {dict(response.headers)}")
-                    
-                    response.raise_for_status()
-
-                    data = response.json()
-                    ann_id = None
-                    
-                    # Handle different response formats from Perusall API
-                    if isinstance(data, dict):
-                        # Response is a dictionary: {'_id': '...'} or {'id': '...'}
-                        ann_id = data.get("_id") or data.get("id")
-                    elif isinstance(data, list) and len(data) > 0:
-                        # Response is a list: [{'id': '...'}] or [{'_id': '...'}]
-                        first_item = data[0]
-                        if isinstance(first_item, dict):
-                            ann_id = first_item.get("_id") or first_item.get("id")
-                    
-                    if ann_id:
+                    if mock_mode:
+                        from app.mocks.perusall_mock_data import get_mock_annotation_post_response
+                        data = get_mock_annotation_post_response(idx)
+                        ann_id = data.get("_id")
+                        print(f"[post_annotations_to_perusall] MOCK MODE: Simulated annotation post {idx + 1}/{len(annotations_to_post)}, mock ID: {ann_id}")
                         created_ids.append(str(ann_id))
-                        print(f"[post_annotations_to_perusall] Successfully posted annotation {idx + 1}, got ID: {ann_id}")
                     else:
-                        errors.append({
-                            "index": idx,
-                            "error": f"Unexpected response format: {data}. Expected dict with '_id' or 'id', or list of dicts.",
-                            "payload": payload
-                        })
-                        print(f"[post_annotations_to_perusall] Unexpected response format for annotation {idx + 1}: {data}")
+                        url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments/{perusall_assignment_id}/annotations"
+
+                        print(f"[post_annotations_to_perusall] Posting annotation {idx + 1}/{len(annotations_to_post)} to: {url}")
+                        print(f"[post_annotations_to_perusall] Payload: {payload}")
+
+                        # Try form-encoded first (as Perusall API typically expects this)
+                        response = session.post(url, data=payload, headers=headers, timeout=30)
+
+                        print(f"[post_annotations_to_perusall] Response status: {response.status_code}")
+                        print(f"[post_annotations_to_perusall] Response headers: {dict(response.headers)}")
+
+                        response.raise_for_status()
+
+                        data = response.json()
+                        ann_id = None
+
+                        # Handle different response formats from Perusall API
+                        if isinstance(data, dict):
+                            # Response is a dictionary: {'_id': '...'} or {'id': '...'}
+                            ann_id = data.get("_id") or data.get("id")
+                        elif isinstance(data, list) and len(data) > 0:
+                            # Response is a list: [{'id': '...'}] or [{'_id': '...'}]
+                            first_item = data[0]
+                            if isinstance(first_item, dict):
+                                ann_id = first_item.get("_id") or first_item.get("id")
+
+                        if ann_id:
+                            created_ids.append(str(ann_id))
+                            print(f"[post_annotations_to_perusall] Successfully posted annotation {idx + 1}, got ID: {ann_id}")
+                        else:
+                            errors.append({
+                                "index": idx,
+                                "error": f"Unexpected response format: {data}. Expected dict with '_id' or 'id', or list of dicts.",
+                                "payload": payload
+                            })
+                            print(f"[post_annotations_to_perusall] Unexpected response format for annotation {idx + 1}: {data}")
 
                 except requests.exceptions.RequestException as e:
                     error_msg = str(e)

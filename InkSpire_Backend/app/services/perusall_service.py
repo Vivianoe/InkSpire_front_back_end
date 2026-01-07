@@ -171,6 +171,14 @@ def validate_perusall_credentials(
     if not is_valid:
         raise Exception(f"Invalid credential format: {error_msg}")
 
+    # Check for mock mode
+    import os
+    mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+
+    if mock_mode:
+        logger.info("[validate_perusall_credentials] MOCK MODE: Returning True (credentials format valid)")
+        return True
+
     url = f"{PERUSALL_BASE_URL}/courses"
     headers = {
         "X-Institution": institution_id,
@@ -221,6 +229,15 @@ def fetch_perusall_courses(
     Raises:
         Exception: For API errors, network issues, or invalid responses
     """
+    # Check for mock mode
+    import os
+    mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+
+    if mock_mode:
+        from app.mocks.perusall_mock_data import MOCK_COURSES
+        logger.info(f"[fetch_perusall_courses] MOCK MODE: Returning {len(MOCK_COURSES)} mock courses")
+        return MOCK_COURSES.copy()
+
     url = f"{PERUSALL_BASE_URL}/courses"
     headers = {
         "X-Institution": institution_id,
