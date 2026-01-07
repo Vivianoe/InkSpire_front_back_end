@@ -85,6 +85,7 @@ class PublicUserResponse(BaseModel):
 
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
+    course_id: str
     title: str
     perusall_course_id: Optional[str] = None
     description: str

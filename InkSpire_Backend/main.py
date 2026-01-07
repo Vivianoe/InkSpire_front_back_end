@@ -712,20 +712,14 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     discipline_info = payload.class_input.get("discipline_info")
     course_info = payload.class_input.get("course_info")
     class_info = payload.class_input.get("class_info")
-    
-    # Create course in database
-    course = create_course(
-        db=db,
-        instructor_id=instructor_uuid,
-        title=payload.title,
-        course_code=payload.course_code,
-        description=payload.description,
-    )
+
+    # Get course id from payload
+    course_id = payload.course_id
     
     # Create course basic info in database
     basic_info = create_course_basic_info(
         db=db,
-        course_id=course.id,
+        course_id=course_id,
         discipline_info_json=discipline_info,
         course_info_json=course_info,
         class_info_json=class_info,
@@ -767,7 +761,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     class_profile = create_class_profile_db(
         db=db,
         instructor_id=instructor_uuid,
-        course_id=course.id,
+        course_id=course_id,
         title=payload.title,
         description=profile_text,  # Store the full JSON string as description
         metadata_json=metadata_json,
@@ -784,7 +778,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     
     # Keep backward compatibility with memory store
     CLASS_PROFILE_REVIEWS[str(class_profile.id)] = review
-    COURSE_PROFILE_MAP[str(course.id)] = str(class_profile.id)
+    COURSE_PROFILE_MAP[str(course_id)] = str(class_profile.id)
 
     return RunClassProfileResponse(
         review=profile_to_model(class_profile, db),
