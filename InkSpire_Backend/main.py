@@ -5,6 +5,7 @@ import json
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security
+security = HTTPBearer()
 
 # Database
 from database import get_db
@@ -76,7 +80,7 @@ from user_service import (
     get_user_by_supabase_id,
     user_to_dict,
 )
-from auth.supabase import supabase_signup, supabase_login, AuthenticationError
+from auth.supabase import supabase_signup, supabase_login, supabase_logout, AuthenticationError
 from auth.dependencies import get_current_user
 
 # Course management
@@ -307,6 +311,10 @@ class LoginResponse(BaseModel):
     message: str = "Login successful"
 
 
+class LogoutResponse(BaseModel):
+    message: str = "Logout successful"
+
+
 class PublicUserResponse(BaseModel):
     id: str
     email: str
@@ -410,6 +418,39 @@ def login_user(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@app.post("/api/users/logout", response_model=LogoutResponse)
+def logout_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user = Depends(get_current_user)
+):
+    """
+    Logout user by invalidating their session
+
+    Flow:
+    1. Validate JWT token (via get_current_user dependency)
+    2. Call Supabase logout to invalidate session
+    3. Return success message
+
+    Requires valid JWT token in Authorization header.
+    Usage: Authorization: Bearer <token>
+    """
+    try:
+        # Extract JWT token from Authorization header
+        access_token = credentials.credentials
+
+        # Invalidate session in Supabase
+        supabase_logout(access_token)
+
+        return LogoutResponse(message="Logout successful")
+
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
 
 
 @app.get("/api/users/me", response_model=UserResponse)
@@ -671,20 +712,14 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     discipline_info = payload.class_input.get("discipline_info")
     course_info = payload.class_input.get("course_info")
     class_info = payload.class_input.get("class_info")
-    
-    # Create course in database
-    course = create_course(
-        db=db,
-        instructor_id=instructor_uuid,
-        title=payload.title,
-        course_code=payload.course_code,
-        description=payload.description,
-    )
+
+    # Get course id from payload
+    course_id = payload.course_id
     
     # Create course basic info in database
     basic_info = create_course_basic_info(
         db=db,
-        course_id=course.id,
+        course_id=course_id,
         discipline_info_json=discipline_info,
         course_info_json=course_info,
         class_info_json=class_info,
@@ -726,7 +761,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     class_profile = create_class_profile_db(
         db=db,
         instructor_id=instructor_uuid,
-        course_id=course.id,
+        course_id=course_id,
         title=payload.title,
         description=profile_text,  # Store the full JSON string as description
         metadata_json=metadata_json,
@@ -743,7 +778,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     
     # Keep backward compatibility with memory store
     CLASS_PROFILE_REVIEWS[str(class_profile.id)] = review
-    COURSE_PROFILE_MAP[str(course.id)] = str(class_profile.id)
+    COURSE_PROFILE_MAP[str(course_id)] = str(class_profile.id)
 
     return RunClassProfileResponse(
         review=profile_to_model(class_profile, db),

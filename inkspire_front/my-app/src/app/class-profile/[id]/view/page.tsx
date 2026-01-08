@@ -17,6 +17,13 @@ import {
 } from '@/app/class-profile/designConsiderations';
 import styles from './page.module.css';
 
+// const DEFAULT_CLASS_BACKGROUND = '';
+
+// const DEFAULT_CLASS_PROFILE_TEXT = '';
+
+const DEFAULT_CLASS_BACKGROUND =
+  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
+
 const DEFAULT_CLASS_PROFILE_TEXT = `This discipline focuses on computing and software engineering, where knowledge is built through logical proof, empirical validation, and formal specification. Learners engage with diverse materials such as code examples, conceptual explanations, research papers, and documentation, using both linear and non-linear reading strategies to understand algorithms, design patterns, and system behavior. Core practices include debugging, testing, verification, code review, and version control, reflecting inquiry processes rooted in problem solving, replication, and collaboration.
 
 Discipline level:
@@ -37,9 +44,6 @@ Class level:
 1. learning_goals: Understand core version control concepts and best practices; enable effective use of version control systems like Git in collaborative coding environments.
 2. key_concepts: Version control systems (VCS), distributed VCS (Git), repository, working copy, staging area, commit, branch, merge, conflict resolution, remote repositories, push, pull, best practices for version control (atomic commits, clear messages, frequent updates, branching strategies).
 3. key_terms: Version control, VCS, Git, repository, commit, branch, merge, conflict, working copy, staging area, remote, push, pull, clone, fork, HEAD, main, checkout, status, add, diff, log, rebase.`;
-
-const DEFAULT_CLASS_BACKGROUND =
-  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
 
 type ProfileLevel = 'all' | 'discipline' | 'course' | 'class';
 
@@ -794,7 +798,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       
       // Get course_id from URL params, or use "new" to create a new course
       const urlParams = new URLSearchParams(window.location.search);
-      const urlCourseId = urlParams.get('courseId');
+      const urlCourseId = urlParams.get('courseId') || 
+        (typeof window !== 'undefined' && window.location.pathname.match(/\/courses\/([^\/]+)/)?.[1]);
       const courseIdForRequest = urlCourseId || 'new';
 
       const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
@@ -1001,8 +1006,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       }
 
       if (options.approveAfter && savedId && savedId !== 'new') {
-        // Get course_id from profile data or URL params
-        const courseIdForApprove = formData?.courseInfo?.courseId || urlCourseId || data?.course_id;
+        // Get course_id from URL params
+        const courseIdForApprove = urlCourseId || data?.course_id;
         if (!courseIdForApprove) {
           throw new Error('course_id is required for approving profile');
         }

@@ -4,11 +4,15 @@ import Navigation from "@/components/layout/Navigation";
 import styles from "./page.module.css";
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { AuthGuard } from '@/components/auth/AuthGuard';
+import { useAuth } from '@/contexts/AuthContext';
+import { CourseCard } from '@/components/course/CourseCard';
+import { supabase } from '@/lib/supabase/client';
 
 interface CourseSummary {
   id: string;
   title: string;
-  courseCode?: string | null;
+  perusallCourseId?: string | null;
   description?: string | null;
   classProfileId?: string | null;
   lastUpdated?: string | null;
@@ -17,27 +21,59 @@ interface CourseSummary {
 interface ApiCourse {
   id: string;
   title: string;
-  course_code?: string | null;
+  perusall_course_id?: string | null;
   description?: string | null;
   class_profile_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
 
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
-
 export default function DashboardPage() {
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, showPerusallModal, coursesRefreshTrigger } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [instructorId, setInstructorId] = useState<string | null>(null);
 
-  // Test backend connection when the component mounts
+  const getUserFirstName = () => {
+    if (!user) return 'Instructor'
+
+    // Try to get full name from metadata
+    const fullName = user.user_metadata?.display_name ||
+                     user.user_metadata?.full_name ||
+                     user.user_metadata?.name
+
+    if (fullName) {
+      // Extract first name (first word)
+      return fullName.split(' ')[0]
+    }
+
+    // Fallback to email username
+    if (user.email) {
+      return user.email.split('@')[0]
+    }
+
+    return 'Instructor'
+  };
+
+  // Test backend connection and load courses when the component mounts
   useEffect(() => {
     testBackendConnection();
-    loadCourses();
-  }, [pathname]); // Reload when pathname changes (e.g., when returning from edit page)
+
+    if (user && !showPerusallModal) {
+      // User is signed in - load their courses
+      loadCourses();
+    } else if (!user) {
+      // User signed out - clear all course-related state
+      setCourses([]);
+      setInstructorId(null);
+      setError(null);
+      setLoading(false);
+    }
+  }, [pathname, user, showPerusallModal, coursesRefreshTrigger]); // Reload when pathname changes, user becomes available, modal closes, or trigger changes
 
   const testBackendConnection = async () => {
     try {
@@ -60,22 +96,56 @@ export default function DashboardPage() {
   };
 
   const loadCourses = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(`/api/courses/instructor/${MOCK_INSTRUCTOR_ID}`);
-      if (response.ok) {
-        const data = await response.json();
-        const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
-          id: c.id,
-          title: c.title,
-          courseCode: c.course_code ?? undefined,
-          description: c.description ?? undefined,
-          classProfileId: c.class_profile_id ?? undefined,
-          lastUpdated: c.updated_at ?? c.created_at ?? null,
-        }));
-        setCourses(items);
+      setLoading(true);
+      setError(null);
+
+      // Get auth token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
       }
-    } catch (error) {
-      console.error('Failed to load courses:', error);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      };
+
+      // Step 1: Get internal user ID from /api/users/me
+      const userResponse = await fetch('/api/users/me', { headers });
+      if (!userResponse.ok) {
+        throw new Error(`Failed to fetch user info: ${userResponse.status} ${userResponse.statusText}`);
+      }
+      const userData = await userResponse.json();
+
+      // Save instructor ID to state for navigation
+      setInstructorId(userData.id);
+
+      // Step 2: Use internal ID to fetch courses
+      const response = await fetch(`/api/courses/instructor/${userData.id}`, { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to load courses: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const items: CourseSummary[] = (data.courses || []).map((c: ApiCourse) => ({
+        id: c.id,
+        title: c.title,
+        perusallCourseId: c.perusall_course_id ?? undefined,
+        description: c.description ?? undefined,
+        classProfileId: c.class_profile_id ?? undefined,
+        lastUpdated: c.updated_at ?? c.created_at ?? null,
+      }));
+      setCourses(items);
+    } catch (err) {
+      console.error('Failed to load courses:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load courses. Please try again.');
+      setCourses([]);
     } finally {
       setLoading(false);
     }
@@ -84,138 +154,129 @@ export default function DashboardPage() {
   const openCourse = (course: CourseSummary) => {
     // RESTful URL structure: /courses/[courseId]/class-profiles/[profileId]/view
     if (course.classProfileId) {
+      // Navigate to view existing profile
       router.push(`/courses/${course.id}/class-profiles/${course.classProfileId}/view`);
     } else {
-      // For new profiles, use "new" as profileId
+      // Navigate to create new profile using "new" as profileId
       router.push(`/courses/${course.id}/class-profiles/new/edit`);
     }
   };
 
-  const handleNewClass = () => {
-    // For new class, we need to create course first, so use a temporary course ID
-    // In a real app, you might want to create the course first or use a different flow
-    router.push(`/courses/new/class-profiles/new/edit`);
-  };
+  // const handleNewClass = () => {
+  //   // For new class, we need to create course first, so use a temporary course ID
+  //   // In a real app, you might want to create the course first or use a different flow
+  //   router.push(`/courses/new/class-profiles/new/edit`);
+  // };
 
-  if (loading) {
-    return (
+  return (
+    <AuthGuard>
       <div className={styles.container}>
         <Navigation />
         <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
-            <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
+            <h1 className={styles.welcomeTitle}>
+              {user ? `Welcome Back, ${getUserFirstName()}` : 'Welcome to InkSpire!'}
+            </h1>
+            {process.env.NODE_ENV === 'development' && !loading && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginTop: '8px',
+              }}>
+                <span>Backend:</span>
+                {backendStatus === 'checking' && (
+                  <span style={{ color: '#666' }}>Checking...</span>
+                )}
+                {backendStatus === 'connected' && (
+                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
+                )}
+                {backendStatus === 'disconnected' && (
+                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
+                )}
+                <button
+                  onClick={testBackendConnection}
+                  style={{
+                    marginLeft: '8px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    background: '#fff',
+                    color: 'red'
+                  }}
+                >
+                  Test
+                </button>
+              </div>
+            )}
           </div>
-          <div style={{ textAlign: 'center', padding: '2rem' }}>
-            <p>Loading class profiles...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  return (
-    <div className={styles.container}>
-      <Navigation />
-      <div className={styles.dashboard}>
-        <div className={styles.dashboardHeader}>
-          <h1 className={styles.welcomeTitle}>Welcome Back, Dr. Chen</h1>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px',
-            marginTop: '8px',
-            fontSize: '14px'
-          }}>
-            <span>Backend:</span>
-            {backendStatus === 'checking' && (
-              <span style={{ color: '#666' }}>Checking...</span>
-            )}
-            {backendStatus === 'connected' && (
-              <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
-            )}
-            {backendStatus === 'disconnected' && (
-              <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
-            )}
-            <button 
-              onClick={testBackendConnection}
-              style={{
-                marginLeft: '8px',
-                padding: '4px 8px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                background: '#fff'
-              }}
-            >
-              Test
-            </button>
-          </div>
-        </div>
-
-        <div className={styles.classCardsGrid}>
-          {courses.length === 0 ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-              <p>No courses yet. Create your first one!</p>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p>Loading your courses...</p>
             </div>
           ) : (
-            courses.map((course) => {
-            return (
-              <div key={course.id} className={styles.classCard}>
-                <div className={styles.classCardHeader}>
-                  <div>
-                    <h2 className={styles.courseName}>{course.title}</h2>
-                    <p className={styles.courseCode}>{course.courseCode}</p>
-                  </div>
-                  {course.classProfileId ? (
-                    <span className={`${styles.statusBadge} ${styles.statusCreated}`}>
-                      Profile Created
-                    </span>
-                  ) : (
-                    <span className={`${styles.statusBadge} ${styles.statusInProgress}`}>
-                      No Profile Yet
-                    </span>
-                  )}
-                </div>
-
-                <div className={styles.classCardContent}>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Last Updated</span>
-                    <span className={styles.statValue}>
-                      {course.lastUpdated
-                        ? new Date(course.lastUpdated).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })
-                        : '—'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className={styles.classCardActions}>
-                  <button 
-                    className={styles.viewButton}
-                    onClick={() => openCourse(course)}
+            <>
+              {error ? (
+                <div style={{
+                  gridColumn: '1 / -1',
+                  textAlign: 'center',
+                  padding: '2rem',
+                  backgroundColor: '#fee2e2',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #fca5a5',
+                  marginBottom: '2rem'
+                }}>
+                  <p style={{ color: '#991b1b', margin: 0 }}>{error}</p>
+                  <button
+                    onClick={() => loadCourses()}
+                    style={{
+                      marginTop: '1rem',
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#dc2626',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '0.375rem',
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
                   >
-                    {course.classProfileId ? 'Open Profile' : 'Create Profile'}
+                    Retry
                   </button>
                 </div>
-              </div>
-            );
-          }))}
-        </div>
+              ) : (
+                <div className={styles.classCardsGrid}>
+                  {courses.length === 0 ? (
+                    <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+                      {user ? 'No courses yet. Import your first one from Perusall!' : 'Please sign in to view your courses.'}
+                    </div>
+                  ) : (
+                    courses.map((course) => (
+                      <CourseCard
+                        key={course.id}
+                        course={course}
+                        onClick={openCourse}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </>
+          )}
 
-        <div className={styles.newClassButtonContainer}>
-          <button 
-            className={styles.newClassButton}
-            onClick={handleNewClass}
-          >
-            <span className={styles.plusIcon}>+</span>
-            New Class Profile
-          </button>
+          {/* <div className={styles.newClassButtonContainer}>
+            <button
+              className={styles.newClassButton}
+              onClick={handleNewClass}
+            >
+              <span className={styles.plusIcon}>+</span>
+              New Class Profile
+            </button>
+          </div> */}
         </div>
       </div>
-    </div>
+    </AuthGuard>
   );
 }
