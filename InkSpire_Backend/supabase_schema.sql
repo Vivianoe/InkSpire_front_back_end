@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS courses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     instructor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
+    course_code TEXT,
     perusall_course_id TEXT,
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS courses (
 -- Create indexes for courses
 CREATE INDEX IF NOT EXISTS idx_courses_instructor_id ON courses(instructor_id);
 CREATE INDEX IF NOT EXISTS idx_courses_title ON courses(title);
+CREATE INDEX IF NOT EXISTS idx_courses_course_code ON courses(course_code);
 
 -- Create course_basic_info table
 CREATE TABLE IF NOT EXISTS course_basic_info (

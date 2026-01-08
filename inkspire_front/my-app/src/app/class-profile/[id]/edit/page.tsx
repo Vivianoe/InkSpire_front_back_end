@@ -13,6 +13,7 @@ import {
   parseDesignConsiderations,
 } from '@/app/class-profile/designConsiderations';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 interface ClassProfile {
   id: string;
@@ -242,14 +243,16 @@ export default function EditClassProfilePage() {
   const profileId = pathParams?.id as string;
   const isEdit = profileId !== 'new';
   
-  // Get course_id and instructor_id from URL params
-  const urlCourseId = searchParams?.get('courseId');
+  // Extract course_id from URL path structure: /courses/{courseId}/class-profiles/{profileId}/edit
+  const urlCourseId = searchParams?.get('courseId') || 
+    (typeof window !== 'undefined' && window.location.pathname.match(/\/courses\/([^\/]+)/)?.[1]);
   const urlInstructorId = searchParams?.get('instructorId');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -298,6 +301,36 @@ export default function EditClassProfilePage() {
       setFormData(createDefaultFormData('new'));
     }
   }, [profileId, isEdit, loadProfile]);
+
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        // TODO: replace with httponly cookies for security
+        // Get auth token from Supabase session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error('Not authenticated. Please sign in again.');
+        }
+
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        };
+
+        const response = await fetch('/api/users/me', { headers });
+        if (response.ok) {
+          const userData = await response.json();
+          setCurrentUserId(userData.id);
+        } else {
+          console.error('Failed to fetch current user');
+        }
+      } catch (err) {
+        console.error('Error fetching current user:', err);
+      }
+    }
+    
+    fetchCurrentUser();
+  }, []);
 
   const handleInputChange = (section: keyof ClassProfile, field: string, value: string) => {
     setFormData(prev => {
@@ -348,21 +381,27 @@ export default function EditClassProfilePage() {
       return;
     }
 
+    if (!currentUserId && !urlInstructorId) {
+      setError('Unable to identify instructor. Please try refreshing the page.');
+      return;
+    }
+
     setGenerating(true);
     setError(null);
 
     try {
+      // Use course_id from URL params, or "new" to create a new course
+      const courseIdForRequest = urlCourseId || 'new';
+
       const payload = {
-        instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+        instructor_id: urlInstructorId || currentUserId || MOCK_INSTRUCTOR_ID,
+        course_id: courseIdForRequest,
         title: formData.courseInfo.courseName || 'Untitled Class',
         course_code: formData.courseInfo.courseCode || 'TBD',
         description:
           formData.courseInfo.description || 'Draft class profile generated via Inkspire',
         class_input: buildClassInputPayload(formData),
       };
-      
-      // Use course_id from URL params, or "new" to create a new course
-      const courseIdForRequest = urlCourseId || 'new';
 
       const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
         method: 'POST',

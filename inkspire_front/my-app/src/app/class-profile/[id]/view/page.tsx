@@ -798,7 +798,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       
       // Get course_id from URL params, or use "new" to create a new course
       const urlParams = new URLSearchParams(window.location.search);
-      const urlCourseId = urlParams.get('courseId');
+      const urlCourseId = urlParams.get('courseId') || 
+        (typeof window !== 'undefined' && window.location.pathname.match(/\/courses\/([^\/]+)/)?.[1]);
       const courseIdForRequest = urlCourseId || 'new';
 
       const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
@@ -1005,8 +1006,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       }
 
       if (options.approveAfter && savedId && savedId !== 'new') {
-        // Get course_id from profile data or URL params
-        const courseIdForApprove = formData?.courseInfo?.courseId || urlCourseId || data?.course_id;
+        // Get course_id from URL params
+        const courseIdForApprove = urlCourseId || data?.course_id;
         if (!courseIdForApprove) {
           throw new Error('course_id is required for approving profile');
         }

@@ -323,7 +323,7 @@ def create_class_profile(
     class_profile = create_class_profile_db(
         db=db,
         instructor_id=instructor_uuid,
-        course_id=course_id,
+        course_id=course.id,
         title=payload.title,
         description=profile_text,  # Store the full JSON string as description
         metadata_json=metadata_json,

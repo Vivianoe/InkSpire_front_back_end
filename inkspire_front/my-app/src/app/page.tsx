@@ -157,7 +157,7 @@ export default function DashboardPage() {
       // Navigate to view existing profile
       router.push(`/courses/${course.id}/class-profiles/${course.classProfileId}/view`);
     } else {
-      // For new profiles, use "new" as profileId
+      // Navigate to create new profile using "new" as profileId
       router.push(`/courses/${course.id}/class-profiles/new/edit`);
     }
   };

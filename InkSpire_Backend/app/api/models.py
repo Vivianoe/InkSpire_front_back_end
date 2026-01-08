@@ -87,6 +87,7 @@ class RunClassProfileRequest(BaseModel):
     instructor_id: str
     course_id: str
     title: str
+    course_code: Optional[str] = None
     perusall_course_id: Optional[str] = None
     description: str
     class_input: Dict[str, Any]
