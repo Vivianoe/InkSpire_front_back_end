@@ -258,52 +258,62 @@ For detailed database logic documentation, see:
 
 ## API Endpoints
 
+All endpoints follow RESTful conventions with resource hierarchy: `/api/courses/{course_id}/...`
+
+For detailed API documentation with request/response examples, see [API_DOCUMENTATION.md](../API_DOCUMENTATION.md).
+
 ### Health Check
 - `GET /health` - Check API health status
 
 ### User Authentication
 - `POST /api/users/register` - Register a new user
 - `POST /api/users/login` - Login user
-- `GET /api/users/me` - Get current user
+- `GET /api/users/me` - Get current user (requires authentication)
 - `GET /api/users/{user_id}` - Get user by ID
 - `GET /api/users/email/{email}` - Get user by email
 
 ### Course Management
-- `POST /api/basic_info/edit` - Edit course basic information
-- `POST /api/design-considerations/edit` - Edit design considerations
 - `GET /api/courses/instructor/{instructor_id}` - Get courses by instructor
+- `POST /api/courses/{course_id}/basic-info/edit` - Edit course basic information
+- `POST /api/courses/{course_id}/design-considerations/edit` - Edit design considerations
 
 ### Class Profiles
-- `POST /api/class-profiles` - Create and generate class profile
-- `POST /api/class-profiles/{profile_id}/approve` - Approve class profile
-- `POST /api/class-profiles/{profile_id}/edit` - Manually edit class profile
-- `POST /api/class-profiles/{profile_id}/llm-refine` - Refine profile using LLM
+- `POST /api/courses/{course_id}/class-profiles` - Create and generate class profile (use `course_id="new"` to create new course)
 - `GET /api/class-profiles/{profile_id}` - Get class profile by ID
 - `GET /api/class-profiles/instructor/{instructor_id}` - Get profiles by instructor
 - `GET /api/class-profiles/{profile_id}/export` - Export approved profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/approve` - Approve class profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/edit` - Manually edit class profile
+- `POST /api/courses/{course_id}/class-profiles/{profile_id}/llm-refine` - Refine profile using LLM
 
 ### Reading Management
-- `POST /api/readings/batch-upload` - Batch upload readings
-- `GET /api/readings` - Get reading list (filter by course_id and/or instructor_id)
+- `POST /api/courses/{course_id}/readings/batch-upload` - Batch upload readings (with PDF content)
+- `GET /api/readings` - Get reading list (query params: `course_id`, `instructor_id`)
+- `DELETE /api/courses/{course_id}/readings/{reading_id}` - Delete a reading
+
+### Session Management
+- `POST /api/courses/{course_id}/sessions` - Create session and associate readings
 
 ### Scaffold Generation
-- `POST /api/generate-scaffolds` - Generate scaffolds via Material → Focus → Scaffold workflow
-- `POST /api/annotation-scaffolds/{scaffold_id}/approve` - Approve a scaffold (creates version)
-- `POST /api/annotation-scaffolds/{scaffold_id}/reject` - Reject a scaffold (creates version)
-- `POST /api/annotation-scaffolds/{scaffold_id}/edit` - Manually edit scaffold content (creates version)
-- `POST /api/annotation-scaffolds/{scaffold_id}/llm-refine` - Refine scaffold using LLM (creates version)
-- `GET /api/annotation-scaffolds/by-session/{session_id}` - Get scaffolds by session
-- `GET /api/annotation-scaffolds/export` - Export approved scaffolds (filter by reading_id or session_id)
-
-### Highlight Coordinates
-- `POST /api/highlight-report` - Save PDF highlight coordinates
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/generate` - Generate scaffolds (use `session_id="new"` to create new session)
+- `GET /api/courses/{course_id}/sessions/{session_id}/scaffolds/bundle` - Get scaffolds bundle for a session
+- `GET /api/courses/{course_id}/scaffolds/export` - Export approved scaffolds (query params: `session_id`, `reading_id`)
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/approve` - Approve a scaffold
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/edit` - Manually edit scaffold content
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/llm-refine` - Refine scaffold using LLM
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/{scaffold_id}/reject` - Reject a scaffold
+- `POST /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/highlight-report` - Save PDF highlight coordinates
 
 ### Perusall Integration
-- `POST /api/perusall/annotations` - Upload annotations to Perusall
+- `POST /api/courses/{course_id}/readings/{reading_id}/perusall/annotations` - Upload annotations to Perusall
+- `POST /api/courses/{course_id}/readings/{reading_id}/perusall/mapping` - Create Perusall mapping
+- `GET /api/perusall/mapping/{course_id}/{reading_id}` - Get Perusall mapping
 
-### Compatibility Endpoints (Legacy)
-- `POST /threads/{thread_id}/review` - Thread-based review endpoint (maps to scaffold actions)
-- `GET /threads/{thread_id}/scaffold-bundle` - Get scaffolds by thread/session
+### Test/Development Endpoints
+- `POST /api/test-scaffold-response` - Test scaffold response format
+- `GET /api/test-scaffold-response` - Get test scaffold response
+- `POST /api/reading-scaffolds` - Direct scaffold generation (internal use)
+- `POST /api/threads/{thread_id}/review` - Thread-based review endpoint (legacy compatibility)
 
 ## Workflows
 

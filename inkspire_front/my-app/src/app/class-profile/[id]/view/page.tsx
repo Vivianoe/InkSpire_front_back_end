@@ -313,13 +313,16 @@ interface ClassProfile {
 
 export default function ViewClassProfilePage() {
   const router = useRouter();
-  const params = useParams();
+  // Path parameters (from route: /class-profile/[id]/view or /courses/[courseId]/class-profiles/[profileId]/view)
+  const pathParams = useParams();
+  // Query parameters (from URL: ?instructorId=yyy - courseId and profileId are now in path)
   const searchParams = useSearchParams();
-  const profileId = params?.id as string;
+  const profileId = pathParams?.profileId || pathParams?.id as string; // Support both old and new routes
+  const courseId = pathParams?.courseId as string | undefined; // New RESTful route
   const isCreateMode = !profileId || profileId === 'new';
   
-  // Get course_id and instructor_id from URL params or profile data
-  const urlCourseId = searchParams?.get('courseId');
+  // Get course_id from path (new) or query params (old), and instructor_id from query params
+  const urlCourseId = courseId || searchParams?.get('courseId'); // Path param takes priority
   const urlInstructorId = searchParams?.get('instructorId');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -493,7 +496,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         return;
       }
 
-      const response = await fetch(`/api/class-profiles/${profileId}`);
+      const courseIdParam = urlCourseId ? `?course_id=${urlCourseId}` : '';
+      const response = await fetch(`/api/class-profiles/${profileId}${courseIdParam}`);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to load profile');
@@ -680,7 +684,11 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
     try {
       const payload = buildRunClassProfileRequest(formData);
-      const response = await fetch('/api/class-profiles', {
+      
+      // Get course_id from URL params, or use "new" to create a new course
+      const courseIdForRequest = urlCourseId || 'new';
+      
+      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -787,8 +795,13 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
     try {
       const payload = buildRunClassProfileRequest(currentData);
+      
+      // Get course_id from URL params, or use "new" to create a new course
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlCourseId = urlParams.get('courseId');
+      const courseIdForRequest = urlCourseId || 'new';
 
-      const response = await fetch('/api/class-profiles', {
+      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -848,12 +861,17 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setBasicInfoSnapshot(null);
 
       if (updatedFormData.id && updatedFormData.id !== 'new' && profileId === 'new') {
-        // Preserve course_id and instructor_id when navigating
-        const navParams = new URLSearchParams();
-        if (urlCourseId) navParams.set('courseId', urlCourseId);
-        if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-        const queryString = navParams.toString();
-        router.replace(`/class-profile/${updatedFormData.id}/view${queryString ? `?${queryString}` : ''}`);
+        // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
+        if (urlCourseId && updatedFormData.id) {
+          router.replace(`/courses/${urlCourseId}/class-profiles/${updatedFormData.id}/view`);
+        } else {
+          // Fallback to old structure with query params
+          const navParams = new URLSearchParams();
+          if (urlCourseId) navParams.set('courseId', urlCourseId);
+          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+          const queryString = navParams.toString();
+          router.replace(`/class-profile/${updatedFormData.id}/view${queryString ? `?${queryString}` : ''}`);
+        }
       }
     } catch (err: unknown) {
       const message =
@@ -973,16 +991,27 @@ const createDefaultProfile = (id: string): ClassProfile => ({
               : undefined;
 
       if (!hasExistingId && savedId && savedId !== 'new' && profileId === 'new') {
-        // Preserve course_id and instructor_id when navigating
-        const navParams = new URLSearchParams();
-        if (urlCourseId) navParams.set('courseId', urlCourseId);
-        if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-        const queryString = navParams.toString();
-        router.replace(`/class-profile/${savedId}/view${queryString ? `?${queryString}` : ''}`);
+        // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
+        if (urlCourseId && savedId) {
+          router.replace(`/courses/${urlCourseId}/class-profiles/${savedId}/view`);
+        } else {
+          // Fallback to old structure with query params
+          const navParams = new URLSearchParams();
+          if (urlCourseId) navParams.set('courseId', urlCourseId);
+          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+          const queryString = navParams.toString();
+          router.replace(`/class-profile/${savedId}/view${queryString ? `?${queryString}` : ''}`);
+        }
       }
 
       if (options.approveAfter && savedId && savedId !== 'new') {
-        const approveResponse = await fetch(`/api/class-profiles/${savedId}/approve`, {
+        // Get course_id from profile data or URL params
+        const courseIdForApprove = formData?.courseInfo?.courseId || urlCourseId || data?.course_id;
+        if (!courseIdForApprove) {
+          throw new Error('course_id is required for approving profile');
+        }
+        const approveUrl = `/api/courses/${courseIdForApprove}/class-profiles/${savedId}/approve`;
+        const approveResponse = await fetch(approveUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1038,11 +1067,17 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     // Get instructor_id from URL params or fallback to mock
     const instructorId = urlInstructorId || MOCK_INSTRUCTOR_ID;
     
-    const params = new URLSearchParams({
-      courseId,
-      instructorId,
-    });
-    router.push(`/class-profile/${formData.id}/reading?${params.toString()}`);
+    // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
+    if (urlCourseId && formData.id) {
+      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${urlInstructorId}`);
+    } else {
+      // Fallback to old structure with query params
+      const params = new URLSearchParams({
+        courseId: courseId || '',
+        instructorId,
+      });
+      router.push(`/class-profile/${formData.id}/reading?${params.toString()}`);
+    }
   };
 
   const startSessionLabel = 'Start Session';

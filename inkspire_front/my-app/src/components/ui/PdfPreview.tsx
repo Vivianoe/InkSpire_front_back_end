@@ -51,6 +51,7 @@ const loadRangy = async () => {
 interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
+  readingId?: string | null;  // Reading ID for fallback when URL fails and for RESTful API calls
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -70,9 +71,11 @@ interface PdfPreviewProps {
   scaffoldIndex?: number;
   // Session ID for mapping fragments to annotation_version_id
   sessionId?: string | null;
+  // Course ID for RESTful API calls
+  courseId?: string | null;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   
   // Debug logging
@@ -210,7 +213,8 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   }, []);
 
   useEffect(() => {
-    if (!file && !url) {
+    // If no file and no url, but readingId is provided, use readingId to fetch PDF
+    if (!file && !url && !readingId) {
       setPdfDoc(null);
       setRenderedPages(new Set());
       setPageElements(new Map());
@@ -227,7 +231,43 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         if (!pdfjs || cancelled) return;
 
         let pdf;
-        if (url) {
+        // If no url but readingId is provided, fetch from API directly
+        if (!url && readingId) {
+          console.log('[PdfPreview] No URL provided, fetching PDF from API using readingId:', readingId);
+          try {
+            const response = await fetch(`/api/readings/${readingId}/content`);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch reading content: ${response.status}`);
+            }
+            const data = await response.json();
+            if (data?.content_base64) {
+              // Convert base64 to File object
+              const base64 = data.content_base64 as string;
+              const byteCharacters = atob(base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i += 1) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const mimeType = data?.mime_type || 'application/pdf';
+              const fileName = `reading_${readingId}.pdf`;
+              const blob = new Blob([byteArray], { type: mimeType });
+              const fallbackFile = new File([blob], fileName, { type: mimeType });
+              
+              // Load PDF from File object
+              const arrayBuffer = await fallbackFile.arrayBuffer();
+              pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+              console.log('[PdfPreview] PDF document loaded from API successfully');
+            } else {
+              throw new Error('No content_base64 in API response');
+            }
+          } catch (apiError: any) {
+            console.error('[PdfPreview] Error fetching PDF from API:', apiError);
+            setError(apiError?.message || 'Failed to load PDF');
+            setLoading(false);
+            return;
+          }
+        } else if (url) {
           // Load PDF from URL
           console.log('[PdfPreview] Loading PDF from URL:', url);
           try {
@@ -242,7 +282,44 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           } catch (urlError: any) {
             console.error('[PdfPreview] Error loading PDF from URL:', urlError);
             console.error('[PdfPreview] URL was:', url);
+            
+            // Fallback: if URL fails and readingId is provided, fetch from API
+            if (readingId) {
+              console.log('[PdfPreview] Attempting fallback: fetching PDF from API using readingId:', readingId);
+              try {
+                const response = await fetch(`/api/readings/${readingId}/content`);
+                if (!response.ok) {
+                  throw new Error(`Failed to fetch reading content: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data?.content_base64) {
+                  // Convert base64 to File object
+                  const base64 = data.content_base64 as string;
+                  const byteCharacters = atob(base64);
+                  const byteNumbers = new Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i += 1) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  const byteArray = new Uint8Array(byteNumbers);
+                  const mimeType = data?.mime_type || 'application/pdf';
+                  const fileName = `reading_${readingId}.pdf`;
+                  const blob = new Blob([byteArray], { type: mimeType });
+                  const fallbackFile = new File([blob], fileName, { type: mimeType });
+                  
+                  // Load PDF from File object
+                  const arrayBuffer = await fallbackFile.arrayBuffer();
+                  pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+                  console.log('[PdfPreview] PDF document loaded from API fallback successfully');
+                } else {
+                  throw new Error('No content_base64 in API response');
+                }
+              } catch (fallbackError: any) {
+                console.error('[PdfPreview] Fallback also failed:', fallbackError);
+                throw urlError; // Throw original error
+              }
+            } else {
             throw urlError;
+            }
           }
         } else if (file) {
           // Load PDF from File object
@@ -283,7 +360,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     loadPdf();
 
     return () => { cancelled = true; };
-  }, [file, url]);
+  }, [file, url, readingId]);
 
   /**
    * Calculates the optimal scale factor for PDF pages based on container width
@@ -550,15 +627,56 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function indexToDomRange(idxStart: number, idxEnd: number, map: any[]) {
     function locate(idx: number) {
-      for (const e of map) { if (idx >= e.start && idx <= e.end) { return { node: e.node, offset: idx - e.start }; } }
+      for (const e of map) { 
+        if (idx >= e.start && idx <= e.end) { 
+          const offset = idx - e.start;
+          // Ensure offset is within node's actual length
+          const nodeLength = e.node.textContent?.length || e.node.nodeValue?.length || 0;
+          const safeOffset = Math.min(offset, nodeLength);
+          return { node: e.node, offset: safeOffset }; 
+        }
+      }
       return null;
     }
     const a = locate(idxStart);
     const b = locate(idxEnd);
     if (!a || !b) return null;
+    
+    // Additional safety check: ensure offsets are within node lengths
+    const aNodeLength = a.node.textContent?.length || a.node.nodeValue?.length || 0;
+    const bNodeLength = b.node.textContent?.length || b.node.nodeValue?.length || 0;
+    
+    if (a.offset > aNodeLength || b.offset > bNodeLength) {
+      console.warn('[PdfPreview] Offset exceeds node length:', {
+        aOffset: a.offset,
+        aNodeLength,
+        bOffset: b.offset,
+        bNodeLength,
+        idxStart,
+        idxEnd
+      });
+      // Clamp offsets to valid range
+      a.offset = Math.min(a.offset, aNodeLength);
+      b.offset = Math.min(b.offset, bNodeLength);
+    }
+    
     const r = rangyLib ? rangyLib.createRange() : document.createRange();
+    try {
     r.setStart(a.node, a.offset);
     r.setEnd(b.node, b.offset);
+    } catch (error) {
+      console.error('[PdfPreview] Error creating range:', error, {
+        aNode: a.node,
+        aOffset: a.offset,
+        aNodeLength,
+        bNode: b.node,
+        bOffset: b.offset,
+        bNodeLength,
+        idxStart,
+        idxEnd
+      });
+      return null;
+    }
     return r;
   }
 
@@ -570,8 +688,53 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   function escapeRegExp(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
   /**
+   * Calculates text similarity between two strings using normalized comparison
+   * Returns a value between 0 (completely different) and 1 (identical)
+   * @param str1 - First string to compare
+   * @param str2 - Second string to compare
+   * @returns Similarity score between 0 and 1
+   */
+  function calculateTextSimilarity(str1: string, str2: string): number {
+    // Normalize strings: lowercase, remove extra whitespace, remove punctuation
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[^\w\s]/g, '');
+    const norm1 = normalize(str1);
+    const norm2 = normalize(str2);
+    
+    if (norm1 === norm2) return 1.0;
+    if (norm1.length === 0 || norm2.length === 0) return 0.0;
+    
+    // Calculate character-level similarity (Jaccard-like)
+    const longer = norm1.length > norm2.length ? norm1 : norm2;
+    const shorter = norm1.length > norm2.length ? norm2 : norm1;
+    
+    // Check if shorter is contained in longer (substring match)
+    if (longer.includes(shorter)) {
+      return shorter.length / longer.length;
+    }
+    
+    // Calculate word-level similarity
+    const words1 = norm1.split(/\s+/).filter(w => w.length > 0);
+    const words2 = norm2.split(/\s+/).filter(w => w.length > 0);
+    
+    if (words1.length === 0 || words2.length === 0) return 0.0;
+    
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    const wordSimilarity = intersection.size / union.size;
+    
+    // Combine character and word similarity
+    const charSimilarity = 1 - (longer.length - shorter.length) / Math.max(longer.length, 1);
+    
+    return (wordSimilarity * 0.7 + charSimilarity * 0.3);
+  }
+
+  /**
    * Generates a flexible regex pattern from a query string to handle PDF text quirks
    * Handles missing spaces, hyphens, merged words (e.g., "A version" -> "aversion"), and citations
+   * Improved to be more precise while still handling PDF text variations
    * @param q - Query string to convert to regex pattern
    * @returns Regex pattern string that can match text with spacing variations
    */
@@ -581,9 +744,9 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
 
     const HYPHENS = '\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212';
     const HYPHEN_CLASS = `[${HYPHENS}]`;
-    // GAP now allows: nothing (words directly connected), spaces, or hyphens
-    // This handles PDF text layers where words may be concatenated without spaces
-    const GAP = `(?:|[\\s\\u00A0]*|\\s*${HYPHEN_CLASS}\\s*)`;
+    // GAP: prefer spaces, but allow no space or hyphens (more restrictive)
+    // This reduces false matches while still handling PDF text quirks
+    const GAP = `(?:\\s+|\\s*${HYPHEN_CLASS}\\s*|[\\s\\u00A0]{0,2})`;
 
     const SUP_DIGITS = '0-9\\u2070\\u00B2\\u00B3\\u2074-\\u2079';
     const DIGIT_CLASS = `[${SUP_DIGITS}]+`;
@@ -602,17 +765,12 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         // Single letter word: allow it to be merged with next word or have space
         // e.g., "A version" -> match "A version", "aversion", "Aversion"
         const nextTok = rawParts[i + 1];
-        const escapedLetter = escapeRegExp(tok);
         const escapedNext = escapeRegExp(nextTok);
-        // Create pattern that matches:
-        // 1. "A version" (with space) - (?:A[\s\u00A0]+)version
-        // 2. "aversion" (merged, lowercase) - aversion
-        // 3. "Aversion" (merged, uppercase) - Aversion
-        // Use case-insensitive matching, so pattern: (?:[Aa](?:[\s\u00A0]+|))?version
         const letterLower = tok.toLowerCase();
         const letterUpper = tok.toUpperCase();
-        // Match: [Aa]version OR (?:[Aa][\s\u00A0]+)version
-        parts.push(`(?:[${letterLower}${letterUpper}]${escapedNext}|(?:[${letterLower}${letterUpper}]${GAP})${escapedNext})`);
+        // More restrictive: prefer space, but allow merge
+        // Match: (?:[Aa]\s+)?version OR [Aa]version (case-insensitive)
+        parts.push(`(?:[${letterLower}${letterUpper}]\\s+)?${escapedNext}`);
         i++; // Skip next token since we've already included it
       } else {
         parts.push(escapeRegExp(tok));
@@ -769,55 +927,121 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     
     let rec: any = null;
     
-    // Strategy 1: Direct index matching (most accurate)
-    // Each scaffold corresponds to a query, and we want the first match of that query
-    if (typeof scaffoldIdx === 'number' && scaffoldIdx >= 0) {
-      // Get unique queries in order (as they appear in mockQueries)
-      const seenQueries = new Set<string>();
-      const orderedQueries: string[] = [];
-      for (const r of list) {
-        if (r.fragment && !seenQueries.has(r.fragment)) {
-          seenQueries.add(r.fragment);
-          orderedQueries.push(r.fragment);
+    // Strategy 1: Use annotation_id if available (most accurate)
+    // Find the annotation_id from fragmentToAnnotationIdRef using the fragment from searchQueries
+    let targetAnnotationId: string | undefined;
+    if (typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
+      const queries = Array.isArray(searchQueries) ? searchQueries : [searchQueries];
+      if (scaffoldIdx < queries.length) {
+        const targetQuery = queries[scaffoldIdx];
+        if (targetQuery && typeof targetQuery === 'string') {
+          const normalizedQuery = targetQuery.toLowerCase().trim();
+          targetAnnotationId = fragmentToAnnotationIdRef.current.get(normalizedQuery) || 
+                               fragmentToAnnotationIdRef.current.get(targetQuery) || 
+                               undefined;
+          if (targetAnnotationId) {
+            console.log('[PdfPreview] Looking for annotation_id:', targetAnnotationId, 'for scaffold index:', scaffoldIdx);
+          }
         }
-      }
-      
-      if (scaffoldIdx < orderedQueries.length) {
-        const targetQuery = orderedQueries[scaffoldIdx];
-        rec = list.find((r: any) => r.fragment === targetQuery);
-      } else if (scaffoldIdx < list.length) {
-        rec = list[scaffoldIdx];
       }
     }
     
-    // Strategy 2: Text matching (fallback)
+    // Also try using the fragment parameter directly
+    if (!targetAnnotationId && fragment) {
+      const normalizedFragment = fragment.toLowerCase().trim();
+      targetAnnotationId = fragmentToAnnotationIdRef.current.get(normalizedFragment) || 
+                           fragmentToAnnotationIdRef.current.get(fragment) || 
+                           undefined;
+    }
+    
+    if (targetAnnotationId) {
+      rec = list.find((r: any) => r.annotation_id === targetAnnotationId);
+      if (rec) {
+        console.log('[PdfPreview] ✅ Found highlight by annotation_id:', targetAnnotationId, 'scaffoldIdx:', scaffoldIdx);
+      } else {
+        console.warn('[PdfPreview] ⚠️ annotation_id found but no matching highlight record:', targetAnnotationId);
+        console.log('[PdfPreview] Available annotation_ids in records:', list.map((r: any) => r.annotation_id).filter(Boolean));
+      }
+    }
+    
+    // Strategy 2: Direct index matching using searchQueries order (fallback)
+    // scaffoldIdx corresponds to the index in searchQueries array
+    if (!rec && typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
+      const queries = Array.isArray(searchQueries) ? searchQueries : [searchQueries];
+      
+      console.log('[PdfPreview] Strategy 2: Using scaffold index', scaffoldIdx, 'out of', queries.length, 'queries');
+      console.log('[PdfPreview] Target query:', queries[scaffoldIdx]?.substring(0, 100));
+      console.log('[PdfPreview] Available queryFragments in records:', list.map((r: any) => r.queryFragment?.substring(0, 50)).filter(Boolean));
+      
+      if (scaffoldIdx < queries.length) {
+        const targetQuery = queries[scaffoldIdx];
+        if (targetQuery && typeof targetQuery === 'string') {
+          // Find the first highlight record that matches this query
+          const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+          const targetNormalized = norm(targetQuery);
+          
+          // Try exact match first
+          rec = list.find((r: any) => {
+            if (!r.queryFragment) return false;
+            return norm(r.queryFragment) === targetNormalized;
+          });
+          
+          // If not found, try partial match (first 50 chars)
+          if (!rec) {
+            const targetFirst50 = targetNormalized.substring(0, 50);
+            rec = list.find((r: any) => {
+              if (!r.queryFragment) return false;
+              const fragNormalized = norm(r.queryFragment);
+              return fragNormalized.substring(0, 50) === targetFirst50;
+            });
+          }
+          
+          if (rec) {
+            console.log('[PdfPreview] ✅ Found highlight by scaffold index:', scaffoldIdx, 'query:', targetQuery.substring(0, 50));
+          } else {
+            console.warn('[PdfPreview] ⚠️ No highlight found for scaffold index:', scaffoldIdx, 'query:', targetQuery.substring(0, 50));
+          }
+        }
+      }
+    }
+    
+    // Strategy 3: Text matching (last resort)
     if (!rec && fragment) {
       const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
       const target = norm(fragment);
-      const targetCleaned = target.replace(/…/g, '').trim();
+      const targetFirst50 = target.substring(0, 50);
       
-      rec = list.find((r: any) => {
-        if (!r.fragment) return false;
-        const pdfFrag = norm(r.fragment);
-        const pdfFragCleaned = pdfFrag.replace(/…/g, '').trim();
-        const pdfFirst50 = pdfFragCleaned.substring(0, 50);
-        const targetFirst50 = targetCleaned.substring(0, 50);
-        const pdfFirst100 = pdfFragCleaned.substring(0, 100);
-        const targetFirst100 = targetCleaned.substring(0, 100);
+      // Find the best match by comparing first 50 chars
+      let bestMatch: any = null;
+      let bestScore = 0;
+      
+      for (const r of list) {
+        if (!r.queryFragment) continue;
+        const pdfFrag = norm(r.queryFragment);
+        const pdfFirst50 = pdfFrag.substring(0, 50);
         
-        // Direct match
-        if (pdfFrag.includes(target) || target.includes(pdfFrag)) return true;
-        // Cleaned match
-        if (pdfFragCleaned.includes(targetCleaned) || targetCleaned.includes(pdfFragCleaned)) return true;
-        // First 50 chars match
-        if (pdfFirst50 && targetFirst50 && pdfFirst50.length >= 30 && 
-            (pdfFirst50.includes(targetFirst50) || targetFirst50.includes(pdfFirst50))) return true;
-        // First 100 chars match
-        if (pdfFirst100 && targetFirst100 && pdfFirst100.length >= 50 &&
-            (pdfFirst100.includes(targetFirst100) || targetFirst100.includes(pdfFirst100))) return true;
+        // Calculate similarity score
+        let score = 0;
+        if (pdfFirst50 === targetFirst50) {
+          score = 100; // Exact match
+        } else if (pdfFirst50.includes(targetFirst50) || targetFirst50.includes(pdfFirst50)) {
+          score = 80; // Contains match
+        } else {
+          // Calculate character overlap
+          const overlap = pdfFirst50.split('').filter((c, i) => targetFirst50[i] === c).length;
+          score = (overlap / Math.max(pdfFirst50.length, targetFirst50.length)) * 50;
+        }
         
-        return false;
-      });
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = r;
+        }
+      }
+      
+      if (bestMatch && bestScore >= 50) {
+        rec = bestMatch;
+        console.log('[PdfPreview] Found highlight by text matching, score:', bestScore.toFixed(1));
+      }
     }
     
     if (!rec) {
@@ -830,6 +1054,11 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     
     // Scroll to center highlight in viewport
+    if (!containerRef.current) {
+      console.warn('[PdfPreview] Container ref is not available, cannot scroll to highlight');
+      return;
+    }
+    
     const containerRect = containerRef.current.getBoundingClientRect();
     const containerHeight = containerRect.height;
     const pageHeight = pageEl.clientHeight;
@@ -947,106 +1176,374 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     const { text, map } = buildIndex(nodes);
 
-    if (debug) {
-      console.log('[PdfPreview] Layer text length:', text.length);
-      console.log('[PdfPreview] Layer text sample:', text.substring(0, 400));
-    }
-
-    const flags = 'gius';
-    const pattern = patternFromQueryLiteralFlexible(query);
-    if (!pattern) {
-      console.warn('[PdfPreview] No pattern generated for query:', query.substring(0, 80));
-      return 0;
-    }
-
-    if (debug) {
-      console.log('[PdfPreview] Query:', query.substring(0, 100));
-      console.log('[PdfPreview] Pattern:', pattern);
-    }
-
-    let re: RegExp;
-    try { 
-      re = new RegExp(pattern, flags);
-    } catch (e) {
-      console.warn('[PdfPreview] Failed to create regex for pattern:', pattern, 'error:', e);
-      return 0;
-    }
-    
-    // Test if pattern matches
-    if (debug) {
-      const testMatch = re.test(text);
-      console.log('[PdfPreview] Pattern test match:', testMatch);
-      // Reset regex after test
-      re.lastIndex = 0;
-      
-      // Also test a simpler pattern: just the key words
-      const keyWords = query.split(/\s+/).filter(w => w.length > 1 && !/^[aA]$/.test(w));
-      if (keyWords.length > 0) {
-        const simplePattern = keyWords.slice(0, 3).map(w => escapeRegExp(w.toLowerCase())).join('.*?');
-        const simpleRe = new RegExp(simplePattern, 'gi');
-        const simpleMatch = simpleRe.test(text);
-        console.log('[PdfPreview] Simple key words test (first 3 words):', simpleMatch, 'words:', keyWords.slice(0, 3));
-        console.log('[PdfPreview] Looking for in text:', text.toLowerCase().includes(keyWords[0].toLowerCase()) ? 'FOUND' : 'NOT FOUND', keyWords[0]);
-      }
-    }
-
+    // Get page element and page number early
     const pageEl = layer.closest('.page') as HTMLElement | null;
     const pageNum = pageEl ? parseInt(pageEl.dataset.page || '1', 10) : 1;
 
-    let count = 0; let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      const start = m.index;
-      const end = start + m[0].length;
+    // Check if simple match mode is enabled (via localStorage or window variable)
+    const useSimpleMatch = typeof window !== 'undefined' && (
+      (window as any).USE_SIMPLE_MATCH === true ||
+      localStorage.getItem('USE_SIMPLE_MATCH') === 'true'
+    );
+    
+    // SIMPLE MATCH MODE: Use basic text search
+    if (useSimpleMatch) {
+    if (debug) {
+        console.log('[PdfPreview] Simple match mode - searching for:', query.substring(0, 100));
+        console.log('[PdfPreview] Text length:', text.length);
+        console.log('[PdfPreview] Text sample (first 300 chars):', text.substring(0, 300));
+      }
+      
+      // Normalize both query and text for better matching
+      // Use a simpler normalization that preserves character positions better
+      const normalize = (s: string) => {
+        return s.toLowerCase()
+          .trim()
+          .replace(/\s+/g, ' ')  // Multiple spaces to single space
+          .replace(/[""]/g, '"')  // Normalize quotes
+          .replace(/['']/g, "'")  // Normalize apostrophes
+          .replace(/…/g, '...');  // Normalize ellipsis
+        // Don't remove other special chars - they might be important for position mapping
+      };
+      const queryLower = normalize(query);
+      const textLower = normalize(text);
+      
+      // Strategy 1: Exact substring match (normalized)
+      let normalizedIndex = textLower.indexOf(queryLower);
+      
+      // Convert normalized index to original text index
+      // Since we only collapsed whitespace, we can map back approximately
+      let index = -1;
+      if (normalizedIndex !== -1) {
+        // Find the corresponding position in original text
+        let normalizedPos = 0;
+        let originalPos = 0;
+        let lastWasSpace = false;
+        
+        while (originalPos < text.length && normalizedPos < normalizedIndex) {
+          const char = text[originalPos].toLowerCase();
+          const normalizedChar = normalize(text[originalPos]);
+          
+          if (normalizedChar && normalizedChar.length > 0) {
+            normalizedPos++;
+            lastWasSpace = false;
+          } else if ((char === ' ' || char === '\n' || char === '\t') && !lastWasSpace) {
+            normalizedPos++; // Count first space
+            lastWasSpace = true;
+          } else if (char === ' ' || char === '\n' || char === '\t') {
+            lastWasSpace = true;
+          } else {
+            lastWasSpace = false;
+          }
+          
+          originalPos++;
+        }
+        
+        index = originalPos;
+      }
+      
+      // Helper function to map normalized text index to original text index
+      function mapNormalizedToOriginal(normIdx: number, originalText: string, normFn: (s: string) => string): number {
+        if (normIdx === -1) return -1;
+        let normalizedPos = 0;
+        let originalPos = 0;
+        let lastWasSpace = false;
+        
+        while (originalPos < originalText.length && normalizedPos < normIdx) {
+          const char = originalText[originalPos].toLowerCase();
+          const normalizedChar = normFn(originalText[originalPos]);
+          
+          if (normalizedChar && normalizedChar.length > 0) {
+            normalizedPos++;
+            lastWasSpace = false;
+          } else if ((char === ' ' || char === '\n' || char === '\t') && !lastWasSpace) {
+            normalizedPos++; // Count first space
+            lastWasSpace = true;
+          } else if (char === ' ' || char === '\n' || char === '\t') {
+            lastWasSpace = true;
+          } else {
+            lastWasSpace = false;
+          }
+          
+          originalPos++;
+        }
+        
+        return originalPos;
+      }
+      
+      // Strategy 2: If exact match fails, try with first few words (more flexible but still precise)
+      if (index === -1) {
+        const words = query.split(/\s+/).filter(w => w.length > 0);
+        
+        // For very long queries, try with first 15 words
+        if (words.length >= 15) {
+          const firstWords = words.slice(0, 15).join(' ');
+          const firstWordsLower = normalize(firstWords);
+          normalizedIndex = textLower.indexOf(firstWordsLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using first 15 words');
+            }
+          }
+        }
+        
+        // Try with first 10 words (for long queries)
+        if (index === -1 && words.length >= 10) {
+          const firstWords = words.slice(0, 10).join(' ');
+          const firstWordsLower = normalize(firstWords);
+          normalizedIndex = textLower.indexOf(firstWordsLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using first 10 words');
+            }
+          }
+        }
+        
+        // Try with first 8 words
+        if (index === -1 && words.length >= 8) {
+          const firstWords = words.slice(0, 8).join(' ');
+          const firstWordsLower = normalize(firstWords);
+          normalizedIndex = textLower.indexOf(firstWordsLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using first 8 words');
+            }
+          }
+        }
+        
+        // Try with first 5 words (for shorter queries)
+        if (index === -1 && words.length >= 5) {
+          const firstWords = words.slice(0, 5).join(' ');
+          const firstWordsLower = normalize(firstWords);
+          normalizedIndex = textLower.indexOf(firstWordsLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using first 5 words');
+            }
+          }
+        }
+        
+        // Try with first 3 words (last resort, but still specific enough)
+        if (index === -1 && words.length >= 3) {
+          const firstWords = words.slice(0, 3).join(' ');
+          const firstWordsLower = normalize(firstWords);
+          normalizedIndex = textLower.indexOf(firstWordsLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using first 3 words');
+            }
+          }
+        }
+      }
+      
+      // Strategy 3: For very long fragments, try matching by sentence chunks
+      if (index === -1 && query.length > 100) {
+        // Split by sentences (period, exclamation, question mark, but keep the punctuation)
+        // Use a regex that splits but keeps the delimiter
+        const sentencePattern = /([^.!?]+[.!?]+)/g;
+        const sentences: string[] = [];
+        let match;
+        while ((match = sentencePattern.exec(query)) !== null && sentences.length < 3) {
+          const sentence = match[1].trim();
+          if (sentence.length > 20) {
+            sentences.push(sentence);
+          }
+        }
+        
+        // Try each sentence in order
+        for (const sentence of sentences) {
+          if (sentence.length > 30) {
+            const sentenceLower = normalize(sentence);
+            normalizedIndex = textLower.indexOf(sentenceLower);
+            if (normalizedIndex !== -1) {
+              index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+              if (debug && index !== -1) {
+                console.log('[PdfPreview] Found match using sentence:', sentence.substring(0, 50));
+              }
+              break; // Found a match, stop
+            }
+          }
+        }
+      }
+      
+      // Strategy 4: For very long fragments, try matching by key phrases
+      if (index === -1 && query.length > 150) {
+        // Extract key phrases (longer phrases that are likely unique)
+        const phrases: string[] = [];
+        const words = query.split(/\s+/).filter(w => w.length > 0);
+        
+        // Extract phrases of 6-8 words
+        for (let i = 0; i < words.length - 5; i++) {
+          const phrase = words.slice(i, i + 6).join(' ');
+          if (phrase.length > 40) {
+            phrases.push(phrase);
+          }
+        }
+        
+        // Try each phrase
+        for (const phrase of phrases.slice(0, 5)) { // Limit to first 5 phrases
+          const phraseLower = normalize(phrase);
+          normalizedIndex = textLower.indexOf(phraseLower);
+          if (normalizedIndex !== -1) {
+            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
+            if (debug && index !== -1) {
+              console.log('[PdfPreview] Found match using key phrase:', phrase.substring(0, 50));
+            }
+            break; // Found a match, stop
+          }
+        }
+      }
+      
+      if (index !== -1) {
+        const start = index;
+        const end = start + query.length;
+        const rng: any = indexToDomRange(start, end, map);
+        
+        if (rng) {
+          try { 
+            if (!applier) {
+              console.error('[PdfPreview] ❌ Applier is null or undefined!');
+              return 0;
+            }
+            applier.applyToRange(rng);
+            if (debug) {
+              console.log('[PdfPreview] ✅ Applied highlight to range (exact match)');
+              console.log('[PdfPreview] Range details:', { 
+                start, 
+                end, 
+                fragment: text.substring(start, end),
+                queryLength: query.length,
+                textLength: text.length
+              });
+            }
+            
+            // Verify highlight was applied (check after a short delay)
+            setTimeout(() => {
+              const highlights = layer.querySelectorAll('mark.pdf-highlight, mark.pdf-highlight-alt');
+              if (debug || highlights.length === 0) {
+                console.log(`[PdfPreview] Highlights found after applying: ${highlights.length}`);
+                if (highlights.length === 0) {
+                  console.warn('[PdfPreview] ⚠️ No highlights found in DOM - highlight may not have been applied!');
+                }
+              }
+            }, 50);
+    } catch (e) {
+            console.error('[PdfPreview] ❌ Error applying highlight:', e);
+      return 0;
+    }
+    
+          if (pageEl) {
+            const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+            highlightRecordsRef.current.push({
+              rangeType: 'text',
+              rangePage: pageNum,
+              rangeStart: start,
+              rangeEnd: end,
+              fragment: text.substring(start, end),
+              queryFragment: query,
+              ...coords,
+              ...(annotationId ? { annotation_id: annotationId } : {}),
+            });
+            if (debug) console.log('[PdfPreview] Added highlight record to array');
+          }
+          
+          try { rng.detach?.(); } catch {}
+          return 1;
+        } else {
+          if (debug) {
+            console.warn('[PdfPreview] ❌ Failed to create DOM range from index', { 
+              start, 
+              end, 
+              textLength: text.length,
+              mapSize: map ? map.length : 'unknown'
+            });
+          }
+        }
+      } else {
+        if (debug) {
+          console.warn('[PdfPreview] No match found for query:', query.substring(0, 100));
+          console.warn('[PdfPreview] Text sample:', text.substring(0, 200));
+        }
+      }
+      return 0; // No match found with simple search
+    }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // COMPLEX MATCH MODE: Use regex (may freeze, but more accurate)
+    if (debug) {
+      console.log('[PdfPreview] Layer text length:', text.length);
+      console.log('[PdfPreview] Query:', query.substring(0, 100));
+    }
+
+    // Strategy 1: Try exact match first (fast and precise)
+    const exactPattern = escapeRegExp(query.trim());
+    const exactRe = new RegExp(exactPattern, 'gi');
+    let exactMatch: RegExpExecArray | null = exactRe.exec(text);
+    
+    if (exactMatch) {
+      // Found exact match - use it
+      const start = exactMatch.index;
+      const end = start + exactMatch[0].length;
       const rng: any = indexToDomRange(start, end, map);
-      if (!rng) { if (m[0].length === 0) re.lastIndex++; continue; }
 
+      if (rng) {
       try { applier.applyToRange(rng); } catch {}
 
       if (pageEl) {
         const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+          const matchedFragment = exactMatch[0];
+          
+          if (debug) {
+            console.log('[PdfPreview] Exact match found:', {
+              queryFragment: query.substring(0, 100),
+              matchedFragment: matchedFragment.substring(0, 100),
+              similarity: 1.0,
+              annotationId: annotationId || 'none'
+            });
+          }
+          
         highlightRecordsRef.current.push({
           rangeType: 'text',
           rangePage: pageNum,
           rangeStart: start,
           rangeEnd: end,
-          fragment: m[0],
+            fragment: matchedFragment,
+            queryFragment: query,
           ...coords,
           ...(annotationId ? { annotation_id: annotationId } : {}),
         });
       }
 
       try { rng.detach?.(); } catch {}
-      count++;
-      if (m[0].length === 0) re.lastIndex++;
+        return 1; // Return immediately after exact match
+      }
     }
     
-    // Fallback: If no matches found, try keyword-based matching
-    // This handles cases where PDF text has words concatenated
-    if (count === 0) {
+    // Strategy 2: Try simple keyword search (fallback, no complex regex)
       const keyWords = query.split(/\s+/)
-        .filter(w => w.length > 1)
-        .map(w => w.replace(/[^\w]/g, '').toLowerCase())
-        .filter(w => w.length > 2); // Only words longer than 2 chars
+      .filter(w => w.length > 2)
+      .slice(0, 5); // Only use first 5 words
       
       if (keyWords.length >= 2) {
-        // Try to find a sequence of keywords (allowing any characters between them)
-        // This matches cases like "aversion" (a+version) or "Afterreading" (After+reading)
-        const keyPattern = keyWords.slice(0, Math.min(5, keyWords.length))
-          .map(w => escapeRegExp(w))
-          .join('.*?');
+      const keyPattern = keyWords.map(w => escapeRegExp(w)).join('.*?');
         const keyRe = new RegExp(keyPattern, 'gi');
         keyRe.lastIndex = 0;
         
-        while ((m = keyRe.exec(text)) !== null) {
-          const start = m.index;
-          const end = start + m[0].length;
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let keyMatch: RegExpExecArray | null;
+      let matchCount = 0;
+      const MAX_KEYWORD_MATCHES = 3; // Limit matches
+      
+      while ((keyMatch = keyRe.exec(text)) !== null && matchCount < MAX_KEYWORD_MATCHES) {
+        matchCount++;
+        const start = keyMatch.index;
+        const end = start + keyMatch[0].length;
           const rng: any = indexToDomRange(start, end, map);
-          if (!rng) { if (m[0].length === 0) keyRe.lastIndex++; continue; }
 
+        if (rng) {
           try { applier.applyToRange(rng); } catch {}
 
           if (pageEl) {
@@ -1056,29 +1553,40 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
-              fragment: m[0],
+              fragment: keyMatch[0],
+              queryFragment: query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
           }
 
           try { rng.detach?.(); } catch {}
-          count++;
-          if (m[0].length === 0) keyRe.lastIndex++;
+          return 1; // Return first match found
         }
         
-        if (count > 0 && debug) {
-          console.log('[PdfPreview] Fallback keyword matching found', count, 'match(es)');
+        if (keyMatch[0].length === 0) {
+          keyRe.lastIndex++;
+          if (keyRe.lastIndex >= text.length) break;
         }
       }
     }
     
-    return count;
+    return 0; // No match found
   }
 
   // Track if coords have been reported to avoid duplicate uploads
   const coordsReportedRef = useRef<boolean>(false);
   const lastSearchQueriesRef = useRef<string>('');
+  // Track code version for development hot reload - forces re-highlight when code changes
+  const codeVersionRef = useRef<number>(0);
+  
+  // In development, increment version on hot reload to force re-highlight
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      codeVersionRef.current += 1;
+      console.log('[PdfPreview] Code version updated (hot reload detected):', codeVersionRef.current);
+    }
+  }, []); // Empty deps - only runs on mount/hot reload
 
   // When all pages are rendered, fetch queries, highlight, and report coords
   useEffect(() => {
@@ -1091,10 +1599,20 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       ? searchQueries.join('|') 
       : (searchQueries || '');
     
+    // In development, always re-highlight if code version changed (hot reload)
+    const codeVersionChanged = process.env.NODE_ENV === 'development' && 
+                                codeVersionRef.current > (lastSearchQueriesRef.current ? 1 : 0);
+    
     // Only run if searchQueries actually changed (not just scaffolds status)
-    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current) {
+    // OR if code version changed in development (hot reload)
+    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current && !codeVersionChanged) {
       console.log('[PdfPreview] Skipping duplicate highlight/search - searchQueries unchanged and coords already reported');
       return;
+    }
+    
+    if (codeVersionChanged) {
+      console.log('[PdfPreview] Code changed (hot reload) - forcing re-highlight');
+      coordsReportedRef.current = false; // Reset to allow re-highlight
     }
 
     // Reset coords reported flag if searchQueries changed
@@ -1128,17 +1646,25 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
         }
 
-        // Fallback: If no searchQueries provided, try fetching from API； needs to be changed to fetch from backend
-        if (list.length === 0) {
+        // Fallback: If no searchQueries provided, try fetching from API using sessionId and readingId
+        if (list.length === 0 && sessionId && readingId) {
           try {
-            console.log('[PdfPreview] Fetching queries from API');
-            const qRes = await fetch('/api/queries');
+            console.log('[PdfPreview] Fetching queries from API (fallback)', { sessionId, readingId });
+            const params = new URLSearchParams();
+            if (sessionId) params.set('sessionId', sessionId);
+            if (readingId) params.set('readingId', readingId);
+            const qRes = await fetch(`/api/queries?${params.toString()}`);
             if (qRes.ok) {
               const { queries } = await qRes.json();
               list = Array.isArray(queries) ? queries : [];
+              console.log('[PdfPreview] Fetched', list.length, 'queries from API');
+            } else if (qRes.status === 404) {
+              // Endpoint doesn't exist, which is fine - just skip this fallback
+              console.log('[PdfPreview] /api/queries endpoint not found, skipping fallback');
             }
           } catch (e) {
-            console.warn('[PdfPreview] Failed to fetch queries from API:', e);
+            // Silently ignore errors - this is just a fallback
+            console.log('[PdfPreview] Could not fetch queries from API:', e);
           }
         }
 
@@ -1147,16 +1673,29 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           return;
         }
 
+        // Check if containerRef is available before accessing it
+        if (!containerRef.current) {
+          console.warn('[PdfPreview] Container ref is not available, skipping highlight processing');
+          return;
+        }
+
         clearHighlights();
-        const layers = Array.from(containerRef.current!.querySelectorAll('.textLayer')) as Element[];
+        const layers = Array.from(containerRef.current.querySelectorAll('.textLayer')) as Element[];
         console.log('[PdfPreview] Found', layers.length, 'text layers');
         if (layers.length > 0) {
           const firstLayerText = layers[0].textContent || '';
           console.log('[PdfPreview] First layer text sample (first 200 chars):', firstLayerText.substring(0, 200));
         }
         
+        // Process fragments asynchronously to prevent UI blocking
         let total = 0;
-        list.forEach((q, i) => {
+        let processedCount = 0;
+        
+        const processFragment = async (q: string, i: number) => {
+          return new Promise<void>((resolve) => {
+            // Use setTimeout to yield to UI thread
+            setTimeout(() => {
+              try {
           console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
           
           // Find annotation_id for this fragment
@@ -1172,20 +1711,81 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
           
           let fragmentTotal = 0;
-          layers.forEach((layer, layerIdx) => {
+                // Check all layers to ensure we find the fragment (but limit to prevent blocking)
+                // For fragments that haven't been found, check more layers
+                const maxLayers = fragmentTotal === 0 && i > 0 ? 10 : 5;
+                const layersToProcess = layers.slice(0, maxLayers);
+                let foundInLayer = false;
+                
+                for (const layer of layersToProcess) {
+                  const layerIdx = layersToProcess.indexOf(layer);
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
-            if (applier && q && q.trim()) {
-              const matches = highlightInLayer(layer, q, applier, i === 0 && layerIdx === 0, annotationId);
-              if (matches > 0) {
-                console.log(`[PdfPreview] Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
-              }
+                  if (!applier) {
+                    if (i === 0 && layerIdx === 0) {
+                      console.warn(`[PdfPreview] Applier not available for fragment ${i + 1}, layer ${layerIdx + 1}`);
+                    }
+                    continue;
+                  }
+                  if (q && q.trim()) {
+                    // Enable debug for fragments that are likely to fail (long fragments or later fragments)
+                    const isDebug = (i === 0 && layerIdx === 0) || (q.length > 200 && layerIdx === 0);
+                    const matches = highlightInLayer(layer, q, applier, isDebug, annotationId);
+                    if (matches > 0) {
+                      console.log(`[PdfPreview] ✅ Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               fragmentTotal += matches;
-            }
-          });
+                      foundInLayer = true;
+                      // Stop after first match to avoid duplicate highlights
+                      break;
+                    } else if (isDebug) {
+                      console.log(`[PdfPreview] ❌ No match found for fragment ${i + 1} in layer ${layerIdx + 1}`);
+                    }
+                  }
+                }
+                
+                if (fragmentTotal === 0) {
+                  console.warn(`[PdfPreview] ⚠️ Fragment ${i + 1} not found in any layer:`, q.substring(0, 100));
+                  console.warn(`[PdfPreview] Fragment text:`, q);
+                  // Log first 500 chars of each layer for debugging (especially for long fragments)
+                  layersToProcess.forEach((layer, idx) => {
+                    const layerText = layer.textContent || '';
+                    const normalizedQuery = q.toLowerCase().trim().replace(/\s+/g, ' ');
+                    const normalizedLayer = layerText.toLowerCase().replace(/\s+/g, ' ');
+                    
+                    // Try to find first few words in layer
+                    const firstWords = q.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
+                    const foundInLayer = normalizedLayer.includes(firstWords);
+                    
+                    console.warn(`[PdfPreview] Layer ${idx + 1}:`, {
+                      textLength: layerText.length,
+                      textSample: layerText.substring(0, 500),
+                      firstWordsMatch: foundInLayer,
+                      firstWords: firstWords
+                    });
+                  });
+                }
           console.log(`[PdfPreview] Fragment ${i + 1} total matches: ${fragmentTotal}`);
           total += fragmentTotal;
-        });
-
+                processedCount++;
+                resolve();
+              } catch (error) {
+                console.error(`[PdfPreview] Error processing fragment ${i + 1}:`, error);
+                processedCount++;
+                resolve(); // Continue even if one fragment fails
+              }
+            }, i * 10); // Stagger processing to prevent blocking
+          });
+        };
+        
+        // Process all fragments asynchronously
+        const processAllFragments = async () => {
+          const promises = list.map((q, i) => processFragment(q, i));
+          await Promise.all(promises);
+          console.log(`[PdfPreview] Completed processing ${processedCount}/${list.length} fragments, total matches: ${total}`);
+        };
+        
+        processAllFragments().then(() => {
+          // Wait a bit more for all highlights to be applied, then report coords
+          setTimeout(async () => {
         const report = highlightRecordsRef.current || [];
         if (report.length && !coordsReportedRef.current) {
           try {
@@ -1199,17 +1799,28 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               // Backend will use annotation_id to find current_version_id if annotation_version_id is not provided
             }));
             const formattedReport = { coords: coordsWithMetadata };
-            const response = await fetch('/api/highlight-report', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' }, 
-              body: JSON.stringify(formattedReport) 
-            });
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
+            
+            // Build RESTful URL with course_id, session_id, and reading_id from props
+            if (!courseId || !readingId || !sessionId) {
+              console.warn('[PdfPreview] courseId, sessionId, or readingId missing, cannot save highlight coords');
             } else {
-              console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
-              coordsReportedRef.current = true; // Mark as reported to avoid duplicate uploads
+              const highlightUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/highlight-report`;
+              try {
+                const response = await fetch(highlightUrl, { 
+                  method: 'POST', 
+                  headers: { 'Content-Type': 'application/json' }, 
+                  body: JSON.stringify(formattedReport) 
+                });
+                if (!response.ok) {
+                  const errorData = await response.json().catch(() => ({}));
+                  console.warn('[PdfPreview] Failed to save highlight coords:', response.status, errorData);
+                } else {
+                  console.log('[PdfPreview] Successfully saved', report.length, 'highlight coord(s)');
+                  coordsReportedRef.current = true; // Mark as reported to avoid duplicate uploads
+                }
+              } catch (e) {
+                console.warn('[PdfPreview] Error sending highlight report:', e);
+              }
             }
           } catch (e) {
             console.warn('[PdfPreview] Error sending highlight report:', e);
@@ -1219,6 +1830,10 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           console.log('[PdfPreview] Skipping coords upload - already reported');
         }
         console.log(`Local search highlighted ${total} match(es) across ${layers.length} page(s) using ${list.length} fragment(s) from scaffolds.`);
+          }, 500); // Wait 500ms after all fragments processed
+        }).catch(error => {
+          console.error('[PdfPreview] Error in async fragment processing:', error);
+        });
       } catch (e) {
         console.error('[PdfPreview] Error in highlight strategy A:', e);
         // Strategy B: Server returns coordinates directly

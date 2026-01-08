@@ -151,25 +151,22 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCourseClick = (course: CourseSummary) => {
-    if (!instructorId) {
-      console.error('Instructor ID not available');
-      return;
-    }
-
-    const params = new URLSearchParams({
-      courseId: course.id,
-      instructorId: instructorId,
-    });
-
+  const openCourse = (course: CourseSummary) => {
+    // RESTful URL structure: /courses/[courseId]/class-profiles/[profileId]/view
     if (course.classProfileId) {
       // Navigate to view existing profile
-      router.push(`/class-profile/${course.classProfileId}/view?${params.toString()}`);
+      router.push(`/courses/${course.id}/class-profiles/${course.classProfileId}/view`);
     } else {
-      // Navigate to create new profile
-      router.push(`/class-profile/new/edit?${params.toString()}`);
+      // For new profiles, use "new" as profileId
+      router.push(`/courses/${course.id}/class-profiles/new/edit`);
     }
   };
+
+  // const handleNewClass = () => {
+  //   // For new class, we need to create course first, so use a temporary course ID
+  //   // In a real app, you might want to create the course first or use a different flow
+  //   router.push(`/courses/new/class-profiles/new/edit`);
+  // };
 
   return (
     <AuthGuard>
@@ -260,7 +257,7 @@ export default function DashboardPage() {
                       <CourseCard
                         key={course.id}
                         course={course}
-                        onClick={handleCourseClick}
+                        onClick={openCourse}
                       />
                     ))
                   )}

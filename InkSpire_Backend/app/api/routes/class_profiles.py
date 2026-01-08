@@ -3,13 +3,14 @@ Class profile management endpoints
 """
 import uuid
 import json
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.class_profile_service import (
     create_class_profile as create_class_profile_db,
     create_class_profile_version,
+    update_class_profile,
     get_class_profile_by_id,
     get_class_profile_by_course_id,
     get_class_profiles_by_instructor,
@@ -18,7 +19,10 @@ from app.services.class_profile_service import (
 )
 from app.services.course_service import (
     create_course,
+    get_course_by_id,
+    get_course_basic_info_by_course_id,
     create_course_basic_info,
+    update_course_basic_info,
 )
 from app.services.user_service import get_user_by_id
 from app.workflows.profile_workflow import (
@@ -30,6 +34,7 @@ from app.workflows.profile_workflow import (
 from app.api.models import (
     RunClassProfileRequest,
     RunClassProfileResponse,
+    UpdateClassProfileRequest,
     ApproveProfileRequest,
     EditProfileRequest,
     LLMRefineProfileRequest,
@@ -56,41 +61,155 @@ def get_profile_or_404(profile_id: str, db: Session) -> Any:
 
 
 def profile_to_model(profile: Any, db: Session = None) -> ReviewedProfileModel:
-    """Convert database ClassProfile model to ReviewedProfileModel"""
-    # Get current version content
-    current_content = profile.description
+    """Convert database ClassProfile model to ReviewedProfileModel (FAST)"""
+    current_content = getattr(profile, "description", "") or ""
     history: List[HistoryEntryModel] = []
-    
-    # If we have a db session, get versions for history
+
+    # Only fetch current version content (avoid loading all versions history - can be slow)
     if db is not None:
-        if profile.current_version_id:
-            version = get_class_profile_version_by_id(db, profile.current_version_id)
-            if version:
-                current_content = version.content
-        
-        # Build history from versions
-        versions = get_class_profile_versions(db, profile.id)
-        for v in versions:
-            history.append(HistoryEntryModel(
-                ts=v.created_at.timestamp() if v.created_at else 0,
-                action="init" if v.created_by == "pipeline" else "manual_edit",
-            ))
-    
+        try:
+            if getattr(profile, "current_version_id", None):
+                version = get_class_profile_version_by_id(db, profile.current_version_id)
+                if version and getattr(version, "content", None):
+                    current_content = version.content
+        except Exception:
+            pass
+
     return ReviewedProfileModel(
         id=str(profile.id),
         text=current_content,
-        status="approved",  # All database profiles are considered approved
+        status="approved",
         history=history,
     )
 
 
-@router.post("/class-profiles", response_model=RunClassProfileResponse)
-def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(get_db)):
+
+def _get_current_profile_text(profile: Any, db: Session) -> str:
+    """Get current version content as source of truth; fallback to profile.description."""
+    current_content = getattr(profile, "description", "") or ""
+    try:
+        if getattr(profile, "current_version_id", None):
+            version = get_class_profile_version_by_id(db, profile.current_version_id)
+            if version and getattr(version, "content", None):
+                current_content = version.content
+    except Exception:
+        pass
+    return current_content or ""
+
+
+def _build_frontend_profile(profile_text: str, profile_id: str) -> Dict[str, Any]:
+    """
+    Build the ClassProfile shape expected by /class-profile/[id]/view.
+    """
+    result: Dict[str, Any] = {
+        "id": profile_id,
+        "disciplineInfo": {
+            "disciplineName": "",
+            "department": "",
+            "fieldDescription": "",
+        },
+        "courseInfo": {
+            "courseName": "",
+            "courseCode": "",
+            "description": "",
+            "credits": "",
+            "prerequisites": "",
+            "learningObjectives": "",
+            "assessmentMethods": "",
+            "deliveryMode": "",
+        },
+        "classInfo": {
+            "semester": "",
+            "year": "",
+            "section": "",
+            "meetingDays": "",
+            "meetingTime": "",
+            "location": "",
+            "enrollment": "",
+            "background": "",
+            "priorKnowledge": "",
+        },
+        "generatedProfile": "",
+        "designConsiderations": {},
+    }
+
+    if not profile_text:
+        return result
+
+    try:
+        parsed = json.loads(profile_text)
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("profile"), str):
+                result["generatedProfile"] = parsed.get("profile") or ""
+            elif isinstance(parsed.get("text"), str):
+                result["generatedProfile"] = parsed.get("text") or ""
+            else:
+                result["generatedProfile"] = profile_text
+
+            dc = parsed.get("design_consideration") or parsed.get("design_considerations")
+            if isinstance(dc, dict):
+                result["designConsiderations"] = dc
+
+            class_input = parsed.get("class_input")
+            if isinstance(class_input, dict):
+                di = class_input.get("discipline_info") or {}
+                ci = class_input.get("course_info") or {}
+                cl = class_input.get("class_info") or {}
+
+                if isinstance(di, dict):
+                    result["disciplineInfo"] = {
+                        "disciplineName": di.get("discipline_name", "") or "",
+                        "department": di.get("department", "") or "",
+                        "fieldDescription": di.get("field_description", "") or "",
+                    }
+
+                if isinstance(ci, dict):
+                    result["courseInfo"] = {
+                        "courseName": ci.get("course_name", "") or "",
+                        "courseCode": ci.get("course_code", "") or "",
+                        "description": ci.get("description", "") or "",
+                        "credits": ci.get("credits", "") or "",
+                        "prerequisites": ci.get("prerequisites", "") or "",
+                        "learningObjectives": ci.get("learning_objectives", "") or "",
+                        "assessmentMethods": ci.get("assessment_methods", "") or "",
+                        "deliveryMode": ci.get("delivery_mode", "") or "",
+                    }
+
+                if isinstance(cl, dict):
+                    result["classInfo"] = {
+                        "semester": cl.get("semester", "") or "",
+                        "year": cl.get("year", "") or "",
+                        "section": cl.get("section", "") or "",
+                        "meetingDays": cl.get("meeting_days", "") or "",
+                        "meetingTime": cl.get("meeting_time", "") or "",
+                        "location": cl.get("location", "") or "",
+                        "enrollment": cl.get("enrollment", "") or "",
+                        "background": cl.get("background", "") or "",
+                        "priorKnowledge": cl.get("prior_knowledge", "") or "",
+                    }
+
+                dc2 = class_input.get("design_considerations")
+                if isinstance(dc2, dict) and not result["designConsiderations"]:
+                    result["designConsiderations"] = dc2
+
+            return result
+    except Exception:
+        pass
+
+    result["generatedProfile"] = profile_text
+    return result
+
+@router.post("/courses/{course_id}/class-profiles", response_model=RunClassProfileResponse)
+def create_class_profile(
+    course_id: str,
+    payload: RunClassProfileRequest,
+    db: Session = Depends(get_db)
+):
     """
     Generate a draft class profile and wrap it in a HITL review object.
-    Saves course information to database before generating profile.
+    If course_id is "new", creates a new course. Otherwise, uses existing course.
     """
-    # Validate and parse instructor_id
+    # Validate instructor_id from payload
     try:
         instructor_uuid = uuid.UUID(payload.instructor_id)
     except ValueError:
@@ -111,18 +230,63 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     discipline_info = payload.class_input.get("discipline_info")
     course_info = payload.class_input.get("course_info")
     class_info = payload.class_input.get("class_info")
-
-    # Get course id from payload
-    course_id = payload.course_id
     
-    # Create course basic info in database
-    basic_info = create_course_basic_info(
-        db=db,
-        course_id=course_id,
-        discipline_info_json=discipline_info,
-        course_info_json=course_info,
-        class_info_json=class_info,
-    )
+    # Handle course_id: if "new", create new course; otherwise, use existing course
+    if course_id == "new":
+        # Create course in database
+        course = create_course(
+            db=db,
+            instructor_id=instructor_uuid,
+            title=payload.title,
+            course_code=payload.course_code,
+            description=payload.description,
+        )
+    else:
+        # Use existing course
+        try:
+            course_uuid = uuid.UUID(course_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}",
+            )
+        
+        course = get_course_by_id(db, course_uuid)
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Course {course_id} not found",
+            )
+        
+        # Verify course belongs to instructor
+        if course.instructor_id != instructor_uuid:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Course {course_id} does not belong to instructor {payload.instructor_id}",
+            )
+    
+    # Create or update course basic info in database
+    existing_basic_info = get_course_basic_info_by_course_id(db, course.id)
+    if existing_basic_info:
+        # Update existing basic info
+        basic_info = update_course_basic_info(
+            db=db,
+            basic_info_id=existing_basic_info.id,
+            discipline_info_json=discipline_info,
+            course_info_json=course_info,
+            class_info_json=class_info,
+            change_type="manual_edit",
+            created_by="User",
+        )
+    else:
+        # Create new basic info
+        basic_info = create_course_basic_info(
+            db=db,
+            course_id=course.id,
+            discipline_info_json=discipline_info,
+            course_info_json=course_info,
+            class_info_json=class_info,
+        )
     
     # Run profile generation workflow
     initial_state: ProfileWorkflowState = {
@@ -174,27 +338,81 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
         created_by="pipeline",
     )
 
-    return RunClassProfileResponse(
-        review=profile_to_model(class_profile, db),
-        course_id=str(class_profile.course_id) if class_profile.course_id else None,
-        instructor_id=str(class_profile.instructor_id) if class_profile.instructor_id else None,
-    )
+    # Build frontend profile format
+    profile_text = _get_current_profile_text(class_profile, db)
+    frontend_profile = _build_frontend_profile(profile_text, str(class_profile.id))
+
+    return {
+        "profile_id": str(class_profile.id),
+        "status": "CREATED",
+        "profile": frontend_profile,
+        "review": profile_to_model(class_profile, db).model_dump(),
+        "course_id": str(class_profile.course_id) if class_profile.course_id else None,
+        "instructor_id": str(class_profile.instructor_id) if class_profile.instructor_id else None,
+    }
+
 
 
 @router.get("/class-profiles/{profile_id}", response_model=RunClassProfileResponse)
-def get_class_profile(profile_id: str, db: Session = Depends(get_db)):
-    """Get a specific class profile by ID"""
+def get_class_profile(
+    profile_id: str,
+    course_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific class profile by ID.
+    Optionally filter by course_id to verify the profile belongs to the course.
+    """
     profile = get_profile_or_404(profile_id, db)
+    
+    # If course_id is provided, verify it matches
+    if course_id:
+        try:
+            course_uuid = uuid.UUID(course_id)
+            if profile.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Class profile {profile_id} does not belong to course {course_id}"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}"
+            )
+    
     return RunClassProfileResponse(
         review=profile_to_model(profile, db),
         course_id=str(profile.course_id) if profile.course_id else None,
         instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
     )
+    
+    # Refresh profile to get updated data
+    db.refresh(profile)
+    
+    # Build frontend profile format
+    profile_text = _get_current_profile_text(profile, db)
+    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
+    
+    return {
+        "profile_id": str(profile.id),
+        "status": getattr(profile, "status", None) or "OK",
+        "profile": frontend_profile,
+        "review": profile_to_model(profile, db).model_dump(),
+        "course_id": str(profile.course_id) if profile.course_id else None,
+        "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
+    }
 
 
 @router.get("/class-profiles/instructor/{instructor_id}", response_model=ClassProfileListResponse)
-def get_class_profiles_by_instructor_endpoint(instructor_id: str, db: Session = Depends(get_db)):
-    """Get all class profiles for a specific instructor"""
+def get_class_profiles_by_instructor_endpoint(
+    instructor_id: str,
+    course_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all class profiles for a specific instructor.
+    Optionally filter by course_id to get profiles for a specific course.
+    """
     # Validate and parse instructor_id
     try:
         instructor_uuid = uuid.UUID(instructor_id)
@@ -214,6 +432,17 @@ def get_class_profiles_by_instructor_endpoint(instructor_id: str, db: Session = 
 
     # Get all profiles for this instructor
     profiles = get_class_profiles_by_instructor(db, instructor_uuid)
+    
+    # Filter by course_id if provided
+    if course_id:
+        try:
+            course_uuid = uuid.UUID(course_id)
+            profiles = [p for p in profiles if p.course_id == course_uuid]
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}"
+            )
 
     # Convert to response format
     profile_models = [profile_to_model(p, db) for p in profiles]
@@ -225,9 +454,31 @@ def get_class_profiles_by_instructor_endpoint(instructor_id: str, db: Session = 
 
 
 @router.get("/class-profiles/{profile_id}/export", response_model=ExportedClassProfileResponse)
-def export_class_profile(profile_id: str, db: Session = Depends(get_db)):
-    """Export the final class profile JSON"""
+def export_class_profile(
+    profile_id: str,
+    course_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Export the final class profile JSON.
+    Optionally filter by course_id to verify the profile belongs to the course.
+    """
     profile = get_profile_or_404(profile_id, db)
+    
+    # If course_id is provided, verify it matches
+    if course_id:
+        try:
+            course_uuid = uuid.UUID(course_id)
+            if profile.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Class profile {profile_id} does not belong to course {course_id}"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}"
+            )
 
     # Get current version content (source of truth)
     current_content = profile.description
@@ -245,17 +496,35 @@ def export_class_profile(profile_id: str, db: Session = Depends(get_db)):
             detail="Failed to parse class profile JSON",
         )
 
-    return ExportedClassProfileResponse(class_profile=profile_json)
+    return ExportedClassProfileResponse(profile=profile_json)
 
 
-@router.post("/class-profiles/{profile_id}/approve", response_model=ExportedClassProfileResponse)
-def approve_class_profile(profile_id: str, payload: ApproveProfileRequest, db: Session = Depends(get_db)):
+@router.post("/courses/{course_id}/class-profiles/{profile_id}/approve", response_model=ExportedClassProfileResponse)
+def approve_class_profile(
+    course_id: str,
+    profile_id: str,
+    payload: ApproveProfileRequest,
+    db: Session = Depends(get_db)
+):
     """
     Confirm and save the final class profile.
     If updated_text is provided: create a new version with the updated text first.
     Then return the final confirmed class_profile JSON.
     """
+    # Verify course_id matches profile
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
     profile = get_profile_or_404(profile_id, db)
+    
+    # Verify profile belongs to the course
+    if profile.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class profile {profile_id} does not belong to course {course_id}"
+        )
 
     if hasattr(payload, 'updated_text') and payload.updated_text is not None:
         # Create a new version with the updated text before confirming
@@ -285,13 +554,33 @@ def approve_class_profile(profile_id: str, payload: ApproveProfileRequest, db: S
         )
 
     # Return the final confirmed profile
-    return ExportedClassProfileResponse(class_profile=profile_json)
+    return ExportedClassProfileResponse(profile=profile_json)
 
 
-@router.post("/class-profiles/{profile_id}/edit", response_model=RunClassProfileResponse)
-def edit_class_profile(profile_id: str, payload: EditProfileRequest, db: Session = Depends(get_db)):
-    """Manual edit - creates a new version."""
+@router.post("/courses/{course_id}/class-profiles/{profile_id}/edit", response_model=RunClassProfileResponse)
+def edit_class_profile(
+    course_id: str,
+    profile_id: str,
+    payload: EditProfileRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Manual edit - creates a new version.
+    """
+    # Verify course_id matches profile
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
     profile = get_profile_or_404(profile_id, db)
+    
+    # Verify profile belongs to the course
+    if profile.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class profile {profile_id} does not belong to course {course_id}"
+        )
     
     # Parse new text to extract metadata if it's JSON
     try:
@@ -315,20 +604,45 @@ def edit_class_profile(profile_id: str, payload: EditProfileRequest, db: Session
     # Refresh profile to get updated data
     db.refresh(profile)
     
-    return RunClassProfileResponse(
-        review=profile_to_model(profile, db),
-        course_id=str(profile.course_id) if profile.course_id else None,
-        instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
-    )
+    
+    profile_text = _get_current_profile_text(profile, db)
+    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
+
+    return {
+    "profile_id": str(profile.id),
+    "status": getattr(profile, "status", None) or "OK",
+    "profile": frontend_profile,
+    "review": profile_to_model(profile, db).model_dump(),
+    "course_id": str(profile.course_id) if profile.course_id else None,
+    "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
+    }
 
 
-@router.post("/class-profiles/{profile_id}/llm-refine", response_model=RunClassProfileResponse)
-def llm_refine_class_profile(profile_id: str, payload: LLMRefineProfileRequest, db: Session = Depends(get_db)):
+@router.post("/courses/{course_id}/class-profiles/{profile_id}/llm-refine", response_model=RunClassProfileResponse)
+def llm_refine_class_profile(
+    course_id: str,
+    profile_id: str,
+    payload: LLMRefineProfileRequest,
+    db: Session = Depends(get_db)
+):
     """
     Use LLM to refine the profile according to teacher instructions.
     Creates a new version with the refined content.
     """
+    # Verify course_id matches profile
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
     profile = get_profile_or_404(profile_id, db)
+    
+    # Verify profile belongs to the course
+    if profile.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class profile {profile_id} does not belong to course {course_id}"
+        )
     
     # Get current content
     current_content = profile.description
@@ -379,8 +693,15 @@ def llm_refine_class_profile(profile_id: str, payload: LLMRefineProfileRequest, 
     # Refresh profile
     db.refresh(profile)
     
-    return RunClassProfileResponse(
-        review=profile_to_model(profile, db),
-        course_id=str(profile.course_id) if profile.course_id else None,
-        instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
-    )
+    
+    profile_text = _get_current_profile_text(profile, db)
+    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
+
+    return {
+    "profile_id": str(profile.id),
+    "status": getattr(profile, "status", None) or "OK",
+    "profile": frontend_profile,
+    "review": profile_to_model(profile, db).model_dump(),
+    "course_id": str(profile.course_id) if profile.course_id else None,
+    "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
+    }

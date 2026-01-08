@@ -3,7 +3,7 @@ import Script from "next/script";
 import "./globals.css";
 import "@/app/ui/ui.module.css";
 // import MswInit from "@/components/MswInit"; // MSW disabled - connecting to FastAPI backend
-import 'pdfjs-dist/web/pdf_viewer.css';
+// PDF.js CSS is loaded via CDN in <head> below - local import causes image path resolution issues
 import { AuthProvider } from "../contexts/AuthContext";
 
 export const metadata: Metadata = {

@@ -235,9 +235,11 @@ const createDefaultFormData = (id: string): ClassProfile => ({
 
 export default function EditClassProfilePage() {
   const router = useRouter();
-  const params = useParams();
+  // Path parameters (from route: /class-profile/[id]/edit)
+  const pathParams = useParams();
+  // Query parameters (from URL: ?courseId=xxx&instructorId=yyy)
   const searchParams = useSearchParams();
-  const profileId = params?.id as string;
+  const profileId = pathParams?.id as string;
   const isEdit = profileId !== 'new';
   
   // Get course_id and instructor_id from URL params
@@ -258,7 +260,8 @@ export default function EditClassProfilePage() {
         return;
       }
 
-      const response = await fetch(`/api/class-profiles/${profileId}`);
+      const courseIdParam = urlCourseId ? `?course_id=${urlCourseId}` : '';
+      const response = await fetch(`/api/class-profiles/${profileId}${courseIdParam}`);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to load profile');
@@ -358,12 +361,10 @@ export default function EditClassProfilePage() {
         class_input: buildClassInputPayload(formData),
       };
       
-      // Add course_id if provided in URL params
-      if (urlCourseId) {
-        (payload as any).course_id = urlCourseId;
-      }
+      // Use course_id from URL params, or "new" to create a new course
+      const courseIdForRequest = urlCourseId || 'new';
 
-      const response = await fetch('/api/class-profiles', {
+      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -418,12 +419,17 @@ export default function EditClassProfilePage() {
       }));
 
       if (typeof nextId === 'string' && nextId !== 'new') {
-        // Preserve course_id and instructor_id when navigating
-        const navParams = new URLSearchParams();
-        if (urlCourseId) navParams.set('courseId', urlCourseId);
-        if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-        const queryString = navParams.toString();
-        router.push(`/class-profile/${nextId}/view${queryString ? `?${queryString}` : ''}`);
+        // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
+        if (urlCourseId) {
+          router.push(`/courses/${urlCourseId}/class-profiles/${nextId}/view`);
+        } else {
+          // Fallback to old structure with query params
+          const navParams = new URLSearchParams();
+          if (urlCourseId) navParams.set('courseId', urlCourseId);
+          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+          const queryString = navParams.toString();
+          router.push(`/class-profile/${nextId}/view${queryString ? `?${queryString}` : ''}`);
+        }
       } else {
         setError('Profile ID was not returned by the server.');
       }

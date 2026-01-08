@@ -6,7 +6,45 @@ import uuid
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from app.models.models import ScaffoldAnnotation, ScaffoldAnnotationVersion
+from app.models.models import ScaffoldAnnotation, ScaffoldAnnotationVersion, AnnotationHighlightCoords
+
+
+def _copy_highlight_coords_to_new_version(
+    db: Session,
+    from_version_id: Optional[uuid.UUID],
+    to_version_id: uuid.UUID,
+) -> int:
+    if not from_version_id:
+        return 0
+
+    coords_list = db.query(AnnotationHighlightCoords).filter(
+        AnnotationHighlightCoords.annotation_version_id == from_version_id,
+        AnnotationHighlightCoords.valid == True,
+    ).all()
+
+    if not coords_list:
+        return 0
+
+    created = 0
+    for coord in coords_list:
+        cloned = AnnotationHighlightCoords(
+            id=uuid.uuid4(),
+            annotation_version_id=to_version_id,
+            range_type=coord.range_type,
+            range_page=coord.range_page,
+            range_start=coord.range_start,
+            range_end=coord.range_end,
+            fragment=coord.fragment,
+            position_start_x=coord.position_start_x,
+            position_start_y=coord.position_start_y,
+            position_end_x=coord.position_end_x,
+            position_end_y=coord.position_end_y,
+            valid=True,
+        )
+        db.add(cloned)
+        created += 1
+
+    return created
 
 
 def create_scaffold_annotation(
@@ -100,6 +138,8 @@ def update_scaffold_annotation_status(
     annotation = get_scaffold_annotation(db, annotation_id)
     if not annotation:
         raise ValueError(f"Annotation {annotation_id} not found")
+
+    previous_version_id = annotation.current_version_id
     
     # Get current version number
     max_version = db.query(ScaffoldAnnotationVersion).filter(
@@ -121,6 +161,8 @@ def update_scaffold_annotation_status(
     annotation.status = status
     annotation.current_version_id = version.id
     annotation.versions.append(version)
+
+    _copy_highlight_coords_to_new_version(db, previous_version_id, version.id)
     
     db.add(version)
     db.commit()
@@ -142,6 +184,8 @@ def update_scaffold_annotation_content(
     annotation = get_scaffold_annotation(db, annotation_id)
     if not annotation:
         raise ValueError(f"Annotation {annotation_id} not found")
+
+    previous_version_id = annotation.current_version_id
     
     old_content = annotation.current_content
     
@@ -165,6 +209,8 @@ def update_scaffold_annotation_content(
     annotation.current_content = new_content
     annotation.current_version_id = version.id
     annotation.versions.append(version)
+
+    _copy_highlight_coords_to_new_version(db, previous_version_id, version.id)
     
     db.add(version)
     db.commit()

@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
-from app.models.models import Session, SessionReading, Reading, SessionItem
+from app.models.models import Session, SessionReading, Reading, SessionVersion
 
 
 def create_session(
@@ -14,21 +14,17 @@ def create_session(
     course_id: uuid.UUID,
     week_number: int,
     title: Optional[str] = None,
-    session_info_json: Optional[Dict[str, Any]] = None,
-    assignment_info_json: Optional[Dict[str, Any]] = None,
-    assignment_goals_json: Optional[Dict[str, Any]] = None,
+    status: str = "draft",
 ) -> Session:
     """
-    Create a new session
+    Create a new session (identity only, no version data)
     """
     session = Session(
         id=uuid.uuid4(),
         course_id=course_id,
         week_number=week_number,
         title=title.strip() if title else None,
-        session_info_json=session_info_json,
-        assignment_info_json=assignment_info_json,
-        assignment_goals_json=assignment_goals_json,
+        status=status,
     )
     
     db.add(session)
@@ -57,12 +53,11 @@ def update_session(
     session_id: uuid.UUID,
     week_number: Optional[int] = None,
     title: Optional[str] = None,
-    session_info_json: Optional[Dict[str, Any]] = None,
-    assignment_info_json: Optional[Dict[str, Any]] = None,
-    assignment_goals_json: Optional[Dict[str, Any]] = None,
+    status: Optional[str] = None,
+    current_version_id: Optional[uuid.UUID] = None,
 ) -> Session:
     """
-    Update session information
+    Update session identity information (not version data)
     """
     session = get_session_by_id(db, session_id)
     if not session:
@@ -72,12 +67,10 @@ def update_session(
         session.week_number = week_number
     if title is not None:
         session.title = title.strip() if title else None
-    if session_info_json is not None:
-        session.session_info_json = session_info_json
-    if assignment_info_json is not None:
-        session.assignment_info_json = assignment_info_json
-    if assignment_goals_json is not None:
-        session.assignment_goals_json = assignment_goals_json
+    if status is not None:
+        session.status = status
+    if current_version_id is not None:
+        session.current_version_id = current_version_id
     
     db.commit()
     db.refresh(session)
@@ -234,9 +227,8 @@ def session_to_dict(session: Session) -> Dict[str, Any]:
         "course_id": str(session.course_id),
         "week_number": session.week_number,
         "title": session.title,
-        "session_info_json": session.session_info_json,
-        "assignment_info_json": session.assignment_info_json,
-        "assignment_goals_json": session.assignment_goals_json,
+        "current_version_id": str(session.current_version_id) if session.current_version_id else None,
+        "status": session.status,
         "created_at": session.created_at.isoformat() if session.created_at else None,
         "updated_at": session.updated_at.isoformat() if session.updated_at else None,
     }
@@ -256,195 +248,135 @@ def session_reading_to_dict(session_reading: SessionReading) -> Dict[str, Any]:
 
 
 # ======================================================
-# Session Item Management
+# Session Version Management
 # ======================================================
 
-def create_session_item(
+def create_session_version(
     db: Session,
     session_id: uuid.UUID,
-    reading_id: uuid.UUID,
-    instructor_id: uuid.UUID,
+    version_number: int,
     session_info_json: Optional[Dict[str, Any]] = None,
     assignment_info_json: Optional[Dict[str, Any]] = None,
     assignment_goals_json: Optional[Dict[str, Any]] = None,
-    version: int = 1,
-) -> SessionItem:
+    reading_ids: Optional[List[str]] = None,
+) -> SessionVersion:
     """
-    Create a new session item (or new version of existing item)
+    Create a new session version (immutable snapshot)
     """
-    session_item = SessionItem(
+    version = SessionVersion(
         id=uuid.uuid4(),
         session_id=session_id,
-        reading_id=reading_id,
-        instructor_id=instructor_id,
+        version_number=version_number,
         session_info_json=session_info_json,
         assignment_info_json=assignment_info_json,
         assignment_goals_json=assignment_goals_json,
-        version=version,
+        reading_ids=reading_ids if reading_ids else [],
     )
     
-    db.add(session_item)
+    db.add(version)
     db.commit()
-    db.refresh(session_item)
+    db.refresh(version)
     
-    return session_item
+    return version
 
 
-def get_session_item_by_id(db: Session, item_id: uuid.UUID) -> Optional[SessionItem]:
+def get_session_version_by_id(db: Session, version_id: uuid.UUID) -> Optional[SessionVersion]:
     """
-    Get session item by ID
+    Get session version by ID
     """
-    return db.query(SessionItem).filter(SessionItem.id == item_id).first()
+    return db.query(SessionVersion).filter(SessionVersion.id == version_id).first()
 
 
-def get_session_item_by_session_and_reading(
+def get_session_version_by_session_and_number(
     db: Session,
     session_id: uuid.UUID,
-    reading_id: uuid.UUID,
-) -> Optional[SessionItem]:
+    version_number: int,
+) -> Optional[SessionVersion]:
     """
-    Get the latest version of session item for a specific session and reading
+    Get a specific version of a session
     """
-    return db.query(SessionItem).filter(
+    return db.query(SessionVersion).filter(
         and_(
-            SessionItem.session_id == session_id,
-            SessionItem.reading_id == reading_id
+            SessionVersion.session_id == session_id,
+            SessionVersion.version_number == version_number
         )
-    ).order_by(desc(SessionItem.version)).first()
+    ).first()
 
 
-def get_session_items_by_session(
-    db: Session,
-    session_id: uuid.UUID,
-) -> List[SessionItem]:
+def get_latest_session_version(db: Session, session_id: uuid.UUID) -> Optional[SessionVersion]:
     """
-    Get all session items for a session (latest version of each reading)
+    Get the latest version of a session
     """
-    # Get the latest version for each reading in the session
-    subquery = db.query(
-        SessionItem.reading_id,
-        db.func.max(SessionItem.version).label('max_version')
-    ).filter(
-        SessionItem.session_id == session_id
-    ).group_by(SessionItem.reading_id).subquery()
-    
-    return db.query(SessionItem).join(
-        subquery,
-        and_(
-            SessionItem.reading_id == subquery.c.reading_id,
-            SessionItem.version == subquery.c.max_version
-        )
-    ).filter(
-        SessionItem.session_id == session_id
-    ).all()
+    return db.query(SessionVersion).filter(
+        SessionVersion.session_id == session_id
+    ).order_by(desc(SessionVersion.version_number)).first()
 
 
-def get_session_item_versions(
-    db: Session,
-    session_id: uuid.UUID,
-    reading_id: uuid.UUID,
-) -> List[SessionItem]:
+def get_session_versions(db: Session, session_id: uuid.UUID) -> List[SessionVersion]:
     """
-    Get all versions of a session item for a specific session and reading
+    Get all versions of a session, ordered by version_number
     """
-    return db.query(SessionItem).filter(
-        and_(
-            SessionItem.session_id == session_id,
-            SessionItem.reading_id == reading_id
-        )
-    ).order_by(desc(SessionItem.version)).all()
+    return db.query(SessionVersion).filter(
+        SessionVersion.session_id == session_id
+    ).order_by(SessionVersion.version_number).all()
 
 
-def save_session_item(
-    db: Session,
-    session_id: uuid.UUID,
-    reading_id: uuid.UUID,
-    instructor_id: uuid.UUID,
-    session_info_json: Optional[Dict[str, Any]] = None,
-    assignment_info_json: Optional[Dict[str, Any]] = None,
-    assignment_goals_json: Optional[Dict[str, Any]] = None,
-) -> SessionItem:
+def get_next_version_number(db: Session, session_id: uuid.UUID) -> int:
     """
-    Save a new version of session item (increments version number)
+    Get the next version number for a session
     """
-    # Get the latest version
-    latest = get_session_item_by_session_and_reading(db, session_id, reading_id)
-    
+    latest = get_latest_session_version(db, session_id)
     if latest:
-        # Increment version
-        next_version = latest.version + 1
-    else:
-        # First version
-        next_version = 1
-    
-    return create_session_item(
-        db=db,
-        session_id=session_id,
-        reading_id=reading_id,
-        instructor_id=instructor_id,
-        session_info_json=session_info_json,
-        assignment_info_json=assignment_info_json,
-        assignment_goals_json=assignment_goals_json,
-        version=next_version,
-    )
+        return latest.version_number + 1
+    return 1
 
 
-def update_session_item(
+def set_current_version(
     db: Session,
-    item_id: uuid.UUID,
-    session_info_json: Optional[Dict[str, Any]] = None,
-    assignment_info_json: Optional[Dict[str, Any]] = None,
-    assignment_goals_json: Optional[Dict[str, Any]] = None,
-) -> SessionItem:
+    session_id: uuid.UUID,
+    version_id: uuid.UUID,
+) -> Session:
     """
-    Update the latest version of a session item
-    Note: This updates the existing record. For versioning, use save_session_item instead.
+    Set the current version for a session
     """
-    item = get_session_item_by_id(db, item_id)
-    if not item:
-        raise ValueError(f"Session item {item_id} not found")
+    session = get_session_by_id(db, session_id)
+    if not session:
+        raise ValueError(f"Session {session_id} not found")
     
-    if session_info_json is not None:
-        item.session_info_json = session_info_json
-    if assignment_info_json is not None:
-        item.assignment_info_json = assignment_info_json
-    if assignment_goals_json is not None:
-        item.assignment_goals_json = assignment_goals_json
+    # Verify version exists and belongs to this session
+    version = get_session_version_by_id(db, version_id)
+    if not version or version.session_id != session_id:
+        raise ValueError(f"Version {version_id} not found or does not belong to session {session_id}")
     
+    session.current_version_id = version_id
     db.commit()
-    db.refresh(item)
+    db.refresh(session)
     
-    return item
+    return session
 
 
-def delete_session_item(db: Session, item_id: uuid.UUID) -> bool:
+def session_version_to_dict(version: SessionVersion) -> Dict[str, Any]:
     """
-    Delete a session item
-    """
-    item = get_session_item_by_id(db, item_id)
-    if not item:
-        raise ValueError(f"Session item {item_id} not found")
-    
-    db.delete(item)
-    db.commit()
-    
-    return True
-
-
-def session_item_to_dict(session_item: SessionItem) -> Dict[str, Any]:
-    """
-    Convert SessionItem model to dictionary
+    Convert SessionVersion model to dictionary
     """
     return {
-        "id": str(session_item.id),
-        "session_id": str(session_item.session_id),
-        "reading_id": str(session_item.reading_id),
-        "instructor_id": str(session_item.instructor_id),
-        "session_info_json": session_item.session_info_json,
-        "assignment_info_json": session_item.assignment_info_json,
-        "assignment_goals_json": session_item.assignment_goals_json,
-        "version": session_item.version,
-        "created_at": session_item.created_at.isoformat() if session_item.created_at else None,
-        "updated_at": session_item.updated_at.isoformat() if session_item.updated_at else None,
+        "id": str(version.id),
+        "session_id": str(version.session_id),
+        "version_number": version.version_number,
+        "session_info_json": version.session_info_json,
+        "assignment_info_json": version.assignment_info_json,
+        "assignment_goals_json": version.assignment_goals_json,
+        "reading_ids": version.reading_ids if version.reading_ids else [],
+        "created_at": version.created_at.isoformat() if version.created_at else None,
     }
+
+
+# ======================================================
+# Session Item Management (DEPRECATED - removed, use SessionVersion instead)
+# ======================================================
+# All SessionItem functions have been removed.
+# Use SessionVersion functions instead:
+# - get_latest_session_version() or get_current_session_version()
+# - create_session_version()
+# - get_session_version_by_id()
 

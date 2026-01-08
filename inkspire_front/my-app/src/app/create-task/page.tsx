@@ -80,8 +80,14 @@ const DEFAULT_COURSE_ID = '00000000-0000-4000-8000-000000000111';
 
 export default function CreateNewReadingTaskPage() {
   const router = useRouter();
+  // Query parameters (from URL: ?readingId=xxx&sessionId=yyy&courseId=zzz&...)
   const searchParams = useSearchParams();
   const profileFromQuery = searchParams?.get('from') || null;
+  // Get readingId, sessionId, readingIndex from query parameters (new flow)
+  const urlReadingId = searchParams?.get('readingId');
+  const urlSessionId = searchParams?.get('sessionId');
+  const urlReadingIndex = searchParams?.get('readingIndex');
+  const urlTotalReadings = searchParams?.get('totalReadings');
   const [formData, setFormData] = useState(createInitialFormState());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,6 +161,41 @@ export default function CreateNewReadingTaskPage() {
     if (typeof window === 'undefined') {
       return;
     }
+    
+    // New flow: Get session readings from sessionStorage (set by session creation page)
+    const sessionReadingsData = window.sessionStorage.getItem('inkspire:sessionReadings');
+    if (sessionReadingsData && urlSessionId && urlReadingId) {
+      try {
+        const parsed = JSON.parse(sessionReadingsData);
+        if (parsed.sessionId === urlSessionId && Array.isArray(parsed.readingIds)) {
+          // Convert reading IDs to SelectedReading format
+          const readings: SelectedReading[] = parsed.readingIds.map((id: string, index: number) => ({
+            id,
+            title: `Reading ${index + 1}`, // Will be loaded from API
+            filePath: '',
+            sourceType: 'uploaded',
+            order: index,
+          }));
+          setSelectedReadings(readings);
+          const readingIndex = urlReadingIndex ? parseInt(urlReadingIndex, 10) : parsed.currentIndex || 0;
+          setCurrentReadingIndex(readingIndex);
+          setSessionId(urlSessionId);
+          setSelectedCourseId(urlCourseId || null);
+          setSelectedInstructorId(urlInstructorId || null);
+          setReadingProfileId(profileFromQuery);
+          
+          // Load current reading details if we have readingId
+          if (urlReadingId && readings.some(r => r.id === urlReadingId)) {
+            // Reading ID is already in the list, we'll use it
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to parse session readings data', err);
+      }
+    }
+    
+    // Fallback to old flow: Get from SELECTED_READING_STORAGE_KEY
     try {
       const cached = window.sessionStorage.getItem(SELECTED_READING_STORAGE_KEY);
       if (cached) {
@@ -170,23 +211,23 @@ export default function CreateNewReadingTaskPage() {
         // Use URL params if available, otherwise use session storage
         setSelectedCourseId(urlCourseId || (parsed?.courseId ?? null));
         setSelectedInstructorId(urlInstructorId || (parsed?.instructorId ?? null));
-        setSessionId(parsed?.sessionId ?? null);
+        setSessionId(urlSessionId || (parsed?.sessionId ?? null));
       } else {
         setSelectedReadings([]);
         setReadingProfileId(profileFromQuery);
-        setSelectedCourseId(null);
-        setSelectedInstructorId(null);
-        setSessionId(null);
+        setSelectedCourseId(urlCourseId || null);
+        setSelectedInstructorId(urlInstructorId || null);
+        setSessionId(urlSessionId || null);
       }
     } catch (err) {
       console.error('Failed to load selected readings', err);
       setSelectedReadings([]);
       setReadingProfileId(profileFromQuery);
-      setSelectedCourseId(null);
-      setSelectedInstructorId(null);
-      setSessionId(null);
+      setSelectedCourseId(urlCourseId || null);
+      setSelectedInstructorId(urlInstructorId || null);
+      setSessionId(urlSessionId || null);
     }
-  }, [profileFromQuery]);
+  }, [profileFromQuery, urlSessionId, urlReadingId, urlReadingIndex, urlCourseId, urlInstructorId]);
   const acceptedScaffolds = useMemo(
     () => scaffolds.filter((s) => s.status === 'ACCEPTED'),
     [scaffolds]
@@ -698,8 +739,35 @@ export default function CreateNewReadingTaskPage() {
 */
 
   const handleGenerateScaffolds = async () => {
-    if (!currentReading) {
-      alert('Select a reading from the library before generating scaffolds.');
+    // Determine which reading to use: URL readingId (new flow) or currentReading (old flow)
+    let readingToUse: SelectedReading | null = null;
+    let readingIdToUse: string | null = null;
+    
+    if (urlReadingId && urlSessionId) {
+      // New flow: Use readingId from URL params
+      readingIdToUse = urlReadingId;
+      // Try to find reading in selectedReadings or fetch from API
+      const foundReading = selectedReadings.find(r => r.id === urlReadingId);
+      if (foundReading) {
+        readingToUse = foundReading;
+      } else {
+        // Reading not in selectedReadings, create a minimal reading object
+        readingToUse = {
+          id: urlReadingId,
+          title: `Reading ${(parseInt(urlReadingIndex || '0', 10) + 1)}`,
+          filePath: '',
+          sourceType: 'uploaded',
+          order: parseInt(urlReadingIndex || '0', 10),
+        };
+      }
+    } else if (currentReading) {
+      // Old flow: Use currentReading
+      readingToUse = currentReading;
+      readingIdToUse = currentReading.id;
+    }
+    
+    if (!readingToUse || !readingIdToUse) {
+      alert('No reading selected. Please select a reading or ensure readingId is provided in URL.');
       return;
     }
     
@@ -708,29 +776,38 @@ export default function CreateNewReadingTaskPage() {
       const newThreadId = `ui-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setThreadId(newThreadId);
 
-      const readingLabel = currentReading.title || currentReading.name;
+      const readingLabel = readingToUse.title || readingToUse.name;
+      const readingIndex = urlReadingIndex ? parseInt(urlReadingIndex, 10) : currentReadingIndex;
       const readingDescriptor = readingLabel
-        ? `Reading ${currentReading.order ?? currentReadingIndex + 1}: ${readingLabel}`
-        : `Reading ${currentReadingIndex + 1}`;
+        ? `Reading ${readingToUse.order ?? readingIndex + 1}: ${readingLabel}`
+        : `Reading ${readingIndex + 1}`;
 
-      const courseIdForRequest = currentReading.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID;
+      // Get course_id from URL params or reading, prioritize URL params
+      const courseIdForRequest = urlCourseId ?? readingToUse.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID;
       const instructorIdForRequest =
-        currentReading.instructorId ?? selectedInstructorId ?? DEFAULT_INSTRUCTOR_ID;
+        readingToUse.instructorId ?? selectedInstructorId ?? urlInstructorId ?? DEFAULT_INSTRUCTOR_ID;
 
-      // Simplified payload - session_id is optional (will be created by backend if not provided)
+      // Payload only contains instructor_id
+      // course_id, session_id, and reading_id are now in the URL path
+      // Use sessionId from URL if available, otherwise use state, otherwise "new"
+      const sessionIdForPath = urlSessionId || sessionId || 'new';
       const payload = {
         instructor_id: instructorIdForRequest,
-        course_id: courseIdForRequest,
-        session_id: sessionId || null,  // null if not set, backend will create new session
-        reading_id: currentReading.id,
       };
 
-      console.log('[Frontend] Calling /api/generate-scaffolds with:', payload);
+      console.log('[Frontend] Calling /api/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds/generate');
+      console.log('[Frontend] Path params:', { 
+        course_id: courseIdForRequest, 
+        session_id: sessionIdForPath,
+        reading_id: readingIdToUse 
+      });
+      console.log('[Frontend] Payload:', payload);
 
-      const res = await fetch('/api/generate-scaffolds', {
+      const generateUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForPath}/readings/${readingIdToUse}/scaffolds/generate`;
+      const res = await fetch(generateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestPayload),
       });
       console.log('res:', res);
       
@@ -794,20 +871,32 @@ export default function CreateNewReadingTaskPage() {
       const cards = serverScaffolds.map((s: any, idx: number) => {
         try {
           console.log(`[Frontend] Processing scaffold ${idx + 1}:`, s);
-          const normalizedText = normalizeScaffoldText(s.text);
+          
+          // Defensive checks for data
+          const scaffoldText = s.text || s.current_content || '';
+          const scaffoldFragment = s.fragment || s.highlight_text || '';
+          
+          if (!scaffoldText && !scaffoldFragment) {
+            console.warn(`[Frontend] Scaffold ${idx + 1} has no text or fragment, skipping`);
+            return null; // Return null and filter later
+          }
+          
+          const normalizedText = normalizeScaffoldText(scaffoldText);
           const { title, texts } = extractTitleFromTexts(normalizedText);
+          
           // Backend returns 'id' field, not 'scaffold_id'
           const scaffoldId = s.id || s.scaffold_id || `scaffold_${idx}`;
+          
           const card = {
             id: scaffoldId,
             scaffold_id: scaffoldId, // Use same value for compatibility
             number: idx + 1,
             type: 'Scaffold',
-            title,
+            title: title || null,
             status: s.status === 'pending' ? 'NOT REVIEWED' : s.status === 'approved' ? 'ACCEPTED' : s.status === 'rejected' ? 'REJECTED' : 'NOT REVIEWED',
-            content: texts[0] || s.fragment || '',
-            fragment: s.fragment || '',
-            text: texts,
+            content: texts[0] || scaffoldFragment || '',
+            fragment: scaffoldFragment,
+            text: texts.length > 0 ? texts : [scaffoldFragment],
             history: Array.isArray(s.history) ? s.history : [],
             backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][idx % 5],
             borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][idx % 5],
@@ -816,20 +905,42 @@ export default function CreateNewReadingTaskPage() {
           return card;
         } catch (e) {
           console.error(`[Frontend] Error processing scaffold ${idx + 1}:`, e, s);
-          throw e;
+          // Return a fallback card instead of throwing to prevent page freeze
+          return {
+            id: s.id || `scaffold_${idx}`,
+            scaffold_id: s.id || `scaffold_${idx}`,
+            number: idx + 1,
+            type: 'Scaffold',
+            title: null,
+            status: 'NOT REVIEWED',
+            content: s.fragment || s.highlight_text || 'Error loading scaffold',
+            fragment: s.fragment || s.highlight_text || '',
+            text: [s.fragment || s.highlight_text || 'Error loading scaffold'],
+            history: [],
+            backgroundColor: '#f9fafb',
+            borderColor: '#6b7280',
+          };
         }
-      });
+      }).filter((card): card is NonNullable<typeof card> => card !== null); // Filter out null cards
       
       console.log('[Frontend] Total cards created:', cards.length);
-      setScaffolds(cards);
-      setManualEditOpenId(null);
-      setManualEditMap({});
-      setCurrentReviewIndex(0);
-      setReviewProgress({
-        review_cursor: 0,
-        scaffold_final: [],
-        scaffold_rejected: [],
-      });
+      
+      // Use setTimeout to prevent blocking the UI thread
+      setTimeout(() => {
+        try {
+          setScaffolds(cards);
+          setManualEditOpenId(null);
+          setManualEditMap({});
+          setCurrentReviewIndex(0);
+          setReviewProgress({
+            review_cursor: 0,
+            scaffold_final: [],
+            scaffold_rejected: [],
+          });
+        } catch (stateError) {
+          console.error('[Frontend] Error setting state:', stateError);
+        }
+      }, 0);
 
       const responseThreadId = data.thread_id || newThreadId;
       setThreadId(responseThreadId);
@@ -1036,7 +1147,14 @@ export default function CreateNewReadingTaskPage() {
       const scaffoldId = scaffold.scaffold_id || scaffold.id;
       console.log('[Frontend] Manual edit - calling API:', { scaffoldId, new_text: editedValue });
       
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/edit`, {
+      const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+      const sessionIdForRequest = sessionId || 'new';
+      const readingIdForRequest = currentReading?.id;
+      if (!readingIdForRequest) {
+        throw new Error('Reading ID is required for scaffold operations');
+      }
+      const editUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/edit`;
+      const res = await fetch(editUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1123,7 +1241,14 @@ export default function CreateNewReadingTaskPage() {
 
       if (action === 'accept') {
         console.log('[Frontend] Approving scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/approve`, {
+        const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+        const sessionIdForRequest = sessionId || 'new';
+        const readingIdForRequest = currentReading?.id;
+        if (!readingIdForRequest) {
+          throw new Error('Reading ID is required for scaffold operations');
+        }
+        const approveUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/approve`;
+        res = await fetch(approveUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1140,7 +1265,14 @@ export default function CreateNewReadingTaskPage() {
         console.log('[Frontend] Formatted data for processReviewResponse:', data);
       } else if (action === 'reject') {
         console.log('[Frontend] Rejecting scaffold:', scaffoldId);
-        res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/reject`, {
+        const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+        const sessionIdForRequest = sessionId || 'new';
+        const readingIdForRequest = currentReading?.id;
+        if (!readingIdForRequest) {
+          throw new Error('Reading ID is required for scaffold operations');
+        }
+        const rejectUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/reject`;
+        res = await fetch(rejectUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1189,8 +1321,15 @@ export default function CreateNewReadingTaskPage() {
     try {
       const scaffoldId = currentCard.scaffold_id || currentCard.id;
       console.log('[Frontend] LLM refine scaffold:', { scaffoldId, prompt: message });
+      const courseIdForRequest = currentReading?.courseId ?? selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+      const sessionIdForRequest = sessionId || 'new';
+      const readingIdForRequest = currentReading?.id;
+      if (!readingIdForRequest) {
+        throw new Error('Reading ID is required for scaffold operations');
+      }
+      const llmRefineUrl = `/api/courses/${courseIdForRequest}/sessions/${sessionIdForRequest}/readings/${readingIdForRequest}/scaffolds/${scaffoldId}/llm-refine`;
       
-      const res = await fetch(`/api/annotation-scaffolds/${scaffoldId}/llm-refine`, {
+      const res = await fetch(llmRefineUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1445,6 +1584,56 @@ export default function CreateNewReadingTaskPage() {
 
       setShowPublishModal(false);
       setShowPostPublishModal(true);
+      
+      // After successful publish, navigate to next reading if available
+      if (urlSessionId && urlReadingIndex !== null && urlTotalReadings) {
+        const currentIndex = parseInt(urlReadingIndex, 10);
+        const totalReadings = parseInt(urlTotalReadings, 10);
+        const nextIndex = currentIndex + 1;
+        
+        if (nextIndex < totalReadings) {
+          // Get next reading ID from sessionStorage
+          const sessionReadingsData = window.sessionStorage.getItem('inkspire:sessionReadings');
+          if (sessionReadingsData) {
+            try {
+              const parsed = JSON.parse(sessionReadingsData);
+              if (Array.isArray(parsed.readingIds) && parsed.readingIds[nextIndex]) {
+                const nextReadingId = parsed.readingIds[nextIndex];
+                
+                // Update sessionStorage
+                window.sessionStorage.setItem(
+                  'inkspire:sessionReadings',
+                  JSON.stringify({
+                    ...parsed,
+                    currentIndex: nextIndex,
+                  })
+                );
+                
+                // Navigate to next reading after a short delay
+                setTimeout(() => {
+                  const navParams = new URLSearchParams();
+                  navParams.set('readingId', nextReadingId);
+                  navParams.set('sessionId', urlSessionId);
+                  navParams.set('readingIndex', nextIndex.toString());
+                  navParams.set('totalReadings', totalReadings.toString());
+                  if (urlCourseId) navParams.set('courseId', urlCourseId);
+                  if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+                  if (profileFromQuery) navParams.set('profileId', profileFromQuery);
+                  
+                  router.push(`/create-task?${navParams.toString()}`);
+                }, 2000); // Wait 2 seconds before navigating
+                return;
+              }
+            } catch (err) {
+              console.error('Failed to get next reading ID', err);
+            }
+          }
+        } else {
+          // All readings processed, show completion message
+          console.log('All readings processed!');
+          // Could show a completion modal or redirect to a completion page
+        }
+      }
     } catch (error) {
       console.error('[Frontend] Publish failed:', error);
       console.error('[Frontend] Error details:', {
@@ -1518,16 +1707,23 @@ export default function CreateNewReadingTaskPage() {
                 <PdfPreviewComponent 
                   url={pdfUrl || undefined}
                   file={pdfUrl ? null : formData.uploadedFile}
+                  readingId={currentReading?.id || undefined}
                   onTextExtracted={handleTextExtracted} 
                   scrollToFragment={activeFragment || undefined}
                   scaffoldIndex={activeFragment ? scaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
-                  searchQueries={scaffolds.map(s => s.fragment).filter(f => f && f.trim())}
-                  scaffolds={scaffolds.map(s => ({
-                    id: s.id,
-                    fragment: s.fragment,
-                    history: s.history || [],
-                  }))}
+                  searchQueries={scaffolds
+                    .map(s => s?.fragment)
+                    .filter((f): f is string => !!f && typeof f === 'string' && f.trim().length > 0)}
+                  scaffolds={scaffolds
+                    .filter(s => s && s.id && s.fragment)
+                    .map(s => ({
+                      id: s.id,
+                      fragment: s.fragment || '',
+                      history: Array.isArray(s.history) ? s.history : [],
+                    }))}
                   sessionId={sessionId || undefined}
+                  courseId={urlCourseId ?? currentReading?.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID}
+                  readingId={currentReading?.id}
                 />
               </div>
             ) : (

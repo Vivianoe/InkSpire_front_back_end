@@ -58,8 +58,10 @@ def normalize_name(name: str) -> str:
     return normalized
 
 
-@router.post("/perusall/annotations", response_model=PerusallAnnotationResponse)
+@router.post("/courses/{course_id}/readings/{reading_id}/perusall/annotations", response_model=PerusallAnnotationResponse)
 def post_annotations_to_perusall(
+    course_id: str,
+    reading_id: str,
     req: PerusallAnnotationRequest,
     db: Session = Depends(get_db)
 ):
@@ -70,6 +72,38 @@ def post_annotations_to_perusall(
     Each annotation corresponds to one POST request to:
     POST /courses/{courseId}/assignments/{assignmentId}/annotations
     """
+    # Validate course_id and reading_id from path
+    try:
+        course_uuid = uuid.UUID(course_id)
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id or reading_id format: course_id={course_id}, reading_id={reading_id}"
+        )
+    
+    # Verify course and reading exist
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course {course_id} not found"
+        )
+    
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Reading {reading_id} not found"
+        )
+    
+    # Verify reading belongs to course
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
     # Check for required environment variables (only API credentials, not IDs)
     missing_vars = []
     if not X_INSTITUTION:
@@ -96,7 +130,7 @@ def post_annotations_to_perusall(
 
     # If annotation_ids provided, fetch highlight_coords from database
     annotations_to_post = []
-    first_annotation = None  # Store first annotation to get course_id and reading_id
+    first_annotation = None  # Store first annotation to verify it belongs to the course/reading
     if req.annotation_ids:
         print(f"[post_annotations_to_perusall] Fetching highlight_coords for {len(req.annotation_ids)} annotation(s)")
         for annotation_id_str in req.annotation_ids:
@@ -111,6 +145,16 @@ def post_annotations_to_perusall(
                     print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} not found")
                     continue
                 
+                # Verify annotation belongs to the specified reading.
+                # Note: scaffold_annotations table does NOT store course_id; course ownership is implied by reading_id.
+                if annotation.reading_id != reading_uuid:
+                    print(f"[post_annotations_to_perusall] Annotation {annotation_id_str} does not belong to reading {reading_id}")
+                    continue
+
+                print(
+                    f"[post_annotations_to_perusall] Using annotation {annotation_id_str} with current_version_id={annotation.current_version_id}"
+                )
+                
                 # Store first annotation for Perusall mapping lookup
                 if first_annotation is None:
                     first_annotation = annotation
@@ -124,6 +168,31 @@ def post_annotations_to_perusall(
                     AnnotationHighlightCoords.annotation_version_id == annotation.current_version_id,
                     AnnotationHighlightCoords.valid == True
                 ).all()
+
+                # Fallback: if current_version_id has no coords (e.g., after approve/edit/llm-refine creates new version),
+                # try older versions and use the most recent version that has coords.
+                if (not coords_list) and getattr(annotation, 'versions', None):
+                    try:
+                        versions_sorted = sorted(
+                            list(annotation.versions),
+                            key=lambda v: getattr(v, 'version_number', 0),
+                            reverse=True,
+                        )
+                        for v in versions_sorted:
+                            v_id = getattr(v, 'id', None)
+                            if not v_id:
+                                continue
+                            coords_list = db.query(AnnotationHighlightCoords).filter(
+                                AnnotationHighlightCoords.annotation_version_id == v_id,
+                                AnnotationHighlightCoords.valid == True
+                            ).all()
+                            if coords_list:
+                                print(
+                                    f"[post_annotations_to_perusall] Fallback: using highlight_coords from older version for annotation {annotation_id_str} (version_number={getattr(v, 'version_number', None)})"
+                                )
+                                break
+                    except Exception as e:
+                        print(f"[post_annotations_to_perusall] Fallback version scan failed for annotation {annotation_id_str}: {e}")
                 
                 if not coords_list:
                     print(f"[post_annotations_to_perusall] No highlight_coords found for annotation {annotation_id_str}")
@@ -195,8 +264,8 @@ def post_annotations_to_perusall(
         
         # First, try to get from database mapping
         perusall_mapping = db.query(PerusallMapping).filter(
-            PerusallMapping.course_id == course.id,
-            PerusallMapping.reading_id == reading.id
+            PerusallMapping.course_id == course_uuid,
+            PerusallMapping.reading_id == reading_uuid
         ).first()
         
         if perusall_mapping:
@@ -493,10 +562,12 @@ def post_annotations_to_perusall(
                     detail=f"Failed to get Perusall mapping: {str(e)}"
                 )
     else:
-        # Fallback to environment variables if annotations provided directly
-        perusall_course_id = COURSE_ID
-        perusall_assignment_id = ASSIGNMENT_ID
-        perusall_document_id = DOCUMENT_ID
+        # If annotations were provided directly (not via annotation_ids), use environment variables
+        if not req.annotation_ids and req.annotations:
+            # Fallback to environment variables if annotations provided directly
+            perusall_course_id = COURSE_ID
+            perusall_assignment_id = ASSIGNMENT_ID
+            perusall_document_id = DOCUMENT_ID
         
         if not perusall_course_id or not perusall_assignment_id or not perusall_document_id:
             raise HTTPException(
@@ -637,8 +708,10 @@ def post_annotations_to_perusall(
 # ======================================================
 
 
-@router.post("/perusall/mapping", response_model=PerusallMappingResponse)
+@router.post("/courses/{course_id}/readings/{reading_id}/perusall/mapping", response_model=PerusallMappingResponse)
 def create_or_update_perusall_mapping(
+    course_id: str,
+    reading_id: str,
     req: PerusallMappingRequest,
     db: Session = Depends(get_db)
 ):
@@ -646,6 +719,7 @@ def create_or_update_perusall_mapping(
     Create or update Perusall mapping for a course-reading pair.
     Maps course_id and reading_id to Perusall course_id, assignment_id, and document_id.
     """
+    # Validate course_id and reading_id from path
     try:
         course_id = uuid.UUID(req.course_id)
         reading_id = uuid.UUID(req.reading_id)
@@ -656,24 +730,31 @@ def create_or_update_perusall_mapping(
         )
     
     # Verify course and reading exist
-    course = get_course_by_id(db, course_id)
+    course = get_course_by_id(db, course_uuid)
     if not course:
         raise HTTPException(
             status_code=404,
-            detail=f"Course {req.course_id} not found"
+            detail=f"Course {course_id} not found"
         )
     
-    reading = get_reading_by_id(db, reading_id)
+    reading = get_reading_by_id(db, reading_uuid)
     if not reading:
         raise HTTPException(
             status_code=404,
-            detail=f"Reading {req.reading_id} not found"
+            detail=f"Reading {reading_id} not found"
+        )
+    
+    # Verify reading belongs to course
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
         )
     
     # Check if mapping already exists
     existing_mapping = db.query(PerusallMapping).filter(
-        PerusallMapping.course_id == course_id,
-        PerusallMapping.reading_id == reading_id
+        PerusallMapping.course_id == course_uuid,
+        PerusallMapping.reading_id == reading_uuid
     ).first()
     
     if existing_mapping:
