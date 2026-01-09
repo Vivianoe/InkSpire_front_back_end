@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS courses (
     instructor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     course_code TEXT,
+    perusall_course_id TEXT,
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS courses (
 -- Create indexes for courses
 CREATE INDEX IF NOT EXISTS idx_courses_instructor_id ON courses(instructor_id);
 CREATE INDEX IF NOT EXISTS idx_courses_title ON courses(title);
+CREATE INDEX IF NOT EXISTS idx_courses_course_code ON courses(course_code);
 
 -- Create course_basic_info table
 CREATE TABLE IF NOT EXISTS course_basic_info (
@@ -355,11 +357,34 @@ CREATE TRIGGER update_perusall_mappings_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+-- Create user_perusall_credentials table
+CREATE TABLE IF NOT EXISTS user_perusall_credentials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    institution_id TEXT NOT NULL,
+    api_token TEXT NOT NULL,  -- TODO: Encrypt using Supabase Vault in production
+    is_validated BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_user_perusall UNIQUE (user_id)
+);
+
+-- Create indexes for user_perusall_credentials
+CREATE INDEX IF NOT EXISTS idx_user_perusall_credentials_user_id ON user_perusall_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_perusall_credentials_validated ON user_perusall_credentials(is_validated);
+
+-- Create trigger for user_perusall_credentials table
+DROP TRIGGER IF EXISTS update_user_perusall_credentials_updated_at ON user_perusall_credentials;
+CREATE TRIGGER update_user_perusall_credentials_updated_at
+    BEFORE UPDATE ON user_perusall_credentials
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- Add table comments
 COMMENT ON TABLE scaffold_annotations IS 'Each annotation corresponds to a text fragment in a reading';
 COMMENT ON TABLE scaffold_annotation_versions IS 'Each automatic generation, manual edit, LLM rewrite, accept/reject creates a record';
 COMMENT ON TABLE users IS 'User authentication and profile information';
-COMMENT ON TABLE courses IS 'Course basic information';
+COMMENT ON TABLE courses IS 'Course basic information with Perusall course ID for integration';
 COMMENT ON TABLE course_basic_info IS 'Detailed course information with versioning support';
 COMMENT ON TABLE course_basic_info_versions IS 'Version history of course basic information';
 COMMENT ON TABLE class_profiles IS 'Active current version of class profile';
@@ -370,4 +395,5 @@ COMMENT ON TABLE session_readings IS 'Many-to-Many relationship between sessions
 COMMENT ON TABLE session_items IS 'Independent content for each reading within a session';
 COMMENT ON TABLE annotation_highlight_coords IS 'Stores coordinate information for annotation highlights, one record per annotation version';
 COMMENT ON TABLE perusall_mappings IS 'Maps courses and readings to Perusall course_id, assignment_id, and document_id';
+COMMENT ON TABLE user_perusall_credentials IS 'Stores per-user Perusall API credentials for integration';
 

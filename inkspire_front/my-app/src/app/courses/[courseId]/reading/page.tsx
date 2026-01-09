@@ -77,7 +77,11 @@ export default function CourseReadingPage() {
   const [loadingList, setLoadingList] = useState(false);
 
   const resolvedCourseId = courseId || searchParams?.get('courseId') || MOCK_COURSE_ID;
-  const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
+  // Get instructor_id from query params, ensure it's never null or undefined
+  const instructorIdFromParams = searchParams?.get('instructorId');
+  const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
+    ? instructorIdFromParams 
+    : MOCK_INSTRUCTOR_ID;
 
   const uploadNewReadings = async (files: FileList) => {
     const fileArray = Array.from(files);

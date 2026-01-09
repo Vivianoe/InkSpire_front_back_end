@@ -5,14 +5,20 @@ import { Dialog } from '@headlessui/react';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import styles from './Navigation.module.css';
+import { useAuth } from '@/contexts/AuthContext';
+import { UserProfileDropdown } from '@/components/auth/UserProfileDropdown';
+import { SignInButton } from '@/components/auth/SignInButton';
+import { AuthModal } from '@/components/auth/AuthModal';
 
 const NAVIGATION_LINKS = [
   { name: 'Dashboard', href: '/' },
-  { name: 'History', href: '/history' },
+  // { name: 'History', href: '/history' },
 ];
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user } = useAuth();
+	const [showAuthModal, setShowAuthModal] = useState(false);
 
   return (
     <header className={styles.header}>
@@ -39,8 +45,27 @@ export default function Navigation() {
           ))}
         </div>
         <div className={styles.profileContainer}>
-          <div className={styles.profileAvatar}></div>
+          {user ? (
+            <UserProfileDropdown
+              dropdownPosition="top-right"
+              showUserName={true}
+              className="transition-all duration-200 hover:bg-gray-50/80 rounded-lg pl-1"
+            />
+          ) : (
+            <SignInButton
+              className="bg-blue-600 text-white font-semibold text-sm px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+              showLoading={true}
+              showModal={false}
+              onClick={() => setShowAuthModal(true)}
+						/>
+          )}
         </div>
+
+        {/* Auth modal */}
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+        />
       </nav>
 
       <Dialog as="div" className="lg:hidden" open={mobileMenuOpen} onClose={setMobileMenuOpen}>

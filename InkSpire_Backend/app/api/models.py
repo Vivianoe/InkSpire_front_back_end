@@ -2,7 +2,7 @@
 Pydantic models for API request/response validation
 """
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 # ======================================================
 # Shared Models
@@ -66,6 +66,7 @@ class UserResponse(BaseModel):
 class LoginResponse(BaseModel):
     user: UserResponse
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     message: str = "Login successful"
 
@@ -84,8 +85,10 @@ class PublicUserResponse(BaseModel):
 
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
+    course_id: str
     title: str
-    course_code: str
+    course_code: Optional[str] = None
+    perusall_course_id: Optional[str] = None
     description: str
     class_input: Dict[str, Any]
 
@@ -132,7 +135,7 @@ class ClassProfileListResponse(BaseModel):
 class CourseSummaryModel(BaseModel):
     id: str
     title: str
-    course_code: str
+    perusall_course_id: Optional[str] = None
     description: str
     class_profile_id: Optional[str] = None
 
@@ -339,4 +342,46 @@ class HighlightReportResponse(BaseModel):
     success: bool
     created_count: int
     errors: List[Dict[str, Any]]
+
+
+# ========================================
+# Perusall Integration Models
+# ========================================
+
+# Perusall Authentication
+class PerusallAuthRequest(BaseModel):
+    institution_id: str
+    api_token: str
+
+class PerusallAuthResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+
+
+# Perusall Courses
+class PerusallCourseItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+
+    id: str = Field(alias="_id")  # Perusall course ID - serializes as "_id"
+    name: str  # Course name
+
+class PerusallCoursesResponse(BaseModel):
+    success: bool
+    courses: List[PerusallCourseItem]
+
+
+# Perusall Course Import
+class PerusallImportRequest(BaseModel):
+    course_ids: List[str]
+
+class ImportedCourse(BaseModel):
+    perusall_course_id: str
+    inkspire_course_id: str
+    title: str
+
+class PerusallImportResponse(BaseModel):
+    success: bool
+    imported_courses: List[ImportedCourse]
+    message: Optional[str] = None
 

@@ -130,10 +130,13 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
             }
         })
 
-        if not response.user:
-            raise AuthenticationError("Signup failed: no user returned")
+        if not response.user or not response.session:
+            raise AuthenticationError("Signup failed: no user or session returned")
 
         return {
+            "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
+            "token_type": "bearer",
             "user": response.user,
             "session": response.session,
         }
@@ -177,6 +180,7 @@ def supabase_login(email: str, password: str) -> Dict[str, Any]:
 
         return {
             "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
             "token_type": "bearer",
             "user": response.user,
             "session": response.session,

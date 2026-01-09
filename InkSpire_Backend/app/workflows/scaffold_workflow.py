@@ -133,6 +133,7 @@ def clean_json_output(raw: str) -> str:
 def safe_json_loads(raw: str, context: str = "") -> Any:
     """
     Safely parse JSON with helpful error messages.
+    Attempts to fix common JSON errors before failing.
     """
     cleaned = clean_json_output(raw)
     if not cleaned:
@@ -141,14 +142,52 @@ def safe_json_loads(raw: str, context: str = "") -> Any:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
-        debug_msg = (
-            f"\n===== JSONDecodeError in {context} =====\n"
-            f"Error: {e}\n"
-            f"Cleaned value was:\n{repr(cleaned)}\n"
-            f"===== END JSON ERROR ({context}) =====\n"
-        )
-        print(debug_msg)
-        raise ValueError(f"Failed to parse JSON in {context}: {e}") from e
+        # Try to fix common JSON errors
+        fixed = cleaned
+        try:
+            # Fix missing commas between object properties (common Gemini error)
+            # Pattern 1: } followed by " (missing comma between objects)
+            fixed = re.sub(r'}\s*"', r'}, "', fixed)
+            # Pattern 2: } followed by { (missing comma between objects)
+            fixed = re.sub(r'}\s*{', r'}, {', fixed)
+            # Pattern 3: " followed by " (missing comma between string properties)
+            # But be careful - this could be inside a string, so we need to check context
+            # Only fix if it's after a closing quote and before an opening quote for a key
+            fixed = re.sub(r'"\s*"([^"]*":)', r'", "\1', fixed)
+            # Pattern 4: ] followed by " or { (missing comma after array)
+            fixed = re.sub(r']\s*"', r'], "', fixed)
+            fixed = re.sub(r']\s*{', r'], {', fixed)
+            # Pattern 5: number followed by " or { (missing comma after number)
+            fixed = re.sub(r'(\d)\s*"', r'\1, "', fixed)
+            fixed = re.sub(r'(\d)\s*{', r'\1, {', fixed)
+            # Pattern 6: true/false/null followed by " or { (missing comma)
+            fixed = re.sub(r'(true|false|null)\s*"', r'\1, "', fixed)
+            fixed = re.sub(r'(true|false|null)\s*{', r'\1, {', fixed)
+            
+            # Try parsing again with fixed JSON
+            return json.loads(fixed)
+        except (json.JSONDecodeError, Exception) as fix_error:
+            # If fixing didn't work, print debug info and raise original error
+            error_pos = getattr(e, 'pos', 0)
+            error_line = getattr(e, 'lineno', 0)
+            error_col = getattr(e, 'colno', 0)
+            
+            # Show context around the error
+            start_pos = max(0, error_pos - 200)
+            end_pos = min(len(cleaned), error_pos + 200)
+            error_context = cleaned[start_pos:end_pos]
+            
+            debug_msg = (
+                f"\n===== JSONDecodeError in {context} =====\n"
+                f"Error: {e}\n"
+                f"Error position: line {error_line}, column {error_col}, char {error_pos}\n"
+                f"Cleaned value (first 1000 chars):\n{repr(cleaned[:1000])}\n"
+                f"Cleaned value (around error, ±200 chars):\n{repr(error_context)}\n"
+                f"Fix attempt failed: {fix_error}\n"
+                f"===== END JSON ERROR ({context}) =====\n"
+            )
+            print(debug_msg)
+            raise ValueError(f"Failed to parse JSON in {context}: {e}") from e
 
 
 # ======================================================

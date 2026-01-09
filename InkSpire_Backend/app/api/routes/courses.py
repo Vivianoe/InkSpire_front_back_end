@@ -60,6 +60,7 @@ def get_courses_by_instructor_endpoint(instructor_id: str, db: Session = Depends
                 title=course_dict["title"],
                 course_code=course_dict.get("course_code"),
                 description=course_dict.get("description"),
+                perusall_course_id=course_dict.get("perusall_course_id"),
                 class_profile_id=str(profile.id) if profile else None,
             )
         )

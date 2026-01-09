@@ -4,10 +4,11 @@ import "./globals.css";
 import "@/app/ui/ui.module.css";
 // import MswInit from "@/components/MswInit"; // MSW disabled - connecting to FastAPI backend
 // PDF.js CSS is loaded via CDN in <head> below - local import causes image path resolution issues
+import { AuthProvider } from "../contexts/AuthContext";
 
 export const metadata: Metadata = {
-  title: "My App",
-  description: "Figma → Next.js Quick Skeleton",
+  title: "InkSpire",
+  description: "InkSpire",
 };
 
 
@@ -35,7 +36,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* MSW disabled - connecting to FastAPI backend */}
         {/* {process.env.NODE_ENV === 'development' ? <MswInit /> : null} */}
-        <main>{children}</main>
+        <main>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </main>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ User authentication and management endpoints
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.models.models import User
 from app.services.user_service import (
     create_user_from_supabase,
     get_user_by_id,
@@ -23,7 +24,7 @@ from app.api.models import (
 
 router = APIRouter()
 
-@router.post("/users/register", response_model=UserResponse)
+@router.post("/users/register", response_model=LoginResponse)
 def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register a new user"""
     import uuid
@@ -32,7 +33,11 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
         supabase_response = supabase_signup(req.email, req.password, req.name)
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
-        
+
+        # Extract tokens from response
+        access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
+
         # Create user record in our database
         user = create_user_from_supabase(
             db=db,
@@ -41,8 +46,20 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             name=req.name,
             role=req.role or "instructor",
         )
-        
-        return UserResponse(**user_to_dict(user))
+
+        # Return LoginResponse with both access and refresh tokens
+        return LoginResponse(
+            user=UserResponse(
+                id=str(user.id),
+                supabase_user_id=str(user.supabase_user_id),
+                email=user.email,
+                name=user.name,
+                role=user.role,
+            ),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            message="Registration successful"
+        )
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -55,16 +72,17 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
     try:
         # Authenticate with Supabase
         supabase_response = supabase_login(req.email, req.password)
-        
-        # Extract JWT token from response
+
+        # Extract tokens from response
         access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
         supabase_user = supabase_response["user"]
-        
+
         # Get user from our database
         user = get_user_by_supabase_id(db, uuid.UUID(supabase_user.id))
         if not user:
             raise HTTPException(status_code=404, detail="User not found in database")
-        
+
         return LoginResponse(
             user=UserResponse(
                 id=str(user.id),
@@ -74,6 +92,7 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
                 role=user.role,
             ),
             access_token=access_token,
+            refresh_token=refresh_token,
         )
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -81,17 +100,14 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @router.get("/users/me", response_model=UserResponse)
-def get_current_user_info(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information"""
-    user = get_user_by_supabase_id(db, current_user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     return UserResponse(
-        id=str(user.id),
-        email=user.email,
-        name=user.name,
-        role=user.role,
+        id=str(current_user.id),
+        supabase_user_id=str(current_user.supabase_user_id),
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
     )
 
 @router.get("/users/{user_id}", response_model=PublicUserResponse)

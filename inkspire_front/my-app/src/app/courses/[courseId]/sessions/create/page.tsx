@@ -538,12 +538,14 @@ export default function SessionCreationPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
+      
           <div>
-            <h1 className={styles.title}>Save Session</h1>
+            <h1 className={styles.title}>Session Setup</h1>
             <p className={styles.subtitle}>
-              Select readings for scaffold generation and create a session.
+              Create a new session or continue working on an existing session.
             </p>
           </div>
+    
           <div className={styles.headerActions}>
             <button
               onClick={() => {
@@ -558,6 +560,7 @@ export default function SessionCreationPage() {
             >
               ← Back to Readings
             </button>
+            {/*
             <button
               onClick={handleCreateSession}
               className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
@@ -571,7 +574,7 @@ export default function SessionCreationPage() {
               disabled={creating || !selectedReadingIds.length}
             >
               {creating ? 'Starting...' : `Start scaffolds generation`}
-            </button>
+            </button>*/}
           </div>
         </div>
       </div>
@@ -784,6 +787,7 @@ export default function SessionCreationPage() {
               <div className={styles.selectionCount}>
                 {selectedReadingIds.length} of {readings.length} selected
               </div>
+              {/*
               <button
                 onClick={handleCreateSession}
                 className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
@@ -792,6 +796,7 @@ export default function SessionCreationPage() {
               >
                 {creating ? 'Creating...' : 'Save Session'}
               </button>
+              */}
               <button
                 onClick={handleStartScaffoldsGeneration}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
