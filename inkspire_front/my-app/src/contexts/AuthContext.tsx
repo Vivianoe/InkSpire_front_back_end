@@ -4,17 +4,25 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session, AuthError } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase/client'
 import { AuthModal as PerusallAuthModal } from '@/components/auth/PerusallAuthModal'
+import { EmailConfirmationModal } from '@/components/auth/EmailConfirmationModal'
+import { EmailConfirmedModal } from '@/components/auth/EmailConfirmedModal'
 
 interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
   showPerusallModal: boolean
+  showEmailConfirmationModal: boolean
+  showEmailConfirmedModal: boolean
+  emailConfirmed: boolean
   coursesRefreshTrigger: number
   signIn: (email: string, password: string) => Promise<{ error?: AuthError }>
   signUp: (email: string, password: string, name: string) => Promise<{ error?: AuthError }>
   signOut: () => Promise<{ error?: AuthError }>
   closePerusallModal: () => void
+  closeEmailConfirmationModal: () => void
+  handleEmailConfirmed: () => void
+  resendConfirmationEmail: () => Promise<{ error?: AuthError }>
   triggerCoursesRefresh: () => void
 }
 
@@ -37,6 +45,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [showPerusallModal, setShowPerusallModal] = useState(false)
+  const [showEmailConfirmationModal, setShowEmailConfirmationModal] = useState(false)
+  const [showEmailConfirmedModal, setShowEmailConfirmedModal] = useState(false)
+  const [emailConfirmed, setEmailConfirmed] = useState(false)
   const [coursesRefreshTrigger, setCoursesRefreshTrigger] = useState(0)
 
   useEffect(() => {
@@ -57,16 +68,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(session?.user ?? null)
         setLoading(false)
 
-        // // Handle sign-in success
-        // if (event === 'SIGNED_IN' && session?.user) {
-        //   console.log('User signed in:', session.user.email)
-        // }
+        // Detect email confirmation
+        if (event === 'USER_UPDATED' && session?.user) {
+          const wasUnconfirmed = !emailConfirmed
+          const isNowConfirmed = session.user.email_confirmed_at !== null
 
-        // // Handle sign-out - clear any cached data
-        // if (event === 'SIGNED_OUT') {
-        //   console.log('User signed out')
-        //   // Could clear any cached data here
-        // }
+          if (wasUnconfirmed && isNowConfirmed) {
+            // Email just got confirmed!
+            setEmailConfirmed(true)
+            setShowEmailConfirmationModal(false)
+            setShowEmailConfirmedModal(true)
+          }
+        }
+
+        // Clear modals on sign out
+        if (event === 'SIGNED_OUT') {
+          setShowEmailConfirmationModal(false)
+          setShowEmailConfirmedModal(false)
+          setEmailConfirmed(false)
+          setShowPerusallModal(false)
+        }
       }
     )
 
@@ -102,6 +123,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (sessionError) {
         console.error('❌ Session setup failed:', sessionError)
         return { error: sessionError }
+      }
+
+      // Check email confirmation status
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user?.email_confirmed_at) {
+        // Email not confirmed - show confirmation waiting modal
+        setEmailConfirmed(false)
+        setShowEmailConfirmationModal(true)
+      } else {
+        setEmailConfirmed(true)
+        // Don't auto-show Perusall modal on sign-in (only on signup)
       }
 
       // Session will be automatically detected by onAuthStateChange listener
@@ -141,8 +174,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { error: sessionError }
       }
 
-      // Show Perusall modal immediately after successful signup and session setup
-      setShowPerusallModal(true)
+      // Check email confirmation status
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (user?.email_confirmed_at) {
+        // Email already confirmed (shouldn't happen in new signup, but handle it)
+        setEmailConfirmed(true)
+        setShowPerusallModal(true)
+      } else {
+        // Email not confirmed - show confirmation waiting modal
+        setEmailConfirmed(false)
+        setShowEmailConfirmationModal(true)
+      }
 
       // Session will be automatically detected by onAuthStateChange listener
       return { error: undefined }
@@ -154,6 +197,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const closePerusallModal = () => {
     setShowPerusallModal(false)
+  }
+
+  const closeEmailConfirmationModal = () => {
+    setShowEmailConfirmationModal(false)
+  }
+
+  const handleEmailConfirmed = () => {
+    // Called when EmailConfirmedModal "Continue" is clicked
+    setShowEmailConfirmedModal(false)
+    setShowPerusallModal(true) // Now show Perusall integration
+  }
+
+  const resendConfirmationEmail = async () => {
+    try {
+      if (!user?.email) {
+        return { error: { message: 'No email found' } as AuthError }
+      }
+
+      const response = await fetch('/api/users/resend-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email })
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        return { error: { message: data.detail || 'Failed to resend email' } as AuthError }
+      }
+
+      return { error: undefined }
+    } catch (error) {
+      return { error: { message: String(error) } as AuthError }
+    }
   }
 
   const triggerCoursesRefresh = () => {
@@ -188,11 +264,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     session,
     loading,
     showPerusallModal,
+    showEmailConfirmationModal,
+    showEmailConfirmedModal,
+    emailConfirmed,
     coursesRefreshTrigger,
     signIn,
     signUp,
     signOut,
     closePerusallModal,
+    closeEmailConfirmationModal,
+    handleEmailConfirmed,
+    resendConfirmationEmail,
     triggerCoursesRefresh,
   }
 
@@ -200,6 +282,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
   return (
     <AuthContext.Provider value={value}>
       {children}
+
+      {/* Email Confirmation Waiting Modal */}
+      <EmailConfirmationModal
+        isOpen={showEmailConfirmationModal}
+        onClose={closeEmailConfirmationModal}
+        email={user?.email || null}
+        allowClose={process.env.NODE_ENV === 'development'}
+      />
+
+      {/* Email Confirmed Success Modal */}
+      <EmailConfirmedModal
+        isOpen={showEmailConfirmedModal}
+        onContinue={handleEmailConfirmed}
+      />
+
+      {/* Perusall Integration Modal */}
       <PerusallAuthModal
         isOpen={showPerusallModal}
         onClose={closePerusallModal}

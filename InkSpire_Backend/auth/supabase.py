@@ -209,3 +209,39 @@ def supabase_logout(access_token: str) -> None:
 
     except Exception as e:
         raise AuthenticationError(f"Logout failed: {str(e)}")
+
+
+def resend_confirmation_email(email: str) -> Dict[str, Any]:
+    """
+    Resend email confirmation to user
+
+    This is useful when users don't receive the initial confirmation email
+    or when the confirmation link has expired.
+
+    Args:
+        email: User's email address
+
+    Returns:
+        Dict containing success message
+
+    Raises:
+        AuthenticationError: If resend fails
+    """
+    try:
+        client = get_supabase_client()
+
+        # Resend confirmation email using Supabase Auth API
+        response = client.auth.resend({
+            "type": "signup",
+            "email": email,
+        })
+
+        return {"message": "Confirmation email sent"}
+
+    except Exception as e:
+        error_message = str(e)
+        if "not found" in error_message.lower():
+            raise AuthenticationError("User not found with this email")
+        elif "already confirmed" in error_message.lower():
+            raise AuthenticationError("Email already confirmed")
+        raise AuthenticationError(f"Failed to resend confirmation email: {error_message}")

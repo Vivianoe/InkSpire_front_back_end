@@ -12,7 +12,7 @@ from app.services.user_service import (
     get_user_by_supabase_id,
     user_to_dict,
 )
-from auth.supabase import supabase_signup, supabase_login, AuthenticationError
+from auth.supabase import supabase_signup, supabase_login, resend_confirmation_email, AuthenticationError
 from auth.dependencies import get_current_user
 from app.api.models import (
     UserRegisterRequest,
@@ -136,11 +136,31 @@ def get_user_by_email_endpoint(email: str, db: Session = Depends(get_db)):
     user = get_user_by_email(db, email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return PublicUserResponse(
         id=str(user.id),
         email=user.email,
         name=user.name,
         role=user.role,
     )
+
+@router.post("/users/resend-confirmation")
+def resend_confirmation(req: dict):
+    """
+    Resend email confirmation to user
+
+    This endpoint allows users who didn't receive their confirmation email
+    or whose link expired to request a new confirmation email.
+    """
+    try:
+        email = req.get("email")
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        result = resend_confirmation_email(email)
+        return result
+    except AuthenticationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resend confirmation: {str(e)}")
 
