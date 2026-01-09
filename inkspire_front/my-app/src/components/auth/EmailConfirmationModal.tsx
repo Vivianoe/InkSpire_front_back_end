@@ -26,15 +26,78 @@ export function EmailConfirmationModal({
     if (!isOpen) return
 
     const pollInterval = setInterval(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { session } } = await supabase.auth.refreshSession()
 
-      if (user?.email_confirmed_at) {
+      if (session?.user?.email_confirmed_at) {
         // Email confirmed! The auth state listener in AuthContext will handle the UI update
         clearInterval(pollInterval)
       }
     }, 5000) // Poll every 5 seconds
 
     return () => clearInterval(pollInterval)
+  }, [isOpen])
+
+  // Cross-tab detection: listen for localStorage changes from other tabs
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleStorageChange = async (e: StorageEvent) => {
+      // Supabase stores auth tokens with pattern: sb-{projectref}-auth-token
+      // Check for any Supabase auth key changes
+      if (e.key && (e.key.startsWith('sb-') && e.key.includes('-auth-token'))) {
+        // Refresh session to get latest confirmation status and trigger USER_UPDATED event
+        const { data: { session } } = await supabase.auth.refreshSession()
+
+        // If email is confirmed, the AuthContext listener will handle the modal transition
+        if (session?.user?.email_confirmed_at) {
+          console.log('✓ Email confirmed detected via storage event')
+        }
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
+  }, [isOpen])
+
+  // Explicit confirmation signal detection from confirmation tab
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleConfirmationSignal = async (e: StorageEvent) => {
+      if (e.key === 'inkspire-email-confirmation-signal' && e.newValue) {
+        console.log('✓ Explicit confirmation signal received from confirmation tab')
+
+        try {
+          const signal = JSON.parse(e.newValue)
+
+          // Acknowledge receipt
+          localStorage.setItem('inkspire-email-confirmation-ack', JSON.stringify({
+            timestamp: Date.now(),
+            receivedSignal: signal.timestamp
+          }))
+
+          // Clean up acknowledgment after 5 seconds
+          setTimeout(() => {
+            localStorage.removeItem('inkspire-email-confirmation-ack')
+          }, 5000)
+
+          // Refresh session to trigger USER_UPDATED event in AuthContext
+          const { data: { session } } = await supabase.auth.refreshSession()
+
+          // Clean up the signal
+          localStorage.removeItem('inkspire-email-confirmation-signal')
+
+          if (session?.user?.email_confirmed_at) {
+            console.log('✓ Email confirmation verified via explicit signal')
+          }
+        } catch (err) {
+          console.error('Error parsing confirmation signal:', err)
+        }
+      }
+    }
+
+    window.addEventListener('storage', handleConfirmationSignal)
+    return () => window.removeEventListener('storage', handleConfirmationSignal)
   }, [isOpen])
 
   // Cooldown timer
@@ -86,7 +149,7 @@ export function EmailConfirmationModal({
   if (!isOpen) return null
 
   return (
-    <div className={`fixed inset-0 ${allowClose ? 'bg-black bg-opacity-60 backdrop-blur-sm' : 'bg-black'} flex items-center justify-center z-[9999]`}>
+    <div className={'fixed inset-0 bg-black flex items-center justify-center z-[9999]'}>
       <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">

@@ -34,9 +34,9 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
 
-        # Extract tokens from response
-        access_token = supabase_response["access_token"]
-        refresh_token = supabase_response["refresh_token"]
+        # Extract tokens from response (may be None if email confirmation required)
+        access_token = supabase_response.get("access_token")
+        refresh_token = supabase_response.get("refresh_token")
 
         # Create user record in our database
         user = create_user_from_supabase(
@@ -47,7 +47,8 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             role=req.role or "instructor",
         )
 
-        # Return LoginResponse with both access and refresh tokens
+        # Return LoginResponse with tokens (will be None if email unconfirmed)
+        message = "Registration successful. Please check your email to confirm your account." if not access_token else "Registration successful"
         return LoginResponse(
             user=UserResponse(
                 id=str(user.id),
@@ -58,7 +59,7 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             ),
             access_token=access_token,
             refresh_token=refresh_token,
-            message="Registration successful"
+            message=message
         )
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -12,6 +12,9 @@ from app.core.database import get_supabase_client
 # Load JWT secret for token validation
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
+# Get frontend URL from environment variable (for email confirmation redirects)
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+
 
 class AuthenticationError(Exception):
     """Raised when authentication fails"""
@@ -126,16 +129,21 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
             "options": {
                 "data": {
                     "name": name,
-                }
+                },
+                "email_redirect_to": f"{FRONTEND_URL}/auth/confirm"  # Redirect to confirm page
             }
         })
 
-        if not response.user or not response.session:
-            raise AuthenticationError("Signup failed: no user or session returned")
+        if not response.user:
+            raise AuthenticationError("Signup failed: no user returned")
+
+        # When email confirmations are enabled, session will be None until email is confirmed
+        access_token = response.session.access_token if response.session else None
+        refresh_token = response.session.refresh_token if response.session else None
 
         return {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "user": response.user,
             "session": response.session,
@@ -234,6 +242,9 @@ def resend_confirmation_email(email: str) -> Dict[str, Any]:
         response = client.auth.resend({
             "type": "signup",
             "email": email,
+            "options": {
+                "email_redirect_to": f"{FRONTEND_URL}/auth/confirm"
+            }
         })
 
         return {"message": "Confirmation email sent"}

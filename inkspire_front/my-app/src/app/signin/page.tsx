@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
 
@@ -15,7 +15,20 @@ export default function SignInPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmSuccess, setConfirmSuccess] = useState(false);
   const router = useRouter();
+
+  // Check for email confirmation redirect success message
+  useEffect(() => {
+    const confirmedRedirect = localStorage.getItem('inkspire-email-confirmed-redirect')
+    if (confirmedRedirect) {
+      setConfirmSuccess(true)
+      setError(null)
+      localStorage.removeItem('inkspire-email-confirmed-redirect')
+      // Clear success message after 5 seconds
+      setTimeout(() => setConfirmSuccess(false), 5000)
+    }
+  }, [])
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -205,6 +218,12 @@ export default function SignInPage() {
                 placeholder="••••••••"
                 required
               />
+            </div>
+          )}
+
+          {confirmSuccess && (
+            <div className={styles.successMessage}>
+              ✓ Email confirmed! Please sign in to continue.
             </div>
           )}
 
