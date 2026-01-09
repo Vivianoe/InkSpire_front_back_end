@@ -219,7 +219,8 @@ export default function ScaffoldPage() {
         prev.map((s) => {
           if (keyForId(s.id) === targetKey) {
             let nextStatus = s.status;
-            if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
+            // Backend historically used both "approved" and "accepted"
+            if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') nextStatus = 'ACCEPTED';
             else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
             else if (normalizedStatus === 'pending' || normalizedStatus === 'draft' || normalizedStatus === 'edit_pending') nextStatus = 'IN PROGRESS';
 
@@ -241,7 +242,10 @@ export default function ScaffoldPage() {
         return next;
       });
 
-      if (manualEditOpenId === targetKey && (normalizedStatus === 'approved' || normalizedStatus === 'rejected')) {
+      if (
+        manualEditOpenId === targetKey &&
+        (normalizedStatus === 'approved' || normalizedStatus === 'accepted' || normalizedStatus === 'rejected')
+      ) {
         setManualEditOpenId(null);
       }
 
@@ -512,6 +516,19 @@ export default function ScaffoldPage() {
 
   // Process scaffolds for display
   const processedScaffolds = scaffolds.map((scaffold, index) => {
+    const normalizedStatus = (typeof scaffold.status === 'string' ? scaffold.status : '').toLowerCase();
+    const displayStatus =
+      normalizedStatus === 'approved' || normalizedStatus === 'accepted'
+        ? 'ACCEPTED'
+        : normalizedStatus === 'rejected'
+          ? 'REJECTED'
+          : normalizedStatus === 'pending' ||
+            normalizedStatus === 'draft' ||
+            normalizedStatus === 'edit_pending' ||
+            normalizedStatus === 'in progress' ||
+            normalizedStatus === 'in_progress'
+            ? 'IN PROGRESS'
+            : 'IN PROGRESS';
     const processed = {
       ...scaffold,
       number: index + 1,
@@ -519,9 +536,7 @@ export default function ScaffoldPage() {
       type: 'Scaffold',
       backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][index % 5],
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
-      status: scaffold.status === 'pending' ? 'IN PROGRESS' : 
-              scaffold.status === 'approved' ? 'ACCEPTED' : 
-              scaffold.status === 'rejected' ? 'REJECTED' : 'IN PROGRESS'
+      status: displayStatus,
     };
     console.log(`[ScaffoldPage] Scaffold ${scaffold.id}: ${scaffold.status} -> ${processed.status}`);
     return processed;
