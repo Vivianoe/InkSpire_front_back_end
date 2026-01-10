@@ -50,7 +50,7 @@ export function EmailConfirmationModal({
 
         // If email is confirmed, the AuthContext listener will handle the modal transition
         if (session?.user?.email_confirmed_at) {
-          console.log('✓ Email confirmed detected via storage event')
+          // console.log('✓ Email confirmed detected via storage event')
         }
       }
     }
@@ -65,7 +65,7 @@ export function EmailConfirmationModal({
 
     const handleConfirmationSignal = async (e: StorageEvent) => {
       if (e.key === 'inkspire-email-confirmation-signal' && e.newValue) {
-        console.log('✓ Explicit confirmation signal received from confirmation tab')
+        // console.log('✓ Explicit confirmation signal received from confirmation tab')
 
         try {
           const signal = JSON.parse(e.newValue)
@@ -88,10 +88,10 @@ export function EmailConfirmationModal({
           localStorage.removeItem('inkspire-email-confirmation-signal')
 
           if (session?.user?.email_confirmed_at) {
-            console.log('✓ Email confirmation verified via explicit signal')
+            // console.log('✓ Email confirmation verified via explicit signal')
           }
         } catch (err) {
-          console.error('Error parsing confirmation signal:', err)
+          // console.error('Error parsing confirmation signal:', err)
         }
       }
     }
@@ -190,7 +190,7 @@ export function EmailConfirmationModal({
           <p className="font-semibold text-gray-900 mb-4">
             {email}
           </p>
-          <p className="text-sm text-gray-600 mb-6">
+          <p className="text-gray-600 mb-6">
             Click the link in the email to confirm your account and continue to Perusall integration.
           </p>
         </div>
@@ -226,6 +226,10 @@ export function EmailConfirmationModal({
           </div>
         )}
 
+        <p className="text-xs text-gray-500 text-center mt-6">
+          Didn't receive an email? <br/> Check your spam folder or click "Resend Email" above.
+        </p>
+        
         {/* Development mode helper */}
         {process.env.NODE_ENV === 'development' && (
           <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
@@ -233,7 +237,7 @@ export function EmailConfirmationModal({
               <strong>Development Mode</strong>
             </p>
             <p className="text-xs text-yellow-700 mb-2">
-              Check Inbucket for confirmation email:
+              Check Mailpit for confirmation email:
             </p>
             <a
               href="http://127.0.0.1:54324"
@@ -241,14 +245,10 @@ export function EmailConfirmationModal({
               rel="noopener noreferrer"
               className="text-blue-600 underline text-sm hover:text-blue-800"
             >
-              Open Inbucket Mail Server →
+              Open Mailpit Mail Server →
             </a>
           </div>
         )}
-
-        <p className="text-xs text-gray-500 text-center mt-6">
-          Didn't receive an email? Check your spam folder or click "Resend Email" above.
-        </p>
       </div>
     </div>
   )

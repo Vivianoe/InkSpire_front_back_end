@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 export default function ConfirmEmailPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [status, setStatus] = useState<'loading' | 'success' | 'success_closing' | 'error'>('loading')
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function ConfirmEmailPage() {
         }
 
         // Success! Email is confirmed
-        console.log('✓ Email confirmed successfully:', user.email)
+        // console.log('✓ Email confirmed successfully:', user.email)
         setStatus('success')
 
         // Write localStorage signal for original tab
@@ -94,29 +94,6 @@ export default function ConfirmEmailPage() {
 
         // Brief delay to ensure localStorage write completes
         await new Promise(resolve => setTimeout(resolve, 500))
-
-        // Always attempt to close the tab
-        setTimeout(() => {
-          window.close()
-
-          // If we're still here after 500ms, the close failed
-          setTimeout(() => {
-            const ackSignal = localStorage.getItem('inkspire-email-confirmation-ack')
-
-            if (ackSignal) {
-              // Original tab exists and acknowledged - show message
-              setStatus('success_closing')
-              // Try closing again after 2s
-              setTimeout(() => window.close(), 2000)
-            } else {
-              // Original tab is gone - redirect to signin
-              localStorage.setItem('inkspire-email-confirmed-redirect', 'true')
-              localStorage.removeItem('inkspire-email-confirmation-signal')
-              router.push('/signin')
-            }
-          }, 500)
-        }, 1000) // Show success message for 1s first
-
       } catch (err) {
         console.error('Confirmation error:', err)
         setStatus('error')
@@ -170,27 +147,14 @@ export default function ConfirmEmailPage() {
         {status === 'success' && (
           <div className="text-center">
             <div className="text-green-500 text-6xl mb-4">✓</div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">
               Email Confirmed!
             </h2>
-            <p className="text-gray-600">
-              This tab will close automatically in a moment...
-            </p>
-          </div>
-        )}
-
-        {status === 'success_closing' && (
-          <div className="text-center">
-            <div className="text-green-500 text-6xl mb-4">✓</div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              Email Confirmed!
-            </h2>
-            <p className="text-gray-600 mb-4">
-              You can close this tab now.
-            </p>
-            <p className="text-sm text-gray-500">
-              This tab will close automatically in a moment...
-            </p>
+            <div className="mb-4">
+              <p className="text-gray-600"> 
+                Please close this tab and return to your original tab to continue the sign up process.
+              </p>
+            </div>
           </div>
         )}
 

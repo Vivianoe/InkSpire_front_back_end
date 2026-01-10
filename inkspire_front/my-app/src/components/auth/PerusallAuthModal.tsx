@@ -217,11 +217,11 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
       <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">
-            {step === 'set-credentials' && 'Connect to Perusall'}
-            {step === 'validate-credentials' && 'Validating Credentials...'}
+            {step === 'set-credentials' && 'Add Perusall Credentials'}
+            {step === 'validate-credentials' && 'Validating Perusall Credentials...'}
             {step === 'select-courses' && 'Select Courses to Import'}
             {step === 'import-courses' && 'Importing Courses...'}
-            {step === 'complete-integration' && 'Integration Complete!'}
+            {step === 'complete-integration' && ''}
           </h2>
           {/* Show close button if allowClose is true OR in development mode */}
           {(allowClose || process.env.NODE_ENV === 'development') && (
@@ -306,10 +306,6 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
         {/* Step 3: Course Selection */}
         {step === 'select-courses' && (
           <div className="space-y-4">
-            <p className="text-sm text-gray-600 mb-4">
-              Select the courses you want to import from Perusall:
-            </p>
-
             {courses.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 No courses found in your Perusall account.
@@ -399,7 +395,7 @@ export function AuthModal({ isOpen, onClose, allowClose = false }: AuthModalProp
             <h3 className="text-xl font-semibold text-gray-900 mb-2">
               Courses Imported Successfully!
             </h3>
-            <p className="text-gray-600">
+            <p className="text-gray-700">
               Redirecting to your dashboard...
             </p>
           </div>

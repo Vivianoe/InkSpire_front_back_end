@@ -16,6 +16,7 @@ interface AuthContextType {
   showEmailConfirmedModal: boolean
   emailConfirmed: boolean
   coursesRefreshTrigger: number
+  pendingEmail: string | null
   signIn: (email: string, password: string) => Promise<{ error?: AuthError }>
   signUp: (email: string, password: string, name: string) => Promise<{ error?: AuthError }>
   signOut: () => Promise<{ error?: AuthError }>
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [showEmailConfirmedModal, setShowEmailConfirmedModal] = useState(false)
   const [emailConfirmed, setEmailConfirmed] = useState(false)
   const [coursesRefreshTrigger, setCoursesRefreshTrigger] = useState(0)
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
   
   // Refs to track modal states without causing re-renders in localStorage checking
   const modalStateRef = useRef({
@@ -93,13 +95,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const currentConfirmationStatus = session.user.email_confirmed_at !== null
           const previouslyUnconfirmed = showEmailConfirmationModal  // Use modal state instead
 
-          // If the modal is showing AND email is now confirmed, transition
-          if (previouslyUnconfirmed && currentConfirmationStatus) {
-            console.log('✓ Email confirmation detected - transitioning modals')
-            setEmailConfirmed(true)
-            setShowEmailConfirmationModal(false)
-            setShowEmailConfirmedModal(true)
-          }
+          // Clear pending email when email is confirmed
+        if (previouslyUnconfirmed && currentConfirmationStatus) {
+          console.log('✓ Email confirmation detected - transitioning modals')
+          setEmailConfirmed(true)
+          setShowEmailConfirmationModal(false)
+          setShowEmailConfirmedModal(true)
+          setPendingEmail(null)
+        }
 
           // Always sync the emailConfirmed state with actual session
           setEmailConfirmed(currentConfirmationStatus)
@@ -111,6 +114,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setShowEmailConfirmedModal(false)
           setEmailConfirmed(false)
           setShowPerusallModal(false)
+          setPendingEmail(null)
         }
       }
     )
@@ -126,13 +130,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const signal = localStorage.getItem('inkspire-email-confirmation-signal')
       if (signal) {
         try {
-          const data = JSON.parse(signal)
-          console.log('✓ Email confirmation signal detected:', data)
+          // const data = JSON.parse(signal)
+          // console.log('✓ Email confirmation signal detected:', data)
           
           // IMPORTANT: Only process if this is NOT the confirmation page
           const isConfirmationPage = window.location.pathname.includes('/auth/confirm')
           if (isConfirmationPage) {
-            console.log('🚫 This is confirmation page, ignoring signal')
+            // console.log('🚫 This is confirmation page, ignoring signal')
             return
           }
           
@@ -144,7 +148,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const remainingSignal = localStorage.getItem('inkspire-email-confirmation-signal')
           if (remainingSignal) {
             localStorage.removeItem('inkspire-email-confirmation-signal')
-            console.log('🗑️ Removed signal after delay')
+            // console.log('🗑️ Removed signal after delay')
           }
           
           // Send acknowledgment
@@ -162,11 +166,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
           
           if (currentUser?.email_confirmed_at) {
-            console.log('✓ User email confirmed, showing modal')
+            // console.log('✓ User email confirmed, showing modal')
             
             // Show confirmed modal if not already showing (using refs to avoid re-renders)
             if (!modalStateRef.current.showEmailConfirmedModal && !modalStateRef.current.showPerusallModal) {
-              console.log('✓ Showing EmailConfirmedModal from localStorage signal')
+              // console.log('✓ Showing EmailConfirmedModal from localStorage signal')
               setShowEmailConfirmedModal(true)
             }
           } else {
@@ -238,6 +242,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signUp = async (email: string, password: string, name: string) => {
     try {
+      // Store the email for the confirmation modal
+      setPendingEmail(email)
+      
       const response = await fetch('/api/users/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -366,6 +373,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     showEmailConfirmedModal,
     emailConfirmed,
     coursesRefreshTrigger,
+    pendingEmail,
     signIn,
     signUp,
     signOut,
@@ -385,7 +393,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       <EmailConfirmationModal
         isOpen={showEmailConfirmationModal}
         onClose={closeEmailConfirmationModal}
-        email={user?.email || null}
+        email={user?.email || pendingEmail || null}
         allowClose={process.env.NODE_ENV === 'development'}
       />
 
