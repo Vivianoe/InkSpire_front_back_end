@@ -703,7 +703,7 @@ export default function SessionCreationPage() {
             <div className={styles.formRow}>
               <div className={styles.formGroup}>
                 <label htmlFor="sessionTitle" className={styles.label}>
-                  Session Title (Optional)
+                  Session Title
                 </label>
                 <input
                   id="sessionTitle"

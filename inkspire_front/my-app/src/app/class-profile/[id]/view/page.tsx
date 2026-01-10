@@ -1081,7 +1081,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
   };
 
-  const startSessionLabel = 'Start Session';
+  const startSessionLabel = 'Upload Readings';
 
   const handleBackToDashboard = () => {
     router.push('/');

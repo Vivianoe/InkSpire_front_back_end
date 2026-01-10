@@ -78,10 +78,27 @@ def login_user(req: UserLoginRequest, db: Session = Depends(get_db)):
         refresh_token = supabase_response["refresh_token"]
         supabase_user = supabase_response["user"]
 
-        # Get user from our database
-        user = get_user_by_supabase_id(db, uuid.UUID(supabase_user.id))
+        # Get (or sync) user from our database
+        supabase_user_id = uuid.UUID(supabase_user.id)
+        user = get_user_by_supabase_id(db, supabase_user_id)
         if not user:
-            raise HTTPException(status_code=404, detail="User not found in database")
+            existing_by_email = get_user_by_email(db, req.email)
+            if existing_by_email:
+                existing_by_email.supabase_user_id = supabase_user_id
+                db.add(existing_by_email)
+                db.commit()
+                db.refresh(existing_by_email)
+                user = existing_by_email
+            else:
+                name = getattr(supabase_user, "user_metadata", None) or {}
+                resolved_name = name.get("name") or req.email.split("@")[0]
+                user = create_user_from_supabase(
+                    db=db,
+                    supabase_user_id=supabase_user_id,
+                    email=req.email,
+                    name=resolved_name,
+                    role="instructor",
+                )
 
         return LoginResponse(
             user=UserResponse(

@@ -272,7 +272,7 @@ export default function ReadingUploadPage() {
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
               disabled={uploading || readings.length === 0}
             >
-              Create Session →
+              Session Setup →
             </button>
           </div>
         </div>

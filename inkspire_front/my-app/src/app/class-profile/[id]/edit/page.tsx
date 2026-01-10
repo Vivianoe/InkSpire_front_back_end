@@ -94,32 +94,32 @@ const DEFAULT_CLASS_BACKGROUND =
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
-    disciplineName: 'Computer Science',
-    department: 'Department of Computer and Information Science',
+    disciplineName: 'Education',
+    department: 'Graduate School of Education',
     fieldDescription:
       'Explores computational theory, software engineering practices, and data-driven inquiry within education research contexts.',
   },
   courseInfo: {
-    courseName: 'Introduction to Python',
-    courseCode: 'CS101',
+    courseName: 'Learning Sciences: Past, Present, and Future',
+    courseCode: 'EDUC 6144',
     description:
-      'This is a beginner-level course focusing on Python programming basics for college students. The course covers the fundamentals of Python programming, including syntax, data structures, and basic algorithms.',
-    credits: '3',
+      'This course is a survey of the kinds of theories, methods, and applications through which educational researchers understand learning and how to improve it. The course is designed to provide information about how the field of the learning sciences emerged, has evolved, and is growing to address current and future learning needs. ',
+    credits: '1',
     prerequisites: 'None required',
     learningObjectives:
-      'Equip graduate researchers with the ability to design, implement, and evaluate Python-based workflows for education data analysis.',
-    assessmentMethods: 'Project-based assessments, annotated code portfolios, collaborative labs, and reflective participation.',
+      'Investigating the roots of the learning sciences field and how it has evolved',
+    assessmentMethods: 'In-class participation, short writing assignments, and a final exam.',
     deliveryMode: 'in-person',
   },
   classInfo: {
-    semester: 'Fall',
-    year: '2024',
+    semester: 'Spring',
+    year: '2026',
     section: 'A',
     meetingDays: 'MW',
     meetingTime: '10:00 AM - 11:30 AM',
     location: 'Engineering Building, Room 210',
     enrollment: '30',
-    background: 'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.',
+    background: 'Cohort includes graduate students from education discipline.',
     priorKnowledge: 'mixed',
   },
   generatedProfile: undefined,

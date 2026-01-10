@@ -771,7 +771,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div className={styles.loadingSpinner}>Loading scaffolds...</div>
@@ -787,7 +787,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div style={{ color: '#dc2626', textAlign: 'center' }}>
@@ -833,9 +833,9 @@ ${scaffold.text || 'No scaffold text available'}
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
           <div className={styles.formCard}>
-            <div className={styles.formHeader}>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
-            </div>
+            {/* <div className={styles.formHeader}>
+              <h1 className={styles.formTitle}>Reading Scaffolds</h1> 
+            </div>*/}
             
             {/* Session Information Form */}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
@@ -875,6 +875,20 @@ ${scaffold.text || 'No scaffold text available'}
                 rows={3}
               />
             </div>
+
+            {/* The number of scaffolds you want to generate; to be changed to a number input to control the generation workflow */}
+            <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
+              <div className={styles.labelWithIcon}>
+                <label className={uiStyles.fieldLabel}>The number of scaffolds you want to generate</label>
+              </div>
+              <textarea
+                value={assignmentGoals}
+                onChange={(e) => setAssignmentGoals(e.target.value)}
+                className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
+                placeholder="Input the number of scaffolds you want to generate."
+                rows={2}
+              />
+            </div>
             
             {/* Session Info Display */}
             {/*
@@ -898,6 +912,20 @@ ${scaffold.text || 'No scaffold text available'}
             </div>
             */}
 
+            
+
+            {/* Generate Scaffolds Button */}
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+              <button
+                onClick={handleGenerateScaffolds}
+                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                disabled={generating}
+                style={{ width: '100%', maxWidth: '300px' }}
+              >
+                {generating ? 'Generating...' : 'Generate Scaffolds'}
+              </button>
+            </div>
+
             {/* Navigation buttons */}
             {enableNavigation && navigationData && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
@@ -919,18 +947,6 @@ ${scaffold.text || 'No scaffold text available'}
                 </button>
               </div>
             )}
-
-            {/* Generate Scaffolds Button */}
-            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-              <button
-                onClick={handleGenerateScaffolds}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                disabled={generating}
-                style={{ width: '100%', maxWidth: '300px' }}
-              >
-                {generating ? 'Generating...' : 'Generate Scaffolds'}
-              </button>
-            </div>
 
             {/* Back button */}
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>

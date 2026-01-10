@@ -37,6 +37,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [instructorId, setInstructorId] = useState<string | null>(null);
+  console.log('DASHBOARD PAGE LOADED - Create New Course button should exist');
 
   const getUserFirstName = () => {
     if (!user) return 'Instructor'
@@ -66,6 +67,7 @@ export default function DashboardPage() {
     if (user && !showPerusallModal) {
       // User is signed in - load their courses
       loadCourses();
+      
     } else if (!user) {
       // User signed out - clear all course-related state
       setCourses([]);
@@ -162,11 +164,13 @@ export default function DashboardPage() {
     }
   };
 
-  // const handleNewClass = () => {
-  //   // For new class, we need to create course first, so use a temporary course ID
-  //   // In a real app, you might want to create the course first or use a different flow
-  //   router.push(`/courses/new/class-profiles/new/edit`);
-  // };
+  const handleNewClass = () => {
+    const params = new URLSearchParams();
+    if (instructorId) {
+      params.set('instructorId', instructorId);
+    }
+    router.push(`/courses/new/class-profiles/new/edit${params.toString() ? `?${params.toString()}` : ''}`);
+  };
 
   return (
     <AuthGuard>
@@ -266,15 +270,16 @@ export default function DashboardPage() {
             </>
           )}
 
-          {/* <div className={styles.newClassButtonContainer}>
+          <div className={styles.newClassButtonContainer}>
             <button
               className={styles.newClassButton}
               onClick={handleNewClass}
+              disabled={!user || !instructorId}
             >
               <span className={styles.plusIcon}>+</span>
-              New Class Profile
+              Create New Class Profile
             </button>
-          </div> */}
+          </div>
         </div>
       </div>
     </AuthGuard>
