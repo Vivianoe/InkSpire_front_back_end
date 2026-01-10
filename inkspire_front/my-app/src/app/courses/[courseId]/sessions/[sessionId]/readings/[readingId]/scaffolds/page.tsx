@@ -880,7 +880,7 @@ ${scaffold.text || 'No scaffold text available'}
           </div> 
 
           {/* Navigation buttons (outside card, below it) */}
-          {enableNavigation && navigationData && (
+          {/* {enableNavigation && navigationData && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }}>
               <button
                 onClick={() => navigateToReading('prev')}
@@ -899,7 +899,7 @@ ${scaffold.text || 'No scaffold text available'}
                 Next Reading →
               </button>
             </div>
-          )}
+          )} */}
         </div>
 
         {/* Middle: PDF content */}
@@ -1167,43 +1167,76 @@ ${scaffold.text || 'No scaffold text available'}
                     </div>
                   </div>
                 </div>
-                <div className={styles.footerPrimary}>
-                  <button
-                    className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.publishButton}`}
-                    type="button"
-                    onClick={() => {
-                      const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-                      if (acceptedScaffolds.length === 0) {
-                        alert('No accepted scaffolds to download.');
-                        return;
-                      }
-                      const md = generateMarkdown(acceptedScaffolds);
-                      setMdContent(md);
-                      setShowDownloadModal(true);
-                    }}
-                    disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-                    style={{ marginRight: '0.75rem' }}
-                  >
-                    Download / Export
-                  </button>
-                  <button
-                    className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.publishButton}`}
-                    type="button"
-                    onClick={() => {
-                      const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-                      if (acceptedScaffolds.length === 0) {
-                        alert('No accepted scaffolds to publish.');
-                        return;
-                      }
-                      setShowPublishModal(true);
-                    }}
-                    disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-                  >
-                    Publish Accepted Scaffolds
-                  </button>
-                </div>
+                {/* Actions moved to floating dock */}
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Dock (bottom bar) */}
+      <div className={styles.floatingDock} role="navigation" aria-label="Reading scaffolds dock">
+        <div className={styles.floatingDockInner}>
+          {/* Left: browsing controls */}
+          <div className={styles.dockGroupLeft} aria-label="Browsing controls">
+            {enableNavigation && navigationData ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigateToReading('prev')}
+                  disabled={!canGoPrev}
+                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                  style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
+                >
+                  ← Previous Reading
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigateToReading('next')}
+                  disabled={!canGoNext}
+                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                  style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
+                >
+                  Next Reading →
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          {/* Right: output controls */}
+          <div className={styles.dockGroupRight} aria-label="Task completion controls">
+            <button
+              className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.publishButton}`}
+              type="button"
+              onClick={() => {
+                const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+                if (acceptedScaffolds.length === 0) {
+                  alert('No accepted scaffolds to download.');
+                  return;
+                }
+                const md = generateMarkdown(acceptedScaffolds);
+                setMdContent(md);
+                setShowDownloadModal(true);
+              }}
+              disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+            >
+              Download / Export
+            </button>
+            <button
+              className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.publishButton}`}
+              type="button"
+              onClick={() => {
+                const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+                if (acceptedScaffolds.length === 0) {
+                  alert('No accepted scaffolds to publish.');
+                  return;
+                }
+                setShowPublishModal(true);
+              }}
+              disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+            >
+              Publish Accepted Scaffolds
+            </button>
           </div>
         </div>
       </div>
