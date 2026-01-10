@@ -61,6 +61,22 @@ const createInitialFormState = () => ({
   uploadedFile: null as File | null
 });
 
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64 || '');
+      } else {
+        reject(new Error('Unable to read file'));
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+    reader.readAsDataURL(file);
+  });
+
 type SelectedReading = {
   id: string;
   title?: string;
@@ -131,6 +147,65 @@ export default function CreateNewReadingTaskPage() {
   const [selectedInstructorId, setSelectedInstructorId] = useState<string | null>(urlInstructorId || null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const currentReading = selectedReadings[currentReadingIndex] ?? null;
+
+  const uploadPdfToReadingApi = useCallback(
+    async (file: File) => {
+      const courseIdForRequest = selectedCourseId ?? urlCourseId ?? DEFAULT_COURSE_ID;
+      const instructorIdForRequest = selectedInstructorId ?? urlInstructorId ?? DEFAULT_INSTRUCTOR_ID;
+
+      if (!courseIdForRequest || !instructorIdForRequest) {
+        throw new Error('Missing courseId or instructorId for reading upload.');
+      }
+
+      const base64 = await fileToBase64(file);
+      const title = file.name.replace(/\.pdf$/i, '');
+
+      const response = await fetch(`/api/courses/${courseIdForRequest}/readings/batch-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructor_id: instructorIdForRequest,
+          readings: [
+            {
+              title,
+              source_type: 'uploaded',
+              content_base64: base64,
+              original_filename: file.name,
+            },
+          ],
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || 'Failed to upload reading PDF.');
+      }
+
+      const created = Array.isArray(data?.readings) ? data.readings[0] : null;
+      const createdReadingId = created?.id as string | undefined;
+      if (!createdReadingId) {
+        throw new Error('Reading upload succeeded but no reading id was returned.');
+      }
+
+      setSelectedReadings([
+        {
+          id: createdReadingId,
+          title: created?.title ?? title,
+          name: created?.title ?? title,
+          filePath: created?.file_path,
+          sourceType: created?.source_type ?? 'uploaded',
+          courseId: courseIdForRequest,
+          instructorId: instructorIdForRequest,
+          mimeType: 'application/pdf',
+          order: 0,
+        },
+      ]);
+      setCurrentReadingIndex(0);
+      setSelectedCourseId(courseIdForRequest);
+      setSelectedInstructorId(instructorIdForRequest);
+    },
+    [selectedCourseId, selectedInstructorId, urlCourseId, urlInstructorId]
+  );
   const persistReadingSelection = useCallback(
     (readings: SelectedReading[], readingIndex: number, nextSessionId?: string | null) => {
       if (typeof window === 'undefined') {
@@ -320,26 +395,34 @@ export default function CreateNewReadingTaskPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       if (isPdf) {
-        // TODO: Upload PDF to backend via /api/upload/pdf
         setFormData(prev => ({ ...prev, uploadedFile: file }));
+        uploadPdfToReadingApi(file).catch((error) => {
+          console.error('Failed to upload PDF to reading API', error);
+        });
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (isPdf) {
+        setFormData(prev => ({ ...prev, uploadedFile: file }));
+        uploadPdfToReadingApi(file).catch((error) => {
+          console.error('Failed to upload PDF to reading API', error);
+        });
       }
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      if (isPdf) {
-        // TODO: Upload PDF to backend via /api/upload/pdf
-        setFormData(prev => ({ ...prev, uploadedFile: file }));
-      }
-    }
+    handleFileChange(e);
   };
 
   const handleAdjustReadingSelection = () => {
@@ -807,7 +890,7 @@ export default function CreateNewReadingTaskPage() {
       const res = await fetch(generateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestPayload),
+        body: JSON.stringify(payload),
       });
       console.log('res:', res);
       
@@ -921,7 +1004,7 @@ export default function CreateNewReadingTaskPage() {
             borderColor: '#6b7280',
           };
         }
-      }).filter((card): card is NonNullable<typeof card> => card !== null); // Filter out null cards
+      }).filter((card: any): card is NonNullable<typeof card> => card !== null); // Filter out null cards
       
       console.log('[Frontend] Total cards created:', cards.length);
       
@@ -1723,7 +1806,6 @@ export default function CreateNewReadingTaskPage() {
                     }))}
                   sessionId={sessionId || undefined}
                   courseId={urlCourseId ?? currentReading?.courseId ?? selectedCourseId ?? DEFAULT_COURSE_ID}
-                  readingId={currentReading?.id}
                 />
               </div>
             ) : (

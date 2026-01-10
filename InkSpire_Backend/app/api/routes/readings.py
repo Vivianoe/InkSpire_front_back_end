@@ -122,6 +122,7 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=temp_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
                 reading_id = reading.id
                 
@@ -233,7 +234,16 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=final_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
+            
+            # If perusall_reading_id is provided and we have assignment context, create Perusall mapping
+            if hasattr(reading_item, "perusall_reading_id") and reading_item.perusall_reading_id:
+                # Check if we need to create a Perusall mapping
+                # We need perusall_course_id and perusall_assignment_id to create mapping
+                # For now, we'll store the perusall_reading_id in the reading table
+                # The mapping will be created when the assignment is known
+                pass
             
             # Refresh reading to ensure it's up to date
             db.refresh(reading)
