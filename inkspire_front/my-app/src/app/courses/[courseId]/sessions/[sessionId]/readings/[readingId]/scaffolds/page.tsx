@@ -244,7 +244,8 @@ export default function ScaffoldPage() {
           const sKey = keyForId(s.id);
           if (sKey === targetKey) {
             let nextStatus = s.status;
-            if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
+            // Backend historically used both "approved" and "accepted"
+            if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') nextStatus = 'ACCEPTED';
             else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
             else if (normalizedStatus === 'pending' || normalizedStatus === 'draft' || normalizedStatus === 'edit_pending') nextStatus = 'IN PROGRESS';
 
@@ -266,7 +267,10 @@ export default function ScaffoldPage() {
         return next;
       });
 
-      if (manualEditOpenId === targetKey && (normalizedStatus === 'approved' || normalizedStatus === 'rejected')) {
+      if (
+        manualEditOpenId === targetKey &&
+        (normalizedStatus === 'approved' || normalizedStatus === 'accepted' || normalizedStatus === 'rejected')
+      ) {
         setManualEditOpenId(null);
       }
 
@@ -589,21 +593,19 @@ export default function ScaffoldPage() {
 
   // Process scaffolds for display
   const processedScaffolds = scaffolds.map((scaffold, index) => {
-    // Map status: preserve ACCEPTED/REJECTED, convert pending/approved/rejected to display format
-    let displayStatus: string;
-    if (scaffold.status === 'ACCEPTED' || scaffold.status === 'REJECTED' || scaffold.status === 'IN PROGRESS') {
-      // Already in display format, use as-is
-      displayStatus = scaffold.status;
-    } else if (scaffold.status === 'pending' || scaffold.status === 'draft' || scaffold.status === 'edit_pending') {
-      displayStatus = 'IN PROGRESS';
-    } else if (scaffold.status === 'approved') {
-      displayStatus = 'ACCEPTED';
-    } else if (scaffold.status === 'rejected') {
-      displayStatus = 'REJECTED';
-    } else {
-      displayStatus = 'IN PROGRESS';
-    }
-    
+    const normalizedStatus = (typeof scaffold.status === 'string' ? scaffold.status : '').toLowerCase();
+    const displayStatus =
+      normalizedStatus === 'approved' || normalizedStatus === 'accepted'
+        ? 'ACCEPTED'
+        : normalizedStatus === 'rejected'
+          ? 'REJECTED'
+          : normalizedStatus === 'pending' ||
+            normalizedStatus === 'draft' ||
+            normalizedStatus === 'edit_pending' ||
+            normalizedStatus === 'in progress' ||
+            normalizedStatus === 'in_progress'
+            ? 'IN PROGRESS'
+            : 'IN PROGRESS';
     const processed = {
       ...scaffold,
       number: index + 1,
@@ -611,7 +613,7 @@ export default function ScaffoldPage() {
       type: 'Scaffold',
       backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][index % 5],
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
-      status: displayStatus
+      status: displayStatus,
     };
     return processed;
   });
