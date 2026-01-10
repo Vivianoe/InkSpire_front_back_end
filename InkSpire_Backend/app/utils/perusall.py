@@ -23,7 +23,7 @@ missing = [name for name, value in REQUIRED_ENV_VARS.items() if not value]
 if missing:
     raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
 
-PERUSALL_BASE_URL = "https://app.perusall.com/api/v1"
+PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 
 
 def build_comment_text(item: Dict[str, Any]) -> str:
