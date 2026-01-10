@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 const MOCK_COURSE_ID = '00000000-0000-4000-8000-000000000111';
@@ -41,12 +42,19 @@ type SessionListItem = {
   course_id: string;
   week_number: number;
   title?: string;
+  perusall_assignment_id?: string;
   current_version_id?: string;
   status: string;
   created_at?: string;
   updated_at?: string;
   current_version?: SessionVersionData;
   reading_ids: string[];
+};
+
+type PerusallAssignment = {
+  id: string;
+  name: string;
+  documents?: Array<{ _id?: string; id?: string }>;
 };
 
 const formatFileSize = (size: number) => {
@@ -73,8 +81,11 @@ export default function SessionCreationPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [perusallAssignments, setPerusallAssignments] = useState<PerusallAssignment[]>([]);
+  const [loadingPerusallAssignments, setLoadingPerusallAssignments] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'select' | 'create'>('select'); // 'select' or 'create'
+  const [selectedPerusallAssignmentId, setSelectedPerusallAssignmentId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'select' | 'create' | 'view'>('select'); // 'select', 'create', or 'view'
   const [sessionTitle, setSessionTitle] = useState<string>('');
   const [weekNumber, setWeekNumber] = useState<number>(1);
   const [sessionDescription, setSessionDescription] = useState<string>('');
@@ -172,6 +183,45 @@ export default function SessionCreationPage() {
     }
   }, [resolvedCourseId, resolvedInstructorId]);
 
+  const fetchPerusallAssignments = useCallback(async () => {
+    setLoadingPerusallAssignments(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${resolvedCourseId}/perusall/assignments`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        // If Perusall is not configured, show a helpful message but don't block
+        const detail = data?.detail || data?.message || 'Failed to load Perusall assignments.';
+        if (response.status === 400 && typeof detail === 'string' && detail.includes('Perusall course ID')) {
+          setPerusallAssignments([]);
+          console.log('Perusall not configured for this course:', detail);
+          return;
+        }
+        throw new Error(detail);
+      }
+
+      const assignments = Array.isArray(data?.assignments) ? data.assignments : [];
+      setPerusallAssignments(assignments);
+    } catch (err) {
+      console.error('Perusall assignments fetch error:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to load Perusall assignments.');
+      }
+    } finally {
+      setLoadingPerusallAssignments(false);
+    }
+  }, [resolvedCourseId]);
+
   const fetchSessions = useCallback(async () => {
     setLoadingSessions(true);
     setError(null);
@@ -187,6 +237,7 @@ export default function SessionCreationPage() {
             course_id: item.course_id,
             week_number: item.week_number,
             title: item.title,
+            perusall_assignment_id: item.perusall_assignment_id,
             current_version_id: item.current_version_id,
             status: item.status || 'draft',
             created_at: item.created_at,
@@ -196,14 +247,8 @@ export default function SessionCreationPage() {
           }))
         : [];
       setSessions(sessionsList);
-      // If no sessions exist, switch to create mode
-      if (sessionsList.length === 0) {
-        setMode('create');
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load sessions.');
-      // If error loading sessions, allow creating new session
-      setMode('create');
     } finally {
       setLoadingSessions(false);
     }
@@ -253,8 +298,9 @@ export default function SessionCreationPage() {
     }
   };
 
-  const handleCreateNew = () => {
+  const handleCreateNew = (perusallAssignmentId?: string) => {
     setSelectedSessionId(null);
+    setSelectedPerusallAssignmentId(perusallAssignmentId || null);
     setSessionTitle('');
     setWeekNumber(1);
     setSessionDescription('');
@@ -264,6 +310,20 @@ export default function SessionCreationPage() {
     setOriginalDraft(null);
     setCurrentVersion(null);
     setMode('create');
+  };
+
+  const handleSelectAssignment = (assignmentId: string) => {
+    // Check if a session already exists for this assignment
+    const existingSession = sessions.find(s => s.perusall_assignment_id === assignmentId);
+    if (existingSession) {
+      // Open existing session in view/edit mode
+      setSelectedSessionId(existingSession.id);
+      setMode('view');
+      loadExistingSession(existingSession.id);
+    } else {
+      // Create new session for this assignment
+      handleCreateNew(assignmentId);
+    }
   };
 
   // Check if draft is dirty (has changes)
@@ -348,10 +408,11 @@ export default function SessionCreationPage() {
   useEffect(() => {
     fetchReadings();
     if (!urlSessionId) {
-      // Only fetch sessions list if not loading existing session
+      // Fetch Perusall assignments and sessions list if not loading existing session
+      fetchPerusallAssignments();
       fetchSessions();
     }
-  }, [fetchReadings, fetchSessions, urlSessionId]);
+  }, [fetchReadings, fetchSessions, fetchPerusallAssignments, urlSessionId]);
 
   const handleCreateSession = async () => {
     if (!selectedReadingIds.length) {
@@ -401,7 +462,7 @@ export default function SessionCreationPage() {
           setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
         }
       } else {
-        // Create new session
+        // Create new session with perusall_assignment_id
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
@@ -409,6 +470,7 @@ export default function SessionCreationPage() {
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
+          perusall_assignment_id: selectedPerusallAssignmentId || undefined,
         };
 
         const response = await fetch(`/api/courses/${resolvedCourseId}/sessions`, {
@@ -486,7 +548,7 @@ export default function SessionCreationPage() {
           setSuccess('Session ready. Navigating to first reading...');
         }
       } else {
-        // Create new session
+        // Create new session with perusall_assignment_id
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
@@ -494,6 +556,7 @@ export default function SessionCreationPage() {
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
+          perusall_assignment_id: selectedPerusallAssignmentId || undefined,
         };
 
         const response = await fetch(`/api/courses/${resolvedCourseId}/sessions`, {
@@ -634,53 +697,55 @@ export default function SessionCreationPage() {
           <section className={styles.selectionSection}>
             <div className={styles.selectionHeader}>
               <div>
-                <h2 className={styles.sectionTitle}>Select Existing Session</h2>
+                <h2 className={styles.sectionTitle}>Select Perusall Assignment</h2>
                 <p className={styles.sectionHelper}>
-                  Choose an existing session to continue, or create a new one.
+                  Choose a Perusall assignment to create or open a session. First time creates a new session, second time opens existing session.
                 </p>
               </div>
-              <button
-                onClick={handleCreateNew}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-              >
-                Create New Session
-              </button>
             </div>
 
             <div className={styles.readingList}>
-              {loadingSessions ? (
-                <div className={styles.emptyState}>Loading sessions…</div>
-              ) : sessions.length === 0 ? (
+              {loadingPerusallAssignments ? (
+                <div className={styles.emptyState}>Loading Perusall assignments…</div>
+              ) : perusallAssignments.length === 0 ? (
                 <div className={styles.emptyState}>
-                  No sessions found. Click "Create New Session" to get started.
+                  No Perusall assignments found. Please configure Perusall integration for this course.
                 </div>
               ) : (
-                sessions.map(session => {
-                  const isSelected = selectedSessionId === session.id;
+                perusallAssignments.map(assignment => {
+                  const existingSession = sessions.find(s => s.perusall_assignment_id === assignment.id);
+                  const isSelected = selectedPerusallAssignmentId === assignment.id;
                   return (
                     <div
-                      key={session.id}
+                      key={assignment.id}
                       className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                      onClick={() => setSelectedSessionId(session.id)}
+                      onClick={() => handleSelectAssignment(assignment.id)}
                       style={{ cursor: 'pointer' }}
                     >
                       <div className={styles.readingMeta}>
                         <div>
                           <p className={styles.readingName}>
-                            {session.title || `Week ${session.week_number} Session`}
-                          </p>
-                          <p className={styles.readingDetails}>
-                            Week {session.week_number} · {session.reading_ids.length} reading{session.reading_ids.length !== 1 ? 's' : ''}
-                            {session.created_at && (
-                              <> · {new Date(session.created_at).toLocaleDateString()}</>
+                            {assignment.name}
+                            {existingSession && (
+                              <span style={{
+                                marginLeft: '8px',
+                                padding: '2px 8px',
+                                backgroundColor: '#10b981',
+                                color: 'white',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: '500'
+                              }}>
+                                ✓ Session Exists
+                              </span>
                             )}
                           </p>
-                          {session.current_version?.session_info_json?.description && (
-                            <p className={styles.readingSecondaryDetail} style={{ marginTop: '0.5rem' }}>
-                              {session.current_version.session_info_json.description.substring(0, 100)}
-                              {session.current_version.session_info_json.description.length > 100 ? '...' : ''}
-                            </p>
-                          )}
+                          <p className={styles.readingDetails}>
+                            {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
+                            {existingSession && (
+                              <> · {existingSession.reading_ids.length} reading{existingSession.reading_ids.length !== 1 ? 's' : ''}</>
+                            )}
+                          </p>
                         </div>
                       </div>
                       <div className={styles.readingActions}>
@@ -688,18 +753,60 @@ export default function SessionCreationPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleUseSession();
+                            handleSelectAssignment(assignment.id);
                           }}
                           className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
-                          disabled={!isSelected}
                         >
-                          Use This Session
+                          {existingSession ? 'Open Session' : 'Create Session'}
                         </button>
                       </div>
                     </div>
                   );
                 })
               )}
+            </div>
+          </section>
+        )}
+
+        {!isLoadingExistingSession && mode === 'view' && (
+          <section className={styles.selectionSection}>
+            <div className={styles.selectionHeader}>
+              <div>
+                <h2 className={styles.sectionTitle}>View Session</h2>
+                <p className={styles.sectionHelper}>
+                  Viewing existing session. Click "Edit" to make changes.
+                </p>
+              </div>
+              <button
+                onClick={() => setMode('create')}
+                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+              >
+                Edit Session
+              </button>
+              <button
+                onClick={() => setMode('select')}
+                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              >
+                Back to Assignments
+              </button>
+            </div>
+            {/* Display session data in read-only mode */}
+            <div className={styles.readingList}>
+              <div className={styles.readingCard}>
+                <div className={styles.readingMeta}>
+                  <div>
+                    <p className={styles.readingName}>{sessionTitle || 'Untitled Session'}</p>
+                    <p className={styles.readingDetails}>
+                      Week {weekNumber} · {selectedReadingIds.length} reading{selectedReadingIds.length !== 1 ? 's' : ''}
+                    </p>
+                    {sessionDescription && (
+                      <p className={styles.readingSecondaryDetail} style={{ marginTop: '0.5rem' }}>
+                        {sessionDescription}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         )}
