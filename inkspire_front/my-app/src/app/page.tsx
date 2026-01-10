@@ -5,7 +5,7 @@ import styles from "./page.module.css";
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthGuard } from '@/components/auth/AuthGuard';
-import { useAuth } from '@/contexts/AuthContext';
+import { ModalFlow, useAuth } from '@/contexts/AuthContext';
 import { CourseCard } from '@/components/course/CourseCard';
 import { supabase } from '@/lib/supabase/client';
 
@@ -31,7 +31,7 @@ interface ApiCourse {
 export default function DashboardPage() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, showPerusallModal, coursesRefreshTrigger } = useAuth();
+  const { user, currentModalFlow, coursesRefreshTrigger } = useAuth();
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +63,8 @@ export default function DashboardPage() {
   useEffect(() => {
     testBackendConnection();
 
-    if (user && !showPerusallModal) {
-      // User is signed in - load their courses
+    if (user && currentModalFlow === ModalFlow.None) {
+      // User is signed in and no modals are showing - load their courses
       loadCourses();
     } else if (!user) {
       // User signed out - clear all course-related state
@@ -73,7 +73,7 @@ export default function DashboardPage() {
       setError(null);
       setLoading(false);
     }
-  }, [pathname, user, showPerusallModal, coursesRefreshTrigger]); // Reload when pathname changes, user becomes available, modal closes, or trigger changes
+  }, [pathname, user, currentModalFlow, coursesRefreshTrigger]); // Reload when pathname changes, user becomes available, modal closes, or trigger changes
 
   const testBackendConnection = async () => {
     try {

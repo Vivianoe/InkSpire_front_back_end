@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
+import { extractTokensFromURL, setSessionFromTokens, waitForSession } from '@/lib/utils/authUtils'
+import { resendConfirmationEmail } from '@/lib/utils/emailUtils'
+import {
+  EMAIL_CONFIRMATION_CHANNEL,
+  LEGACY_CONFIRMATION_SIGNAL_KEY,
+  CONFIRMATION_PAGE_CLEANUP_DELAY
+} from '@/lib/constants/auth'
 
 export default function ConfirmEmailPage() {
   const router = useRouter()
@@ -13,35 +20,23 @@ export default function ConfirmEmailPage() {
   useEffect(() => {
     const confirmEmail = async () => {
       try {
-        // Check for error parameters first
-        const error = searchParams.get('error')
-        const errorDescription = searchParams.get('error_description')
+        // Extract tokens from URL using utility (handles both query and hash params)
+        const tokens = extractTokensFromURL(searchParams)
 
-        if (error) {
-          console.error('Confirmation error from URL:', error, errorDescription)
+        // Check for errors first
+        if (tokens.error) {
+          console.error('Confirmation error from URL:', tokens.error, tokens.errorDescription)
           setStatus('error')
-          setErrorMessage(errorDescription || error || 'Email confirmation failed.')
+          setErrorMessage(tokens.errorDescription || tokens.error || 'Email confirmation failed.')
           return
         }
 
-        // Check for tokens in URL (either query params or hash params)
-        // Query params: ?access_token=...&refresh_token=...
-        let accessToken = searchParams.get('access_token')
-        let refreshToken = searchParams.get('refresh_token')
-
-        // Hash params: #access_token=...&refresh_token=...
-        if (!accessToken && window.location.hash) {
-          const hashParams = new URLSearchParams(window.location.hash.substring(1))
-          accessToken = hashParams.get('access_token')
-          refreshToken = hashParams.get('refresh_token')
-        }
-
         // Scenario A: Tokens in URL - set session explicitly
-        if (accessToken && refreshToken) {
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          })
+        if (tokens.accessToken && tokens.refreshToken) {
+          const { error: sessionError } = await setSessionFromTokens(
+            tokens.accessToken,
+            tokens.refreshToken
+          )
 
           if (sessionError) {
             console.error('Session setup error:', sessionError)
@@ -50,15 +45,14 @@ export default function ConfirmEmailPage() {
             return
           }
 
-          // Wait for session to be fully established in Supabase client
-          await new Promise(resolve => setTimeout(resolve, 500))
+          // Wait for session to be fully established
+          await waitForSession(500)
         } else {
-          // Scenario B: No tokens in URL - Supabase may have auto-set session via cookie
-          // Wait a moment for session to be initialized
-          await new Promise(resolve => setTimeout(resolve, 1000))
+          // Scenario B: No tokens - Supabase may have auto-set session via cookie
+          await waitForSession(1000)
         }
 
-        // Now check if user session exists and email is confirmed
+        // Check if user session exists and email is confirmed
         const { data: { user }, error: userError } = await supabase.auth.getUser()
 
         if (userError) {
@@ -81,19 +75,30 @@ export default function ConfirmEmailPage() {
         }
 
         // Success! Email is confirmed
-        // console.log('✓ Email confirmed successfully:', user.email)
         setStatus('success')
 
-        // Write localStorage signal for original tab
-        const confirmationSignal = {
-          timestamp: Date.now(),
-          userId: user.id,
-          email: user.email || ''
+        // Broadcast to other tabs using BroadcastChannel (with fallback)
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          // Modern approach: BroadcastChannel
+          const channel = new BroadcastChannel(EMAIL_CONFIRMATION_CHANNEL)
+          channel.postMessage({
+            type: 'email-confirmed',
+            timestamp: Date.now(),
+            userId: user.id,
+            email: user.email || ''
+          })
+          channel.close()
+        } else {
+          // Fallback: localStorage signal for older browsers
+          localStorage.setItem(LEGACY_CONFIRMATION_SIGNAL_KEY, JSON.stringify({
+            timestamp: Date.now(),
+            userId: user.id,
+            email: user.email || ''
+          }))
         }
-        localStorage.setItem('inkspire-email-confirmation-signal', JSON.stringify(confirmationSignal))
 
-        // Brief delay to ensure localStorage write completes
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Brief delay to ensure signal completes
+        await waitForSession(CONFIRMATION_PAGE_CLEANUP_DELAY)
       } catch (err) {
         console.error('Confirmation error:', err)
         setStatus('error')
@@ -102,7 +107,7 @@ export default function ConfirmEmailPage() {
     }
 
     confirmEmail()
-  }, [router, searchParams]) // searchParams is needed for query parameter access
+  }, [router, searchParams])
 
   const handleResend = async () => {
     try {
@@ -112,18 +117,13 @@ export default function ConfirmEmailPage() {
         return
       }
 
-      const response = await fetch('/api/users/resend-confirmation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user.email })
-      })
+      const result = await resendConfirmationEmail(user.email)
 
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.detail || 'Failed to resend email')
+      if (result.success) {
+        setErrorMessage('Confirmation email sent! Please check your inbox.')
+      } else {
+        setErrorMessage(result.error || 'Failed to resend email')
       }
-
-      setErrorMessage('Confirmation email sent! Please check your inbox.')
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to resend email')
     }

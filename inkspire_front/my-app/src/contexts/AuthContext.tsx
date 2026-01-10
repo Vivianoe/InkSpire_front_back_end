@@ -6,22 +6,32 @@ import { supabase } from '@/lib/supabase/client'
 import { AuthModal as PerusallAuthModal } from '@/components/auth/PerusallAuthModal'
 import { EmailConfirmationModal } from '@/components/auth/EmailConfirmationModal'
 import { EmailConfirmedModal } from '@/components/auth/EmailConfirmedModal'
+import { useEmailConfirmation } from '@/hooks/useEmailConfirmation'
+import { getCurrentUser } from '@/lib/utils/authUtils'
+import { resendConfirmationEmail } from '@/lib/utils/emailUtils'
+
+/**
+ * Modal flow states - enforces sequential progression
+ * Replaces 5 separate boolean flags for cleaner state management
+ */
+export enum ModalFlow {
+  None = 'none',
+  EmailConfirmation = 'email_confirmation',
+  EmailConfirmed = 'email_confirmed',
+  PerusallSetup = 'perusall_setup'
+}
 
 interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
-  showPerusallModal: boolean
-  showEmailConfirmationModal: boolean
-  showEmailConfirmedModal: boolean
-  emailConfirmed: boolean
+  currentModalFlow: ModalFlow
   coursesRefreshTrigger: number
   pendingEmail: string | null
   signIn: (email: string, password: string) => Promise<{ error?: AuthError }>
   signUp: (email: string, password: string, name: string) => Promise<{ error?: AuthError }>
   signOut: () => Promise<{ error?: AuthError }>
-  closePerusallModal: () => void
-  closeEmailConfirmationModal: () => void
+  closeModals: () => void
   handleEmailConfirmed: () => void
   resendConfirmationEmail: () => Promise<{ error?: AuthError }>
   triggerCoursesRefresh: () => void
@@ -45,26 +55,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showPerusallModal, setShowPerusallModal] = useState(false)
-  const [showEmailConfirmationModal, setShowEmailConfirmationModal] = useState(false)
-  const [showEmailConfirmedModal, setShowEmailConfirmedModal] = useState(false)
-  const [emailConfirmed, setEmailConfirmed] = useState(false)
+  const [currentModalFlow, setCurrentModalFlow] = useState<ModalFlow>(ModalFlow.None)
+  const currentModalFlowRef = useRef<ModalFlow>(ModalFlow.None)
   const [coursesRefreshTrigger, setCoursesRefreshTrigger] = useState(0)
   const [pendingEmail, setPendingEmail] = useState<string | null>(null)
-  
-  // Refs to track modal states without causing re-renders in localStorage checking
-  const modalStateRef = useRef({
-    showEmailConfirmedModal,
-    showPerusallModal
-  })
-  
-  // Update refs when modal states change
+
+  // Keep ref in sync with state for use in subscription callbacks (avoids stale closure)
   useEffect(() => {
-    modalStateRef.current = {
-      showEmailConfirmedModal,
-      showPerusallModal
+    currentModalFlowRef.current = currentModalFlow
+  }, [currentModalFlow])
+
+  // Email confirmation detection hook
+  // Replaces all polling and localStorage detection logic
+  useEmailConfirmation({
+    enabled: currentModalFlow === ModalFlow.EmailConfirmation,
+    onConfirmed: () => {
+      setCurrentModalFlow(ModalFlow.EmailConfirmed)
     }
-  }, [showEmailConfirmedModal, showPerusallModal])
+  })
 
   useEffect(() => {
     // Get initial session
@@ -72,12 +80,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const { data: { session } } = await supabase.auth.getSession()
       setSession(session)
       setUser(session?.user ?? null)
-
-      // Initialize emailConfirmed based on actual session state
-      if (session?.user) {
-        setEmailConfirmed(session.user.email_confirmed_at !== null)
-      }
-
       setLoading(false)
     }
 
@@ -90,31 +92,45 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(session?.user ?? null)
         setLoading(false)
 
-        // Detect email confirmation
+        // Detect email confirmation via SIGNED_IN event
+        // (happens when session is created with email already confirmed after email verification)
+        if (event === 'SIGNED_IN' && session?.user) {
+          const isConfirmed = session.user.email_confirmed_at !== null
+          const waitingForConfirmation = currentModalFlowRef.current === ModalFlow.EmailConfirmation
+          
+          if (waitingForConfirmation && isConfirmed) {
+            setCurrentModalFlow(ModalFlow.EmailConfirmed)
+            setPendingEmail(null)
+          }
+        }
+
+        // Detect email confirmation via USER_UPDATED event
+        // (happens when email is confirmed during an existing session)
         if (event === 'USER_UPDATED' && session?.user) {
-          const currentConfirmationStatus = session.user.email_confirmed_at !== null
-          const previouslyUnconfirmed = showEmailConfirmationModal  // Use modal state instead
+          const isConfirmed = session.user.email_confirmed_at !== null
+          const waitingForConfirmation = currentModalFlowRef.current === ModalFlow.EmailConfirmation
 
-          // Clear pending email when email is confirmed
-        if (previouslyUnconfirmed && currentConfirmationStatus) {
-          console.log('✓ Email confirmation detected - transitioning modals')
-          setEmailConfirmed(true)
-          setShowEmailConfirmationModal(false)
-          setShowEmailConfirmedModal(true)
-          setPendingEmail(null)
+          if (waitingForConfirmation && isConfirmed) {
+            // Email was just confirmed - transition to success modal
+            setCurrentModalFlow(ModalFlow.EmailConfirmed)
+            setPendingEmail(null)
+          } else {
+            console.log('❌ NOT transitioning because:', {
+              waitingForConfirmation,
+              isConfirmed
+            })
+          }
         }
 
-          // Always sync the emailConfirmed state with actual session
-          setEmailConfirmed(currentConfirmationStatus)
-        }
-
-        // Clear modals on sign out
+        // Clear all modals and state on sign out
+        // EXCEPT when we're waiting for email confirmation (session recreation during email verification)
         if (event === 'SIGNED_OUT') {
-          setShowEmailConfirmationModal(false)
-          setShowEmailConfirmedModal(false)
-          setEmailConfirmed(false)
-          setShowPerusallModal(false)
-          setPendingEmail(null)
+          if (currentModalFlowRef.current !== ModalFlow.EmailConfirmation) {
+            setCurrentModalFlow(ModalFlow.None)
+            setPendingEmail(null)
+          } else {
+            console.log('⏸️ SIGNED_OUT during email confirmation - preserving modal state')
+          }
         }
       }
     )
@@ -122,74 +138,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
-
-  // Separate useEffect for localStorage signal detection to avoid infinite loops
-  useEffect(() => {
-    const checkEmailConfirmationSignal = async () => {
-      const signal = localStorage.getItem('inkspire-email-confirmation-signal')
-      if (signal) {
-        try {
-          // const data = JSON.parse(signal)
-          // console.log('✓ Email confirmation signal detected:', data)
-          
-          // IMPORTANT: Only process if this is NOT the confirmation page
-          const isConfirmationPage = window.location.pathname.includes('/auth/confirm')
-          if (isConfirmationPage) {
-            // console.log('🚫 This is confirmation page, ignoring signal')
-            return
-          }
-          
-          // Add a small delay to ensure confirmation page has time to finish processing
-          // This helps prevent race conditions
-          await new Promise(resolve => setTimeout(resolve, 100))
-          
-          // Try to remove signal (only if still there)
-          const remainingSignal = localStorage.getItem('inkspire-email-confirmation-signal')
-          if (remainingSignal) {
-            localStorage.removeItem('inkspire-email-confirmation-signal')
-            // console.log('🗑️ Removed signal after delay')
-          }
-          
-          // Send acknowledgment
-          localStorage.setItem('inkspire-email-confirmation-ack', JSON.stringify({
-            timestamp: Date.now(),
-            processedBy: window.location.pathname
-          }))
-          
-          // Check if user is confirmed - get fresh session data
-          const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser()
-          
-          if (userError) {
-            console.error('Error checking user session:', userError)
-            return
-          }
-          
-          if (currentUser?.email_confirmed_at) {
-            // console.log('✓ User email confirmed, showing modal')
-            
-            // Show confirmed modal if not already showing (using refs to avoid re-renders)
-            if (!modalStateRef.current.showEmailConfirmedModal && !modalStateRef.current.showPerusallModal) {
-              // console.log('✓ Showing EmailConfirmedModal from localStorage signal')
-              setShowEmailConfirmedModal(true)
-            }
-          } else {
-            console.log('⚠️ User email not yet confirmed, waiting for auth state change')
-          }
-        } catch (err) {
-          console.error('Failed to parse confirmation signal:', err)
-        }
-      }
-    }
-
-    // Check on mount and less frequently to reduce race conditions
-    checkEmailConfirmationSignal()
-    const signalCheckInterval = setInterval(checkEmailConfirmationSignal, 2000) // Increased to 2 seconds
-
-    return () => {
-      clearInterval(signalCheckInterval)
-    }
-  }, [])
+  }, [])  // Empty array - only run once on mount, avoids subscription churn
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -206,10 +155,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      // console.log('✅ Login successful:', data.user.email)
 
       // Set the session in Supabase client using tokens from backend
-      // This allows the auth state listener and session management to work seamlessly
       const { error: sessionError } = await supabase.auth.setSession({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -220,17 +167,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { error: sessionError }
       }
 
-      // Check email confirmation status
-      const { data: { user } } = await supabase.auth.getUser()
+      // Check email confirmation status using utility
+      const { isConfirmed } = await getCurrentUser()
 
-      if (!user?.email_confirmed_at) {
+      if (!isConfirmed) {
         // Email not confirmed - show confirmation waiting modal
-        setEmailConfirmed(false)
-        setShowEmailConfirmationModal(true)
-      } else {
-        setEmailConfirmed(true)
-        // Don't auto-show Perusall modal on sign-in (only on signup)
+        setCurrentModalFlow(ModalFlow.EmailConfirmation)
       }
+      // If confirmed, don't auto-show Perusall modal on sign-in (only on signup)
 
       // Session will be automatically detected by onAuthStateChange listener
       return { error: undefined }
@@ -244,7 +188,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Store the email for the confirmation modal
       setPendingEmail(email)
-      
+
       const response = await fetch('/api/users/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -258,12 +202,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      // console.log('✅ Signup successful:', data.user.email)
 
       // Only set session if we have tokens (confirmations disabled or already confirmed)
       if (data.access_token && data.refresh_token) {
         // Set the session in Supabase client using tokens from backend
-        // This allows the auth state listener and session management to work seamlessly
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: data.access_token,
           refresh_token: data.refresh_token,
@@ -274,22 +216,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return { error: sessionError }
         }
 
-        // Check email confirmation status
-        const { data: { user } } = await supabase.auth.getUser()
+        // Check email confirmation status using utility
+        const { isConfirmed } = await getCurrentUser()
 
-        if (user?.email_confirmed_at) {
-          // Email already confirmed (confirmations disabled or already confirmed)
-          setEmailConfirmed(true)
-          setShowPerusallModal(true)
-        } else {
-          // Email not confirmed - show confirmation waiting modal
-          setEmailConfirmed(false)
-          setShowEmailConfirmationModal(true)
-        }
+        // Set modal flow based on confirmation status
+        setCurrentModalFlow(isConfirmed ? ModalFlow.PerusallSetup : ModalFlow.EmailConfirmation)
       } else {
         // No tokens = email confirmation required before session is created
-        setEmailConfirmed(false)
-        setShowEmailConfirmationModal(true)
+        setCurrentModalFlow(ModalFlow.EmailConfirmation)
       }
 
       // Session will be automatically detected by onAuthStateChange listener
@@ -300,35 +234,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
-  const closePerusallModal = () => {
-    setShowPerusallModal(false)
+  /**
+   * Close all modals
+   */
+  const closeModals = () => {
+    setCurrentModalFlow(ModalFlow.None)
   }
 
-  const closeEmailConfirmationModal = () => {
-    setShowEmailConfirmationModal(false)
-  }
-
+  /**
+   * Handle email confirmed - transition to Perusall setup
+   * Called when EmailConfirmedModal "Continue" is clicked
+   */
   const handleEmailConfirmed = () => {
-    // Called when EmailConfirmedModal "Continue" is clicked
-    setShowEmailConfirmedModal(false)
-    setShowPerusallModal(true) // Now show Perusall integration
+    setCurrentModalFlow(ModalFlow.PerusallSetup)
   }
 
-  const resendConfirmationEmail = async () => {
+  /**
+   * Resend confirmation email using utility
+   */
+  const handleResendConfirmationEmail = async () => {
     try {
-      if (!user?.email) {
+      if (!user?.email && !pendingEmail) {
         return { error: { message: 'No email found' } as AuthError }
       }
 
-      const response = await fetch('/api/users/resend-confirmation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user.email })
-      })
+      const email = user?.email || pendingEmail!
+      const result = await resendConfirmationEmail(email)
 
-      if (!response.ok) {
-        const data = await response.json()
-        return { error: { message: data.detail || 'Failed to resend email' } as AuthError }
+      if (!result.success) {
+        return { error: { message: result.error || 'Failed to resend email' } as AuthError }
       }
 
       return { error: undefined }
@@ -368,22 +302,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     user,
     session,
     loading,
-    showPerusallModal,
-    showEmailConfirmationModal,
-    showEmailConfirmedModal,
-    emailConfirmed,
+    currentModalFlow,
     coursesRefreshTrigger,
     pendingEmail,
     signIn,
     signUp,
     signOut,
-    closePerusallModal,
-    closeEmailConfirmationModal,
+    closeModals,
     handleEmailConfirmed,
-    resendConfirmationEmail,
+    resendConfirmationEmail: handleResendConfirmationEmail,
     triggerCoursesRefresh,
   }
-
 
   return (
     <AuthContext.Provider value={value}>
@@ -391,22 +320,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       {/* Email Confirmation Waiting Modal */}
       <EmailConfirmationModal
-        isOpen={showEmailConfirmationModal}
-        onClose={closeEmailConfirmationModal}
+        isOpen={currentModalFlow === ModalFlow.EmailConfirmation}
+        onClose={closeModals}
         email={user?.email || pendingEmail || null}
         allowClose={process.env.NODE_ENV === 'development'}
       />
 
       {/* Email Confirmed Success Modal */}
       <EmailConfirmedModal
-        isOpen={showEmailConfirmedModal}
+        isOpen={currentModalFlow === ModalFlow.EmailConfirmed}
         onContinue={handleEmailConfirmed}
       />
 
       {/* Perusall Integration Modal */}
       <PerusallAuthModal
-        isOpen={showPerusallModal}
-        onClose={closePerusallModal}
+        isOpen={currentModalFlow === ModalFlow.PerusallSetup}
+        onClose={closeModals}
       />
     </AuthContext.Provider>
   )

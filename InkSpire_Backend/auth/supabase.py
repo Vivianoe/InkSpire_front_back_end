@@ -8,12 +8,10 @@ import jwt
 from jwt.exceptions import PyJWTError
 from supabase import Client
 from app.core.database import get_supabase_client
+from auth.constants import get_email_confirmation_url
 
 # Load JWT secret for token validation
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-
-# Get frontend URL from environment variable (for email confirmation redirects)
-FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 
 class AuthenticationError(Exception):
@@ -130,7 +128,7 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
                 "data": {
                     "name": name,
                 },
-                "email_redirect_to": f"{FRONTEND_URL}/auth/confirm"  # Redirect to confirm page
+                "email_redirect_to": get_email_confirmation_url()  # Redirect to confirm page
             }
         })
 
@@ -243,7 +241,7 @@ def resend_confirmation_email(email: str) -> Dict[str, Any]:
             "type": "signup",
             "email": email,
             "options": {
-                "email_redirect_to": f"{FRONTEND_URL}/auth/confirm"
+                "email_redirect_to": get_email_confirmation_url()
             }
         })
 

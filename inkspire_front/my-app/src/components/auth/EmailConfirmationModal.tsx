@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { useEffect } from 'react'
+import { useResendEmail } from '@/lib/utils/emailUtils'
 
 interface EmailConfirmationModalProps {
   isOpen: boolean
@@ -16,135 +16,15 @@ export function EmailConfirmationModal({
   email,
   allowClose = false
 }: EmailConfirmationModalProps) {
-  const [resending, setResending] = useState(false)
-  const [resendSuccess, setResendSuccess] = useState(false)
-  const [resendCooldown, setResendCooldown] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-
-  // Polling to check if email is confirmed
-  useEffect(() => {
-    if (!isOpen) return
-
-    const pollInterval = setInterval(async () => {
-      const { data: { session } } = await supabase.auth.refreshSession()
-
-      if (session?.user?.email_confirmed_at) {
-        // Email confirmed! The auth state listener in AuthContext will handle the UI update
-        clearInterval(pollInterval)
-      }
-    }, 5000) // Poll every 5 seconds
-
-    return () => clearInterval(pollInterval)
-  }, [isOpen])
-
-  // Cross-tab detection: listen for localStorage changes from other tabs
-  useEffect(() => {
-    if (!isOpen) return
-
-    const handleStorageChange = async (e: StorageEvent) => {
-      // Supabase stores auth tokens with pattern: sb-{projectref}-auth-token
-      // Check for any Supabase auth key changes
-      if (e.key && (e.key.startsWith('sb-') && e.key.includes('-auth-token'))) {
-        // Refresh session to get latest confirmation status and trigger USER_UPDATED event
-        const { data: { session } } = await supabase.auth.refreshSession()
-
-        // If email is confirmed, the AuthContext listener will handle the modal transition
-        if (session?.user?.email_confirmed_at) {
-          // console.log('✓ Email confirmed detected via storage event')
-        }
-      }
-    }
-
-    window.addEventListener('storage', handleStorageChange)
-    return () => window.removeEventListener('storage', handleStorageChange)
-  }, [isOpen])
-
-  // Explicit confirmation signal detection from confirmation tab
-  useEffect(() => {
-    if (!isOpen) return
-
-    const handleConfirmationSignal = async (e: StorageEvent) => {
-      if (e.key === 'inkspire-email-confirmation-signal' && e.newValue) {
-        // console.log('✓ Explicit confirmation signal received from confirmation tab')
-
-        try {
-          const signal = JSON.parse(e.newValue)
-
-          // Acknowledge receipt
-          localStorage.setItem('inkspire-email-confirmation-ack', JSON.stringify({
-            timestamp: Date.now(),
-            receivedSignal: signal.timestamp
-          }))
-
-          // Clean up acknowledgment after 5 seconds
-          setTimeout(() => {
-            localStorage.removeItem('inkspire-email-confirmation-ack')
-          }, 5000)
-
-          // Refresh session to trigger USER_UPDATED event in AuthContext
-          const { data: { session } } = await supabase.auth.refreshSession()
-
-          // Clean up the signal
-          localStorage.removeItem('inkspire-email-confirmation-signal')
-
-          if (session?.user?.email_confirmed_at) {
-            // console.log('✓ Email confirmation verified via explicit signal')
-          }
-        } catch (err) {
-          // console.error('Error parsing confirmation signal:', err)
-        }
-      }
-    }
-
-    window.addEventListener('storage', handleConfirmationSignal)
-    return () => window.removeEventListener('storage', handleConfirmationSignal)
-  }, [isOpen])
-
-  // Cooldown timer
-  useEffect(() => {
-    if (resendCooldown > 0) {
-      const timer = setTimeout(() => {
-        setResendCooldown(resendCooldown - 1)
-      }, 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [resendCooldown])
+  // Use resend email hook with cooldown management
+  const { resend, reset, resending, resendSuccess, resendCooldown, error, canResend } = useResendEmail(email)
 
   // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setResendSuccess(false)
-      setError(null)
+      reset()
     }
-  }, [isOpen])
-
-  const handleResendEmail = async () => {
-    if (!email || resendCooldown > 0) return
-
-    setResending(true)
-    setError(null)
-    setResendSuccess(false)
-
-    try {
-      const response = await fetch('/api/users/resend-confirmation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.detail || 'Failed to resend email')
-      }
-
-      setResendSuccess(true)
-      setResendCooldown(60) // 60 second cooldown
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-    } finally {
-      setResending(false)
-    }
-  }
+  }, [isOpen, reset])
 
   if (!isOpen) return null
 
@@ -198,8 +78,8 @@ export function EmailConfirmationModal({
         {/* Resend button */}
         <div className="mb-4">
           <button
-            onClick={handleResendEmail}
-            disabled={resending || resendCooldown > 0}
+            onClick={resend}
+            disabled={!canResend}
             className="w-full py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {resending ? (
