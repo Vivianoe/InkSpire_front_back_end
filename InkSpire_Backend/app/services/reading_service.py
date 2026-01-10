@@ -16,6 +16,7 @@ def create_reading(
     title: str,
     file_path: str,
     source_type: str = "uploaded",
+    perusall_reading_id: Optional[str] = None,
 ) -> Reading:
     """
     Create a new reading
@@ -31,6 +32,7 @@ def create_reading(
         title=title.strip(),
         file_path=file_path.strip(),
         source_type=source_type,
+        perusall_reading_id=perusall_reading_id.strip() if isinstance(perusall_reading_id, str) and perusall_reading_id.strip() else None,
     )
     
     db.add(reading)
@@ -132,6 +134,7 @@ def reading_to_dict(reading: Reading, include_chunks: bool = False) -> dict:
         "title": reading.title,
         "file_path": reading.file_path,
         "source_type": reading.source_type,
+        "perusall_reading_id": getattr(reading, "perusall_reading_id", None),
         "created_at": reading.created_at.isoformat() if reading.created_at else None,
     }
     

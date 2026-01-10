@@ -122,6 +122,7 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=temp_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
                 reading_id = reading.id
                 
@@ -233,6 +234,7 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=final_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
             
             # Refresh reading to ensure it's up to date

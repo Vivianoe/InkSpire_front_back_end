@@ -227,6 +227,7 @@ def session_to_dict(session: Session) -> Dict[str, Any]:
         "course_id": str(session.course_id),
         "week_number": session.week_number,
         "title": session.title,
+        "perusall_assignment_id": getattr(session, "perusall_assignment_id", None),
         "current_version_id": str(session.current_version_id) if session.current_version_id else None,
         "status": session.status,
         "created_at": session.created_at.isoformat() if session.created_at else None,

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, PerusallMapping, Course, Reading, User
 from app.services.course_service import get_course_by_id
-from app.services.reading_service import get_reading_by_id
+from app.services.reading_service import get_reading_by_id, get_readings_by_course
 from app.services.perusall_service import (
     save_user_perusall_credentials,
     get_user_perusall_credentials,
@@ -31,12 +31,14 @@ from app.api.models import (
     PerusallCourseItem,
     PerusallImportRequest,
     PerusallImportResponse,
+    PerusallLibraryResponse,
+    PerusallLibraryReadingStatus,
 )
 
 router = APIRouter()
 
 # Perusall environment variables
-PERUSALL_BASE_URL = "https://app.perusall.com/api/v1"
+PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 
 X_INSTITUTION = os.getenv("PERUSALL_INSTITUTION")
 X_API_TOKEN = os.getenv("PERUSALL_API_TOKEN")
@@ -1019,4 +1021,203 @@ def import_courses_from_perusall(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to import courses: {str(e)}"
+        )
+
+
+@router.get("/courses/{course_id}/perusall/library", response_model=PerusallLibraryResponse)
+def get_perusall_course_library(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get Perusall course library (readings) for a course and check upload status.
+    Fetches readings from Perusall API and matches them with local database.
+    """
+    try:
+        # Validate course_id
+        try:
+            course_uuid = uuid.UUID(course_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}"
+            )
+        
+        # Get course from database
+        course = get_course_by_id(db, course_uuid)
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Course {course_id} not found"
+            )
+        
+        # Check if course has perusall_course_id
+        if not course.perusall_course_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Course {course_id} does not have a Perusall course ID configured. Please set perusall_course_id for this course."
+            )
+        
+        perusall_course_id = course.perusall_course_id
+
+        # Resolve Perusall credentials
+        env_institution = os.getenv("PERUSALL_INSTITUTION")
+        env_api_token = os.getenv("PERUSALL_API_TOKEN")
+
+        institution_id = None
+        api_token = None
+
+        if env_institution and env_api_token:
+            institution_id = env_institution
+            api_token = env_api_token
+        else:
+            credentials = get_user_perusall_credentials(db, current_user.id)
+            if not credentials or not credentials.is_validated:
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Perusall credentials not found or not validated. "
+                        "Please authenticate first at /api/perusall/authenticate, "
+                        "or set PERUSALL_INSTITUTION and PERUSALL_API_TOKEN in environment variables."
+                    )
+                )
+            institution_id = credentials.institution_id
+            api_token = credentials.api_token
+        
+        # Check for mock mode
+        mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+        
+        # Fetch library from Perusall API
+        if mock_mode:
+            from app.mocks.perusall_mock_data import get_mock_library_for_course
+            perusall_readings = get_mock_library_for_course(perusall_course_id)
+        else:
+            library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
+            headers = {
+                "X-Institution": institution_id,
+                "X-API-Token": api_token,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+            
+            library_response = requests.get(library_url, headers=headers, timeout=30)
+            try:
+                library_response.raise_for_status()
+            except requests.exceptions.HTTPError:
+                status_code = library_response.status_code
+                response_text = (library_response.text or "")[:500]
+
+                if status_code in (401, 403):
+                    raise HTTPException(
+                        status_code=401,
+                        detail=(
+                            "Perusall API authentication failed (unauthorized/forbidden). "
+                            "Please re-authenticate with a valid Institution ID and API Token via /api/perusall/authenticate, "
+                            "and confirm the Perusall course ID belongs to that institution. "
+                            f"Perusall response: {response_text}"
+                        ),
+                    )
+
+                if status_code == 404:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=(
+                            "Perusall course library not found. Verify the course's perusall_course_id is correct and accessible. "
+                            f"Perusall response: {response_text}"
+                        ),
+                    )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Perusall library API request failed. Status: {status_code}. "
+                        f"Response: {response_text}"
+                    ),
+                )
+            
+            try:
+                perusall_readings = library_response.json()
+            except ValueError:
+                response_text = library_response.text[:500]
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Perusall library API returned invalid JSON. Status: {library_response.status_code}. Response: {response_text}"
+                )
+            
+            if not isinstance(perusall_readings, list):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unexpected response format from Perusall library API: {type(perusall_readings)}. Expected list, got {type(perusall_readings)}"
+                )
+        
+        # Get local readings for this course
+        local_readings = get_readings_by_course(db, course_uuid)
+        
+        # Get Perusall mappings for this course
+        perusall_mappings = db.query(PerusallMapping).filter(
+            PerusallMapping.course_id == course_uuid
+        ).all()
+        
+        # Create a mapping from perusall_document_id to local reading
+        mapping_by_perusall_doc_id = {
+            mapping.perusall_document_id: mapping.reading_id
+            for mapping in perusall_mappings
+        }
+        
+        # Create a mapping from reading title (normalized) to local reading
+        # This helps match readings by name if no mapping exists
+        local_readings_by_title = {}
+        for reading in local_readings:
+            normalized_title = normalize_name(reading.title)
+            if normalized_title not in local_readings_by_title:
+                local_readings_by_title[normalized_title] = reading
+        
+        # Build response with upload status
+        reading_statuses = []
+        for perusall_reading in perusall_readings:
+            if not isinstance(perusall_reading, dict):
+                continue
+            
+            perusall_reading_id = perusall_reading.get("_id") or perusall_reading.get("id")
+            perusall_reading_name = perusall_reading.get("name") or perusall_reading.get("title") or "Untitled"
+            
+            if not perusall_reading_id:
+                continue
+            
+            # Check if reading is uploaded via PerusallMapping
+            local_reading_id = mapping_by_perusall_doc_id.get(perusall_reading_id)
+            local_reading = None
+            
+            if local_reading_id:
+                local_reading = get_reading_by_id(db, local_reading_id)
+            
+            # If no mapping found, try to match by name
+            if not local_reading:
+                normalized_perusall_name = normalize_name(perusall_reading_name)
+                local_reading = local_readings_by_title.get(normalized_perusall_name)
+            
+            reading_statuses.append(PerusallLibraryReadingStatus(
+                perusall_reading_id=str(perusall_reading_id),
+                perusall_reading_name=perusall_reading_name,
+                is_uploaded=local_reading is not None,
+                local_reading_id=str(local_reading.id) if local_reading else None,
+                local_reading_title=local_reading.title if local_reading else None,
+            ))
+        
+        return PerusallLibraryResponse(
+            success=True,
+            perusall_course_id=perusall_course_id,
+            readings=reading_statuses,
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[get_perusall_course_library] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch Perusall course library: {str(e)}"
         )

@@ -162,6 +162,7 @@ class EditDesignConsiderationsRequest(BaseModel):
 
 class ReadingUploadItem(BaseModel):
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: Optional[str] = None  # Optional for uploaded readings (will be generated)
     source_type: str = "uploaded"
     content_base64: Optional[str] = None  # Base64 encoded PDF content for uploaded readings
@@ -177,6 +178,7 @@ class BatchUploadReadingsRequest(BaseModel):
 class ReadingResponse(BaseModel):
     id: str
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: str
     source_type: str
     course_id: Optional[str] = None
@@ -383,5 +385,29 @@ class ImportedCourse(BaseModel):
 class PerusallImportResponse(BaseModel):
     success: bool
     imported_courses: List[ImportedCourse]
+    message: Optional[str] = None
+
+
+# Perusall Course Library (Readings)
+class PerusallReadingItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+    
+    id: str = Field(alias="_id")  # Perusall reading/document ID
+    name: str  # Reading name/title
+
+
+class PerusallLibraryReadingStatus(BaseModel):
+    """Status of a Perusall reading in the local database"""
+    perusall_reading_id: str
+    perusall_reading_name: str
+    is_uploaded: bool
+    local_reading_id: Optional[str] = None  # Local reading UUID if uploaded
+    local_reading_title: Optional[str] = None
+
+
+class PerusallLibraryResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    readings: List[PerusallLibraryReadingStatus]
     message: Optional[str] = None
 
