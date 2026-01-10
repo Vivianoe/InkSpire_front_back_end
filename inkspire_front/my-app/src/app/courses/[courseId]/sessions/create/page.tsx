@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, ChangeEvent } from '
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
-import styles from '@/app/class-profile/[id]/session/create/page.module.css';
+import styles from '@/app/courses/[courseId]/sessions/create/page.module.css';
 import { supabase } from '@/lib/supabase/client';
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';

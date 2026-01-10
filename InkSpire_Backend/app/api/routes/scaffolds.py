@@ -1315,17 +1315,6 @@ def export_approved_scaffolds_endpoint(
     
     return ExportedScaffoldsResponse(annotation_scaffolds=items)
 
-
-# ======================================================
-# Thread-based Review API (compatibility endpoints)
-# ======================================================
-
-@router.post("/threads/{thread_id}/review")
-def thread_review_endpoint(
-    thread_id: str,
-    payload: ThreadReviewRequest,
-    db: Session = Depends(get_db)
-):
     """
     Compatibility endpoint for thread-based review API.
     Maps to individual scaffold endpoints based on actions.

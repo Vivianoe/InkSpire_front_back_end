@@ -160,7 +160,7 @@ export default function DashboardPage() {
       router.push(`/courses/${course.id}/class-profiles/${course.classProfileId}/view`);
     } else {
       // Navigate to create new profile using "new" as profileId
-      router.push(`/courses/${course.id}/class-profiles/new/edit`);
+      router.push(`/courses/${course.id}/class-profiles/new/create`);
     }
   };
 
@@ -169,7 +169,7 @@ export default function DashboardPage() {
     if (instructorId) {
       params.set('instructorId', instructorId);
     }
-    router.push(`/courses/new/class-profiles/new/edit${params.toString() ? `?${params.toString()}` : ''}`);
+    router.push(`/courses/new/class-profiles/new/create${params.toString() ? `?${params.toString()}` : ''}`);
   };
 
   return (

@@ -580,6 +580,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     };
   }, [pdfDoc]);
 
+  
   // Highlight/search helpers
   const highlightRecordsRef = useRef<any[]>([]);
   const pendingScrollRef = useRef<string | null>(null);

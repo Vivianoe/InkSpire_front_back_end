@@ -1,6 +1,9 @@
+// RESTful route: /courses/[courseId]/class-profiles/[profileId]/create
 'use client';
 
-import { useState, useEffect } from 'react';
+//export { default } from '@/app/class-profile/[id]/edit/page';
+
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
@@ -11,8 +14,9 @@ import {
   createDefaultDesignConsiderations,
   normalizeDesignConsiderations,
   parseDesignConsiderations,
-} from '@/app/class-profile/designConsiderations';
+} from '@/app/courses/[courseId]/class-profiles/designConsiderations';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 interface ClassProfile {
   id: string;
@@ -55,37 +59,70 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
   { value: 'mixed', label: 'Mixed proficiency cohort' },
 ];
 
+// const DEFAULT_CLASS_BACKGROUND = '';
+
+// const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
+//   disciplineInfo: {
+//     disciplineName: '',
+//     department: '',
+//     fieldDescription: '',
+//   },
+//   courseInfo: {
+//     courseName: '',
+//     courseCode: '',
+//     description: '',
+//     credits: '',
+//     prerequisites: '',
+//     learningObjectives: '',
+//     assessmentMethods: '',
+//     deliveryMode: '',
+//   },
+//   classInfo: {
+//     semester: '',
+//     year: '',
+//     section: '',
+//     meetingDays: '',
+//     meetingTime: '',
+//     location: '',
+//     enrollment: '',
+//     background: DEFAULT_CLASS_BACKGROUND,
+//     priorKnowledge: '',
+//   },
+//   generatedProfile: undefined,
+//   designConsiderations: createDefaultDesignConsiderations(),
+// };
+
 const DEFAULT_CLASS_BACKGROUND =
   'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
-    disciplineName: 'Computer Science',
-    department: 'Department of Computer and Information Science',
+    disciplineName: 'Education',
+    department: 'Graduate School of Education',
     fieldDescription:
       'Explores computational theory, software engineering practices, and data-driven inquiry within education research contexts.',
   },
   courseInfo: {
-    courseName: 'Introduction to Python',
-    courseCode: 'CS101',
+    courseName: 'Learning Sciences: Past, Present, and Future',
+    courseCode: 'EDUC 6144',
     description:
-      'This is a beginner-level course focusing on Python programming basics for college students. The course covers the fundamentals of Python programming, including syntax, data structures, and basic algorithms.',
-    credits: '3',
+      'This course is a survey of the kinds of theories, methods, and applications through which educational researchers understand learning and how to improve it. The course is designed to provide information about how the field of the learning sciences emerged, has evolved, and is growing to address current and future learning needs. ',
+    credits: '1',
     prerequisites: 'None required',
     learningObjectives:
-      'Equip graduate researchers with the ability to design, implement, and evaluate Python-based workflows for education data analysis.',
-    assessmentMethods: 'Project-based assessments, annotated code portfolios, collaborative labs, and reflective participation.',
+      'Investigating the roots of the learning sciences field and how it has evolved',
+    assessmentMethods: 'In-class participation, short writing assignments, and a final exam.',
     deliveryMode: 'in-person',
   },
   classInfo: {
-    semester: 'Fall',
-    year: '2024',
+    semester: 'Spring',
+    year: '2026',
     section: 'A',
     meetingDays: 'MW',
     meetingTime: '10:00 AM - 11:30 AM',
     location: 'Engineering Building, Room 210',
     enrollment: '30',
-    background: DEFAULT_CLASS_BACKGROUND,
+    background: 'Cohort includes graduate students from education discipline.',
     priorKnowledge: 'mixed',
   },
   generatedProfile: undefined,
@@ -200,68 +237,59 @@ const createDefaultFormData = (id: string): ClassProfile => ({
   designConsiderations: { ...DEFAULT_PREFILL_PROFILE.designConsiderations },
 });
 
-export default function EditCoursePage() {
+export default function EditClassProfilePage() {
   const router = useRouter();
-  const params = useParams();
+  // Path parameters (from route: /class-profile/[id]/edit)
+  const pathParams = useParams();
+  // Query parameters (from URL: ?courseId=xxx&instructorId=yyy)
   const searchParams = useSearchParams();
-  const courseId = params?.courseId as string;
-  const isEdit = courseId !== 'new';
+  const profileId = (pathParams?.id || pathParams?.profileId) as string;
+  const isEdit = profileId !== 'new';
   
-  // Get course_id and instructor_id from URL params
-  const urlCourseId = courseId || searchParams?.get('courseId');
+  // Extract course_id from URL path structure: /courses/{courseId}/class-profiles/{profileId}/edit
+  const urlCourseId =
+    (pathParams?.courseId as string | undefined) ||
+    searchParams?.get('courseId') ||
+    (typeof window !== 'undefined' && window.location.pathname.match(/\/courses\/([^\/]+)/)?.[1]);
   const urlInstructorId = searchParams?.get('instructorId');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(courseId || 'new'));
+  const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isEdit && courseId) {
-      loadProfile();
-    } else if (!isEdit) {
-      setFormData(createDefaultFormData('new'));
-    }
-  }, [courseId, isEdit]);
-
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      if (!courseId || courseId === 'new') {
+      if (!profileId || profileId === 'new') {
         setLoading(false);
         return;
       }
 
-      // Try to load from class profile if it exists for this course
-      // For now, we'll use a simplified approach
-      const response = await fetch(`/api/courses/instructor/${urlInstructorId || MOCK_INSTRUCTOR_ID}`);
+      const courseIdParam = urlCourseId ? `?course_id=${urlCourseId}` : '';
+      const response = await fetch(`/api/class-profiles/${profileId}${courseIdParam}`);
       const data = await response.json().catch(() => ({}));
-      
-      if (response.ok && Array.isArray(data.courses)) {
-        const course = data.courses.find((c: any) => c.id === courseId);
-        if (course && course.class_profile_id) {
-          // Load the class profile
-          const profileResponse = await fetch(`/api/class-profiles/${course.class_profile_id}`);
-          const profileData = await profileResponse.json().catch(() => ({}));
-          
-          if (profileResponse.ok) {
-            const payload = profileData.profile ?? profileData.class_profile ?? null;
-            const profileDataFormatted = payload
-              ? {
-                  ...createDefaultFormData(courseId),
-                  ...payload,
-                  designConsiderations: normalizeDesignConsiderations(
-                    payload.designConsiderations ?? parseDesignConsiderations(payload.generatedProfile)
-                  ),
-                }
-              : null;
+      if (!response.ok) {
+        throw new Error(data?.message || 'Failed to load profile');
+      }
 
-            if (profileDataFormatted) {
-              setFormData(profileDataFormatted);
-            }
+      const payload = data.profile ?? data.class_profile ?? null;
+      const profileData = payload
+        ? {
+            ...createDefaultFormData(profileId),
+            ...payload,
+            designConsiderations: normalizeDesignConsiderations(
+              payload.designConsiderations ?? parseDesignConsiderations(payload.generatedProfile)
+            ),
           }
-        }
+        : null;
+
+      if (profileData) {
+        setFormData(profileData);
+      } else {
+        throw new Error('Failed to load profile');
       }
     } catch (err) {
       setError('Failed to load profile. Please try again.');
@@ -269,7 +297,45 @@ export default function EditCoursePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profileId]);
+
+  useEffect(() => {
+    if (isEdit && profileId) {
+      loadProfile();
+    } else if (!isEdit) {
+      setFormData(createDefaultFormData('new'));
+    }
+  }, [profileId, isEdit, loadProfile]);
+
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        // TODO: replace with httponly cookies for security
+        // Get auth token from Supabase session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error('Not authenticated. Please sign in again.');
+        }
+
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        };
+
+        const response = await fetch('/api/users/me', { headers });
+        if (response.ok) {
+          const userData = await response.json();
+          setCurrentUserId(userData.id);
+        } else {
+          console.error('Failed to fetch current user');
+        }
+      } catch (err) {
+        console.error('Error fetching current user:', err);
+      }
+    }
+    
+    fetchCurrentUser();
+  }, []);
 
   const handleInputChange = (section: keyof ClassProfile, field: string, value: string) => {
     setFormData(prev => {
@@ -320,25 +386,29 @@ export default function EditCoursePage() {
       return;
     }
 
+    if (!currentUserId && !urlInstructorId) {
+      setError('Unable to identify instructor. Please try refreshing the page.');
+      return;
+    }
+
     setGenerating(true);
     setError(null);
 
     try {
+      // Use course_id from URL params, or "new" to create a new course
+      const courseIdForRequest = urlCourseId || 'new';
+
       const payload = {
-        instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+        instructor_id: urlInstructorId || currentUserId || MOCK_INSTRUCTOR_ID,
+        course_id: courseIdForRequest,
         title: formData.courseInfo.courseName || 'Untitled Class',
         course_code: formData.courseInfo.courseCode || 'TBD',
         description:
           formData.courseInfo.description || 'Draft class profile generated via Inkspire',
         class_input: buildClassInputPayload(formData),
       };
-      
-      // Add course_id if provided in URL params
-      if (urlCourseId && urlCourseId !== 'new') {
-        (payload as any).course_id = urlCourseId;
-      }
 
-      const response = await fetch('/api/class-profiles', {
+      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -346,12 +416,13 @@ export default function EditCoursePage() {
         body: JSON.stringify(payload),
       });
 
+      
+
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to generate profile');
       }
 
-      console.log('data:', data);
       const review = data.review ?? null;
 
       const { profileText, design } = extractProfileFromReview(review);
@@ -392,12 +463,17 @@ export default function EditCoursePage() {
       }));
 
       if (typeof nextId === 'string' && nextId !== 'new') {
-        // Preserve course_id and instructor_id when navigating
-        const navParams = new URLSearchParams();
-        if (urlCourseId && urlCourseId !== 'new') navParams.set('courseId', urlCourseId);
-        if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-        const queryString = navParams.toString();
-        router.push(`/courses/${urlCourseId || courseId}/view${queryString ? `?${queryString}` : ''}`);
+        // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
+        if (urlCourseId) {
+          router.push(`/courses/${urlCourseId}/class-profiles/${nextId}/view`);
+        } else {
+          // Fallback to old structure with query params
+          const navParams = new URLSearchParams();
+          if (urlCourseId) navParams.set('courseId', urlCourseId);
+          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+          const queryString = navParams.toString();
+          router.push(`/courses/${urlCourseId || 'new'}/class-profiles/${nextId}/view${queryString ? `?${queryString}` : ''}`);
+        }
       } else {
         setError('Profile ID was not returned by the server.');
       }
@@ -409,14 +485,7 @@ export default function EditCoursePage() {
   };
 
   const handleCancel = () => {
-    if (urlCourseId && urlCourseId !== 'new') {
-      const navParams = new URLSearchParams();
-      if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-      const queryString = navParams.toString();
-      router.push(`/courses/${urlCourseId}/view${queryString ? `?${queryString}` : ''}`);
-    } else {
-      router.push('/');
-    }
+    router.push('/');
   };
 
   if (loading) {
@@ -522,7 +591,7 @@ export default function EditCoursePage() {
                   value={formData.disciplineInfo.fieldDescription}
                   onChange={(e) => handleInputChange('disciplineInfo', 'fieldDescription', e.target.value)}
                   className={styles.textarea}
-                  placeholder="Summarize the discipline's focus areas, core questions, and primary methods."
+                  placeholder="Summarize the discipline’s focus areas, core questions, and primary methods."
                   rows={3}
                 />
               </div>
@@ -842,3 +911,4 @@ export default function EditCoursePage() {
     </div>
   );
 }
+
