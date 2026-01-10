@@ -52,6 +52,7 @@ interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
   readingId?: string | null;  // Reading ID for fallback when URL fails and for RESTful API calls
+  initialPage?: number;
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -75,8 +76,9 @@ interface PdfPreviewProps {
   courseId?: string | null;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, initialPage, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const initialScrollDoneRef = useRef(false);
   
   // Debug logging
   useEffect(() => {
@@ -85,8 +87,13 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       url: url,
       hasFile: !!file,
       fileName: file?.name,
+      initialPage,
     });
   }, [file, url]);
+
+  useEffect(() => {
+    initialScrollDoneRef.current = false;
+  }, [readingId, url]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -562,6 +569,33 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, viewportVersion]);
+
+  // Auto-scroll to initial page (1-based) after it has been rendered and attached
+  useEffect(() => {
+    if (!initialPage || !Number.isFinite(initialPage) || initialPage <= 0) return;
+    if (!containerRef.current) return;
+    if (initialScrollDoneRef.current) return;
+
+    // Wait until the page is rendered & attached to DOM
+    if (!pageElementsRef.current.has(initialPage)) return;
+
+    const id = window.requestAnimationFrame(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      const target = container.querySelector(`[data-page-number="${initialPage}"]`) as HTMLElement | null;
+      if (!target) return;
+
+      container.scrollTo({
+        top: Math.max(0, target.offsetTop - 12),
+        behavior: 'smooth',
+      });
+      initialScrollDoneRef.current = true;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, [initialPage, pageElements]);
 
   useEffect(() => {
     if (!pdfDoc) return;
@@ -1931,7 +1965,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
             const pageContainer = pageElements.get(pageNumber);
             
             return (
-              <div key={pageNumber} className="flex flex-col items-center mb-4">
+              <div key={pageNumber} className="flex flex-col items-center mb-4" data-page-number={pageNumber}>
                 {pageContainer ? (
                   <div ref={(el) => {
                     if (el && pageContainer) {

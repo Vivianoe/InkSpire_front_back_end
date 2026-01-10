@@ -46,6 +46,12 @@ interface SessionReadingNavigation {
   instructorId: string;
 }
 
+interface AssignmentReadingRange {
+  startPage?: number;
+  endPage?: number;
+  perusallDocumentId?: string;
+}
+
 export default function ScaffoldPage() {
   const router = useRouter();
   const params = useParams();
@@ -56,6 +62,7 @@ export default function ScaffoldPage() {
   const [error, setError] = useState<string | null>(null);
   const [navigationData, setNavigationData] = useState<SessionReadingNavigation | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [initialPdfPage, setInitialPdfPage] = useState<number | null>(null);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
   const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
@@ -132,6 +139,29 @@ export default function ScaffoldPage() {
       loadScaffolds();
     }
   }, [courseId, sessionId, readingId]);
+
+  // Load assignment page range (if available) for this reading and set initial PDF page
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.sessionStorage.getItem('inkspire:assignmentReadingRanges');
+      if (!raw) {
+        setInitialPdfPage(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, AssignmentReadingRange>;
+      const range = parsed && typeof parsed === 'object' ? parsed[readingId] : undefined;
+      const start = range?.startPage;
+      if (typeof start === 'number' && Number.isFinite(start) && start > 0) {
+        setInitialPdfPage(start);
+      } else {
+        setInitialPdfPage(null);
+      }
+    } catch (e) {
+      setInitialPdfPage(null);
+      console.warn('[ScaffoldPage] Failed to read assignment page ranges:', e);
+    }
+  }, [readingId]);
 
   useEffect(() => {
     return () => {
@@ -1004,6 +1034,7 @@ ${scaffold.text || 'No scaffold text available'}
             <PdfPreview 
               url={pdfUrl || undefined}
               file={null}
+              initialPage={initialPdfPage ?? undefined}
               searchQueries={processedScaffolds.map(s => s.fragment).filter(f => f && f.trim())}
               scaffolds={processedScaffolds.map(s => ({
                 id: s.id,

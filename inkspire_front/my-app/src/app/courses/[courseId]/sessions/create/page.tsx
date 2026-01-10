@@ -326,6 +326,36 @@ export default function SessionCreationPage() {
       if (data?.success && Array.isArray(data?.readings)) {
         setAssignmentReadings(data.readings);
         setSelectedAssignmentName(data.assignment_name || '');
+
+        if (typeof window !== 'undefined') {
+          try {
+            const existingRaw = window.sessionStorage.getItem('inkspire:assignmentReadingRanges');
+            const existing = existingRaw ? JSON.parse(existingRaw) : {};
+            const next: Record<string, { startPage?: number; endPage?: number; perusallDocumentId?: string }> = {
+              ...(existing && typeof existing === 'object' ? existing : {}),
+            };
+
+            for (const r of data.readings) {
+              if (!r || typeof r !== 'object') continue;
+              const localReadingId = (r as any).local_reading_id;
+              if (typeof localReadingId !== 'string' || localReadingId.length === 0) continue;
+
+              const startPage = typeof (r as any).start_page === 'number' ? (r as any).start_page : undefined;
+              const endPage = typeof (r as any).end_page === 'number' ? (r as any).end_page : undefined;
+              const perusallDocumentId = typeof (r as any).perusall_document_id === 'string' ? (r as any).perusall_document_id : undefined;
+
+              next[localReadingId] = {
+                startPage: typeof startPage === 'number' ? startPage : undefined,
+                endPage: typeof endPage === 'number' ? endPage : undefined,
+                perusallDocumentId,
+              };
+            }
+
+            window.sessionStorage.setItem('inkspire:assignmentReadingRanges', JSON.stringify(next));
+          } catch (e) {
+            console.warn('[SessionCreationPage] Failed to persist assignment page ranges:', e);
+          }
+        }
       } else {
         setAssignmentReadings([]);
       }
