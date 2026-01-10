@@ -691,7 +691,18 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            <div className={styles.headerLeft}>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className={styles.backIconButton}
+                aria-label="Back to Session"
+                title="Back to Session"
+              >
+                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
+              </button>
+              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div className={styles.loadingSpinner}>Loading scaffolds...</div>
@@ -707,7 +718,18 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            <div className={styles.headerLeft}>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className={styles.backIconButton}
+                aria-label="Back to Session"
+                title="Back to Session"
+              >
+                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
+              </button>
+              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div style={{ color: '#dc2626', textAlign: 'center' }}>
@@ -728,10 +750,23 @@ ${scaffold.text || 'No scaffold text available'}
       <div className={styles.layoutAfterGeneration}>
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
-          <div className={styles.formCard}>
-            <div className={styles.formHeader}>
+          {/* Header (outside card) */}
+          <div className={styles.formHeader}>
+            <div className={styles.headerLeft}>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className={styles.backIconButton}
+                aria-label="Back to Session"
+                title="Back to Session"
+              >
+                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
+              </button>
               <h1 className={styles.formTitle}>Reading Scaffolds</h1>
             </div>
+          </div>
+
+          <div className={styles.formCard}>
             
             {/* Session Information Form */}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
@@ -794,30 +829,8 @@ ${scaffold.text || 'No scaffold text available'}
             </div>
             */}
 
-            {/* Navigation buttons */}
-            {enableNavigation && navigationData && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                <button
-                  onClick={() => navigateToReading('prev')}
-                  disabled={!canGoPrev}
-                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                  style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
-                >
-                  ← Previous Reading
-                </button>
-                <button
-                  onClick={() => navigateToReading('next')}
-                  disabled={!canGoNext}
-                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                  style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
-                >
-                  Next Reading →
-                </button>
-              </div>
-            )}
-
             {/* Generate Scaffolds Button */}
-            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+            <div style={{ textAlign: 'center' }}>
               <button
                 onClick={handleGenerateScaffolds}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
@@ -827,17 +840,6 @@ ${scaffold.text || 'No scaffold text available'}
                 {generating ? 'Generating...' : 'Generate Scaffolds'}
               </button>
             </div>
-
-            {/* Back button */}
-            <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-              <button
-                onClick={() => router.back()}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-              >
-                ← Back to Session
-              </button>
-            </div>
-
             {/* Publish and Download buttons */}
             {/*
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
@@ -876,6 +878,28 @@ ${scaffold.text || 'No scaffold text available'}
             </div> 
             */}
           </div> 
+
+          {/* Navigation buttons (outside card, below it) */}
+          {enableNavigation && navigationData && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }}>
+              <button
+                onClick={() => navigateToReading('prev')}
+                disabled={!canGoPrev}
+                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
+              >
+                ← Previous Reading
+              </button>
+              <button
+                onClick={() => navigateToReading('next')}
+                disabled={!canGoNext}
+                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
+              >
+                Next Reading →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Middle: PDF content */}

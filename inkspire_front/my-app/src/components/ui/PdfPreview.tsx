@@ -51,7 +51,6 @@ const loadRangy = async () => {
 interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
-  readingId?: string | null;  // Reading ID for fallback when URL fails
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -1188,10 +1187,15 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     const rect = native.getBoundingClientRect();
     const pageRect = pageEl.getBoundingClientRect();
 
+    // Guard against transient layout states (0-sized pages) which produce NaN/Infinity and break backend validation
+    if (!pageRect.width || !pageRect.height) return null;
+
     const fx = (rect.left - pageRect.left) / pageRect.width;
     const fx2 = (rect.right - pageRect.left) / pageRect.width;
     let fy = (rect.top - pageRect.top) / pageRect.height;
     let fy2 = (rect.bottom - pageRect.top) / pageRect.height;
+
+    if (![fx, fx2, fy, fy2].every((n) => Number.isFinite(n))) return null;
 
     // Keep fractional Y in [0, 0.999]
     fy = Math.min(Math.max(fy, 0), 0.999);
@@ -1636,16 +1640,20 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+            if (coords) {
             highlightRecordsRef.current.push({
               rangeType: 'text',
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
               fragment: text.substring(start, end),
-              queryFragment: originalQueryFragment || query,
+                queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
+            } else if (debug) {
+              console.warn('[PdfPreview] Skipping highlight record: invalid coords (layout not ready)');
+            }
             if (debug) console.log('[PdfPreview] Added highlight record to array');
           }
           try { rng.detach?.(); } catch {}
@@ -1700,6 +1708,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               annotationId: annotationId || 'none'
             });
           }
+        if (coords) {
         highlightRecordsRef.current.push({
           rangeType: 'text',
           rangePage: pageNum,
@@ -1710,6 +1719,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           ...coords,
           ...(annotationId ? { annotation_id: annotationId } : {}),
         });
+      }
       }
       try { rng.detach?.(); } catch {}
         return 1; // Return immediately after exact match
@@ -1739,16 +1749,18 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           try { applier.applyToRange(rng); } catch {}
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+            if (coords) {
             highlightRecordsRef.current.push({
               rangeType: 'text',
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
               fragment: keyMatch[0],
-              queryFragment: originalQueryFragment || query,
+                queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
+          }
           }
           try { rng.detach?.(); } catch {}
           return 1; // Return first match found
@@ -2029,6 +2041,23 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         const report = highlightRecordsRef.current || [];
         if (report.length && !coordsReportedRef.current) {
           try {
+            const isFiniteNum = (v: any) => typeof v === 'number' && Number.isFinite(v);
+            const isValidCoord = (c: any) => {
+              return (
+                c &&
+                typeof c.rangeType === 'string' &&
+                Number.isInteger(c.rangePage) &&
+                Number.isInteger(c.rangeStart) &&
+                Number.isInteger(c.rangeEnd) &&
+                typeof c.fragment === 'string' &&
+                c.fragment.length > 0 &&
+                isFiniteNum(c.positionStartX) &&
+                isFiniteNum(c.positionStartY) &&
+                isFiniteNum(c.positionEndX) &&
+                isFiniteNum(c.positionEndY)
+              );
+            };
+
             // Format: backend expects { coords: [...] }
             // Add session_id and annotation_id to each coord item
             // Backend can use annotation_id to find current_version_id if annotation_version_id is not provided
@@ -2037,7 +2066,16 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               session_id: sessionId || undefined,
               // annotation_id is already included in coord if found during highlighting
               // Backend will use annotation_id to find current_version_id if annotation_version_id is not provided
-            }));
+            })).filter(isValidCoord);
+
+            const dropped = report.length - coordsWithMetadata.length;
+            if (dropped > 0) {
+              console.warn(`[PdfPreview] Dropped ${dropped} invalid coord(s) before upload (likely NaN/null due to layout timing)`);
+            }
+            if (coordsWithMetadata.length === 0) {
+              console.warn('[PdfPreview] No valid coords to upload (skipping highlight-report)');
+              return;
+            }
             const formattedReport = { coords: coordsWithMetadata };
             
             // Build RESTful URL with course_id, session_id, and reading_id from props
