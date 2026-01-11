@@ -78,7 +78,7 @@ export default function SessionCreationPage() {
   const profileId = searchParams.get('profileId') as string | undefined;
   const urlSessionId = searchParams.get('sessionId') as string | undefined;
   
-  const [mode, setMode] = useState<'create' | 'edit' | 'select' | 'view'>('select');
+  const [mode, setMode] = useState<'create' | 'edit' | 'select'>('select');
   const [weekNumber, setWeekNumber] = useState(1);
   const [sessionTitle, setSessionTitle] = useState('');
   const [sessionDescription, setSessionDescription] = useState('');
@@ -155,11 +155,6 @@ export default function SessionCreationPage() {
         assignmentGoal: currentVersionData?.assignment_goals_json?.goal || '',
         selectedReadingIds: currentVersionData?.reading_ids || sessionData.reading_ids || [],
       });
-
-      // If coming from view mode, keep it; otherwise switch to create mode for editing
-      if (mode !== 'view') {
-        setMode('create');
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load existing session.');
     } finally {
@@ -274,6 +269,7 @@ export default function SessionCreationPage() {
   // Load existing session if sessionId is in URL
   useEffect(() => {
     if (urlSessionId) {
+      setMode('edit');
       loadExistingSession(urlSessionId);
     }
   }, [urlSessionId, loadExistingSession]);
@@ -354,9 +350,9 @@ export default function SessionCreationPage() {
     // Check if a session already exists for this assignment
     const existingSession = sessions.find(s => s.perusall_assignment_id === assignmentId);
     if (existingSession) {
-      // Open existing session in view/edit mode
+      // Open existing session directly in the unified edit UI
       setSelectedSessionId(existingSession.id);
-      setMode('view');
+      setMode('edit');
       loadExistingSession(existingSession.id);
     } else {
       // Create new session for this assignment
@@ -375,7 +371,6 @@ export default function SessionCreationPage() {
       setError(null);
 
       let sessionId: string;
-      let shouldCreateNewVersion = false;
 
       // If continuing existing session, check if dirty and create new version if needed
       if (urlSessionId || selectedSessionId) {
@@ -438,7 +433,6 @@ export default function SessionCreationPage() {
         }
 
         sessionId = data.session_id;
-        shouldCreateNewVersion = true; // New session always creates version 1
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -523,43 +517,40 @@ export default function SessionCreationPage() {
 
       let sessionId: string;
 
+      const ensureSessionVersionIsCurrent = async (existingSessionId: string) => {
+        if (!isDraftDirty) {
+          return;
+        }
+
+        const payload = {
+          session_info_json: {
+            description: sessionDescription || undefined,
+          },
+          assignment_info_json: {
+            description: assignmentDescription || undefined,
+          },
+          assignment_goals_json: {
+            goal: assignmentGoal || undefined,
+          },
+          reading_ids: selectedReadingIds,
+        };
+
+        const response = await fetch(`/api/courses/${courseId}/sessions/${existingSessionId}/versions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.detail || data?.message || 'Failed to create new version.');
+        }
+      };
+
       // If continuing existing session, check if we need to create new version
       if (urlSessionId || selectedSessionId) {
         sessionId = urlSessionId || selectedSessionId!;
-        
-        // If draft is dirty, we'll create a new version when navigating
-        if (isDraftDirty) {
-          const payload = {
-            session_info_json: {
-              description: sessionDescription || undefined,
-            },
-            assignment_info_json: {
-              description: assignmentDescription || undefined,
-            },
-            assignment_goals_json: {
-              goal: assignmentGoal || undefined,
-            },
-            reading_ids: selectedReadingIds,
-          };
-
-          const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/versions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(data?.detail || data?.message || 'Failed to create new version.');
-          }
-
-          setError(null);
-          setSuccess('New version created successfully! Click "Start scaffolds generation" to proceed.');
-        } else {
-          // No changes, just confirm session is ready
-          setError(null);
-          setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
-        }
+        await ensureSessionVersionIsCurrent(sessionId);
       } else {
         // Create new session with perusall_assignment_id
         const payload = {
@@ -584,10 +575,10 @@ export default function SessionCreationPage() {
         }
 
         sessionId = data.session_id;
-        setError(null);
-        setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
-        // Refresh sessions list
-        // fetchSessions();
+
+        // Keep UI semantics consistent: newly created session is now an existing session we can edit
+        setSelectedSessionId(sessionId);
+        setMode('edit');
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -602,18 +593,21 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId,
+            profileId: profileId || '',
             instructorId: resolvedInstructorId,
           })
         );
       }
-      
-      // Navigate to scaffold display page with navigation context (but don't generate scaffolds yet)
-      setTimeout(() => {
-        router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
-      }, 1000);
+
+      setError(null);
+      setSuccess('Session saved. Redirecting...');
+
+      // Navigate to scaffolds page (user can generate scaffolds there)
+      router.push(
+        `/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start scaffolds generation. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to start working on readings. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -872,125 +866,82 @@ export default function SessionCreationPage() {
           <div className={styles.emptyState}>Loading existing session...</div>
         )}
 
-        {!isLoadingExistingSession && mode === 'select' && (
-          <section className={styles.selectionSection}>
-            <div className={styles.selectionHeader}>
-              <div>
-                <h2 className={styles.sectionTitle}>Select Perusall Assignment</h2>
-                <p className={styles.sectionHelper}>
-                  Choose a Perusall assignment to create or open a session. First time creates a new session, second time opens existing session.
-                </p>
-              </div>
+        {!isLoadingExistingSession && mode === 'select' ? (
+        <section className={styles.selectionSection}>
+          <div className={styles.selectionHeader}>
+            <div>
+              <h2 className={styles.sectionTitle}>Select Perusall Assignment</h2>
+              <p className={styles.sectionHelper}>
+                Choose a Perusall assignment to create or open a session.
+              </p>
             </div>
+          </div>
 
-            <div className={styles.readingList}>
-              {loadingPerusallAssignments ? (
-                <div className={styles.emptyState}>Loading Perusall assignments…</div>
-              ) : perusallAssignments.length === 0 ? (
-                <div className={styles.emptyState}>
-                  No Perusall assignments found. Please configure Perusall integration for this course.
-                </div>
-              ) : (
-                perusallAssignments.map(assignment => {
-                  const existingSession = sessions.find(s => s.perusall_assignment_id === assignment.id);
-                  const isSelected = selectedPerusallAssignmentId === assignment.id;
-                  return (
-                    <div
-                      key={assignment.id}
-                      className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                      onClick={() => handleSelectAssignment(assignment.id)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className={styles.readingMeta}>
-                        <div>
-                          <p className={styles.readingName}>
-                            {assignment.name}
-                            {existingSession && (
-                              <span style={{
-                                marginLeft: '8px',
-                                padding: '2px 8px',
-                                backgroundColor: '#10b981',
-                                color: 'white',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                fontWeight: '500'
-                              }}>
-                                ✓ Session Exists
-                              </span>
-                            )}
-                          </p>
-                          <p className={styles.readingDetails}>
-                            {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
-                            {existingSession && (
-                              <> · {existingSession.readingIds?.length || 0} reading{(existingSession.readingIds?.length || 0) !== 1 ? 's' : ''}</>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      <div className={styles.readingActions}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectAssignment(assignment.id);
-                          }}
-                          className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
-                        >
-                          {existingSession ? 'Open Session' : 'Create Session'}
-                        </button>
+          <div className={styles.readingList}>
+            {loadingPerusallAssignments ? (
+              <div className={styles.emptyState}>Loading Perusall assignments…</div>
+            ) : perusallAssignments.length === 0 ? (
+              <div className={styles.emptyState}>
+                No Perusall assignments found. Please configure Perusall integration for this course.
+              </div>
+            ) : (
+              perusallAssignments.map(assignment => {
+                const existingSession = sessions.find(s => s.perusall_assignment_id === assignment.id);
+                const isSelected = selectedPerusallAssignmentId === assignment.id;
+                return (
+                  <div
+                    key={assignment.id}
+                    className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
+                    onClick={() => handleSelectAssignment(assignment.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className={styles.readingMeta}>
+                      <div>
+                        <p className={styles.readingName}>
+                          {assignment.name}
+                          {existingSession && (
+                            <span style={{
+                              marginLeft: '8px',
+                              padding: '2px 8px',
+                              backgroundColor: '#10b981',
+                              color: 'white',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: '500'
+                            }}>
+                              ✓ Session Exists
+                            </span>
+                          )}
+                        </p>
+                        <p className={styles.readingDetails}>
+                          {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
+                          {existingSession && (
+                            <> · {existingSession.readingIds?.length || 0} reading{(existingSession.readingIds?.length || 0) !== 1 ? 's' : ''}</>
+                          )}
+                        </p>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        )}
-
-        {!isLoadingExistingSession && mode === 'view' && (
-          <section className={styles.selectionSection}>
-            <div className={styles.selectionHeader}>
-              <div>
-                <h2 className={styles.sectionTitle}>View Session</h2>
-                <p className={styles.sectionHelper}>
-                  Viewing existing session. Click "Edit" to make changes.
-                </p>
-              </div>
-              <button
-                onClick={() => setMode('create')}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-              >
-                Edit Session
-              </button>
-              <button
-                onClick={() => setMode('select')}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-              >
-                Back to Assignments
-              </button>
-            </div>
-            {/* Display session data in read-only mode */}
-            <div className={styles.readingList}>
-              <div className={styles.readingCard}>
-                <div className={styles.readingMeta}>
-                  <div>
-                    <p className={styles.readingName}>{sessionTitle || 'Untitled Session'}</p>
-                    <p className={styles.readingDetails}>
-                      Week {weekNumber} · {selectedReadingIds.length} reading{selectedReadingIds.length !== 1 ? 's' : ''}
-                    </p>
-                    {sessionDescription && (
-                      <p className={styles.readingSecondaryDetail} style={{ marginTop: '0.5rem' }}>
-                        {sessionDescription}
-                      </p>
-                    )}
+                    <div className={styles.readingActions}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectAssignment(assignment.id);
+                        }}
+                        className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
+                      >
+                        {existingSession ? 'Open Session' : 'Create Session'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
+                );
+              })
+            )}
+          </div>
+        </section>
+        ) : null}
 
-        {!isLoadingExistingSession && mode === 'create' && (
+        {!isLoadingExistingSession && (mode === 'create' || mode === 'edit') && (
           <>
             {sessions.length > 0 && (
               <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1290,7 +1241,7 @@ export default function SessionCreationPage() {
                     : undefined
                 }
               >
-                {creating ? 'Starting...' : `Start scaffolds generation`}
+                {creating ? 'Starting...' : 'Start to work on readings'}
               </button>
             </div>
           </div>
