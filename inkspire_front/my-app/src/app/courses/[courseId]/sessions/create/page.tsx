@@ -646,36 +646,81 @@ export default function SessionCreationPage() {
     setUploadingReading(perusallDocumentId);
     setError(null);
     try {
-      const base64 = await fileToBase64(file);
+      const MAX_PDF_UPLOAD_BYTES = 100 * 1024 * 1024;
+      if (file.size > MAX_PDF_UPLOAD_BYTES) {
+        throw new Error(
+          `PDF is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max allowed is ${(MAX_PDF_UPLOAD_BYTES / (1024 * 1024)).toFixed(0)} MB.`
+        );
+      }
+
       // Use document name from assignment readings if available
       const assignmentReading = assignmentReadings.find(ar => ar.perusall_document_id === perusallDocumentId);
       const readingName = assignmentReading?.perusall_document_name || file.name.replace(/\.pdf$/i, '');
-      
-      const payload = {
-        instructor_id: resolvedInstructorId,
-        readings: [{
-          title: readingName,
-          perusall_reading_id: perusallDocumentId,
-          source_type: 'uploaded' as const,
-          content_base64: base64,
-          original_filename: file.name,
-        }],
-      };
 
-      const response = await fetch(`/api/courses/${courseId}/readings/batch-upload`, {
+      const signedUrlResp = await fetch(`/api/courses/${courseId}/readings/signed-upload-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ filename: file.name, content_type: 'application/pdf' }),
+      });
+
+      const signedUrlData = await signedUrlResp.json().catch(() => null);
+      if (!signedUrlResp.ok) {
+        const fallbackText = signedUrlData ? '' : await signedUrlResp.text().catch(() => '');
+        throw new Error(
+          (signedUrlData as any)?.detail ||
+            (signedUrlData as any)?.message ||
+            (fallbackText || 'Failed to create signed upload URL.')
+        );
+      }
+
+      const filePath = (signedUrlData as any)?.file_path as string | undefined;
+      const signedUrl = (signedUrlData as any)?.signed_url as string | undefined;
+      const token = (signedUrlData as any)?.token as string | undefined;
+
+      if (!filePath || !signedUrl || !token) {
+        throw new Error('Signed upload URL response missing file_path/signed_url/token.');
+      }
+
+      const uploadResp = await fetch(signedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/pdf',
+          'x-upsert': 'true',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: file,
+      });
+
+      if (!uploadResp.ok) {
+        const t = await uploadResp.text().catch(() => '');
+        throw new Error(t || `Failed to upload PDF to signed URL (HTTP ${uploadResp.status}).`);
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/readings/from-storage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructor_id: resolvedInstructorId,
+          title: readingName,
+          file_path: filePath,
+          perusall_reading_id: perusallDocumentId,
+          source_type: 'uploaded',
+        }),
       });
       
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(data?.detail || data?.message || 'Failed to upload reading.');
+        const fallbackText = data ? '' : await response.text().catch(() => '');
+        throw new Error(
+          (data as any)?.detail ||
+            (data as any)?.message ||
+            (fallbackText || 'Failed to save reading from storage.')
+        );
       }
       
       // If upload successful and we have assignment context, create Perusall mapping
-      if (selectedPerusallAssignmentId && data.readings && data.readings.length > 0) {
-        const createdReading = data.readings[0];
+      if (selectedPerusallAssignmentId && data?.reading?.id) {
+        const createdReading = data.reading;
         try {
           // Get course to find perusall_course_id
           const courseResponse = await fetch(`/api/courses/${courseId}`);

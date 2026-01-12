@@ -89,6 +89,8 @@ export default function ReadingUploadPage() {
   const [loadingPerusall, setLoadingPerusall] = useState(false);
   const [selectedPerusallReading, setSelectedPerusallReading] = useState<string | null>(null);
 
+  const MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024;
+
   // Get instructor_id from query params, ensure it's never null or undefined
   const instructorIdFromParams = searchParams?.get('instructorId');
   const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
@@ -104,46 +106,91 @@ export default function ReadingUploadPage() {
       setError('Please upload only one PDF file for each Perusall reading.');
       return;
     }
+
+    const tooLarge = fileArray.find((f) => f.size > MAX_PDF_UPLOAD_BYTES);
+    if (tooLarge) {
+      setError(
+        `PDF is too large (${(tooLarge.size / (1024 * 1024)).toFixed(1)} MB). Max allowed is ${(MAX_PDF_UPLOAD_BYTES / (1024 * 1024)).toFixed(0)} MB.`
+      );
+      return;
+    }
     
     setUploading(true);
     setError(null);
     try {
-      const readingsPayload = await Promise.all(
-        fileArray.map(async file => {
-          const base64 = await fileToBase64(file);
+      await Promise.all(
+        fileArray.map(async (file) => {
           // Use Perusall reading name if available, otherwise use filename
-          const perusallReading = perusallReadingId 
+          const perusallReading = perusallReadingId
             ? perusallReadings.find(r => r.perusall_reading_id === perusallReadingId)
             : null;
-          const title = perusallReading 
-            ? perusallReading.perusall_reading_name 
+          const title = perusallReading
+            ? perusallReading.perusall_reading_name
             : file.name.replace(/\.pdf$/i, '');
-          
-          return {
-            title: title,
-            perusall_reading_id: perusallReadingId,
-            source_type: 'uploaded' as const,
-            content_base64: base64,
-            original_filename: file.name,
-          };
+
+          const signedUrlResp = await fetch(`/api/courses/${courseId}/readings/signed-upload-url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, content_type: 'application/pdf' }),
+          });
+
+          const signedUrlData = await signedUrlResp.json().catch(() => null);
+          if (!signedUrlResp.ok) {
+            const fallbackText = signedUrlData ? '' : await signedUrlResp.text().catch(() => '');
+            throw new Error(
+              (signedUrlData as any)?.detail ||
+                (signedUrlData as any)?.message ||
+                (fallbackText || 'Failed to create signed upload URL.')
+            );
+          }
+
+          const filePath = (signedUrlData as any)?.file_path as string | undefined;
+          const signedUrl = (signedUrlData as any)?.signed_url as string | undefined;
+          const token = (signedUrlData as any)?.token as string | undefined;
+
+          if (!filePath || !signedUrl || !token) {
+            throw new Error('Signed upload URL response missing file_path/signed_url/token.');
+          }
+
+          // Upload to signed URL (Supabase expects token header)
+          const uploadResp = await fetch(signedUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/pdf',
+              'x-upsert': 'true',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: file,
+          });
+
+          if (!uploadResp.ok) {
+            const t = await uploadResp.text().catch(() => '');
+            throw new Error(t || `Failed to upload PDF to signed URL (HTTP ${uploadResp.status}).`);
+          }
+
+          const response = await fetch(`/api/courses/${courseId}/readings/from-storage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instructor_id: resolvedInstructorId,
+              title,
+              file_path: filePath,
+              perusall_reading_id: perusallReadingId,
+              source_type: 'uploaded',
+            }),
+          });
+
+          const data = await response.json().catch(() => null);
+          if (!response.ok) {
+            const fallbackText = data ? '' : await response.text().catch(() => '');
+            throw new Error(
+              (data as any)?.detail ||
+                (data as any)?.message ||
+                (fallbackText || 'Failed to save reading from storage.')
+            );
+          }
         })
       );
-
-      // Use RESTful URL structure: /api/courses/{course_id}/readings/batch-upload
-      const payload = {
-        instructor_id: resolvedInstructorId,
-        readings: readingsPayload,
-      };
-
-      const response = await fetch(`/api/courses/${courseId}/readings/batch-upload`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.detail || data?.message || 'Failed to save readings.');
-      }
       
       // Refresh both readings and Perusall library
       await Promise.all([fetchReadings(), fetchPerusallLibrary()]);

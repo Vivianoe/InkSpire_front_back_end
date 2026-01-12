@@ -175,6 +175,14 @@ class BatchUploadReadingsRequest(BaseModel):
     readings: List[ReadingUploadItem]
 
 
+class CreateReadingFromStorageRequest(BaseModel):
+    instructor_id: str
+    title: str
+    file_path: str
+    perusall_reading_id: Optional[str] = None
+    source_type: str = "uploaded"
+
+
 class ReadingResponse(BaseModel):
     id: str
     title: str
@@ -192,6 +200,23 @@ class BatchUploadReadingsResponse(BaseModel):
     created_count: int
     readings: List[ReadingResponse]
     errors: List[Dict[str, Any]]
+
+
+class CreateReadingFromStorageResponse(BaseModel):
+    success: bool
+    reading: ReadingResponse
+
+
+class CreateReadingSignedUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str = "application/pdf"
+
+
+class CreateReadingSignedUploadUrlResponse(BaseModel):
+    success: bool
+    file_path: str
+    signed_url: str
+    token: str
 
 
 class ReadingContentResponse(BaseModel):

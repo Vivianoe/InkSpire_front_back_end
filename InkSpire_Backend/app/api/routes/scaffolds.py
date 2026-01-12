@@ -297,37 +297,32 @@ def generate_scaffolds_with_session(
     # Handle session_id from path parameter
     # If session_id is "new", create a new session; otherwise use existing session
     # need to handle the dirtystate existing session (as handled in sessions.py)
-    '''if session_id.lower() == "new":
-        # Create a new session (default week_number = 1, title = "Reading Session")
-        session = create_session(
-            db=db,
-            course_id=course_uuid,
-            week_number=1,
-            title="Reading Session",
+    
+    if session_id.lower() == "new":
+        raise HTTPException(
+            status_code=400,
+            detail="session_id must be an existing session UUID. Please create the session first, then call generate.",
         )
-        session_uuid = session.id
-        print(f"[generate_scaffolds_with_session] Created new session: {session_uuid}")
-    else:
-        # Use existing session
-        try:
-            session_uuid = uuid.UUID(session_id)
-            session = get_session_by_id(db, session_uuid)
-            if not session:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Session {session_id} not found",
-                )
-            # Verify session belongs to the course
-            if session.course_id != course_uuid:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Session {session_id} does not belong to course {course_id}",
-                )
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid session_id format: {session_id}. Use UUID or 'new' to create a new session",
-            )'''
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid session_id format: {session_id}. Must be a UUID.",
+        )
+
+    session = get_session_by_id(db, session_uuid)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found",
+        )
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session {session_id} does not belong to course {course_id}",
+        )
     
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)
