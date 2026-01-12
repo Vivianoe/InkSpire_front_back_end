@@ -580,6 +580,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     };
   }, [pdfDoc]);
 
+  
   // Highlight/search helpers
   const highlightRecordsRef = useRef<any[]>([]);
   const pendingScrollRef = useRef<string | null>(null);
@@ -626,20 +627,48 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function indexToDomRange(idxStart: number, idxEnd: number, map: any[]) {
-    function locate(idx: number) {
-      for (const e of map) { 
-        if (idx >= e.start && idx <= e.end) { 
+    const totalLen = map?.length ? (map[map.length - 1]?.end ?? 0) : 0;
+
+    function locateStart(idx: number) {
+      // Start positions should be half-open: [start, end)
+      for (const e of map) {
+        if (idx >= e.start && idx < e.end) {
           const offset = idx - e.start;
-          // Ensure offset is within node's actual length
           const nodeLength = e.node.textContent?.length || e.node.nodeValue?.length || 0;
-          const safeOffset = Math.min(offset, nodeLength);
-          return { node: e.node, offset: safeOffset }; 
+          const safeOffset = Math.min(Math.max(offset, 0), nodeLength);
+          return { node: e.node, offset: safeOffset };
         }
+      }
+      // Special-case: allow start at very end of text => last node end
+      if (idx === totalLen && map?.length) {
+        const last = map[map.length - 1];
+        const nodeLength = last.node.textContent?.length || last.node.nodeValue?.length || 0;
+        return { node: last.node, offset: nodeLength };
       }
       return null;
     }
-    const a = locate(idxStart);
-    const b = locate(idxEnd);
+
+    function locateEnd(idx: number) {
+      // End positions are allowed to be exactly node end.
+      for (const e of map) { 
+        if (idx >= e.start && idx <= e.end) { 
+          const offset = idx - e.start;
+          const nodeLength = e.node.textContent?.length || e.node.nodeValue?.length || 0;
+          const safeOffset = Math.min(Math.max(offset, 0), nodeLength);
+          return { node: e.node, offset: safeOffset }; 
+        }
+      }
+      // Special-case: allow end at very end of text => last node end
+      if (idx === totalLen && map?.length) {
+        const last = map[map.length - 1];
+        const nodeLength = last.node.textContent?.length || last.node.nodeValue?.length || 0;
+        return { node: last.node, offset: nodeLength };
+      }
+      return null;
+    }
+
+    const a = locateStart(idxStart);
+    const b = locateEnd(idxEnd);
     if (!a || !b) return null;
     
     // Additional safety check: ensure offsets are within node lengths
@@ -686,6 +715,399 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
    * @returns Escaped string safe for regex pattern matching
    */
   function escapeRegExp(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  /**
+   * Normalizes PDF text for robust matching:
+   * - lowercases
+   * - collapses whitespace
+   * - removes/normalizes many punctuation characters (including parentheses)
+   * - joins hyphenated line breaks (e.g., "inter-\nactive" -> "interactive")
+   * - removes zero-width chars
+   */
+  function normalizeForMatch(s: string): string {
+    if (!s) return '';
+    const ligMap: Record<string, string> = {
+      '\uFB00': 'ff',
+      '\uFB01': 'fi',
+      '\uFB02': 'fl',
+      '\uFB03': 'ffi',
+      '\uFB04': 'ffl',
+      '\uFB05': 'ft',
+      '\uFB06': 'st',
+    };
+    const greekMap: Record<string, string> = {
+      'α': 'alpha',
+      'β': 'beta',
+      'γ': 'gamma',
+      'δ': 'delta',
+      'ε': 'epsilon',
+      'θ': 'theta',
+      'λ': 'lambda',
+      'μ': 'mu',
+      'π': 'pi',
+      'ρ': 'rho',
+      'ϱ': 'rho',
+      'σ': 'sigma',
+      'τ': 'tau',
+      'ω': 'omega',
+      'Δ': 'delta',
+      'Λ': 'lambda',
+      'Π': 'pi',
+      'Ρ': 'rho',
+      'Σ': 'sigma',
+      'Ω': 'omega',
+    };
+    return s
+      .toLowerCase()
+      // normalize common ligatures (PDF text often uses these)
+      .replace(/[\uFB00-\uFB06]/g, (m) => ligMap[m] ?? m)
+      // normalize some Greek letters to ASCII words (helps with formulas)
+      .replace(/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/g, (m) => (greekMap[m] ?? m).toLowerCase())
+      // normalize subscripts/superscripts commonly used in formulas (e.g. σₑ, r³)
+      .replace(/[\u2080-\u2089]/g, (m) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(m)))
+      .replace(/[ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]/g, (m) => ({
+        'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm',
+        'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x',
+      } as Record<string, string>)[m] ?? m)
+      // normalize whitespace including NBSP
+      .replace(/[\s\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, ' ')
+      // join hyphenated line breaks: "foo- bar" -> "foobar"
+      .replace(/([a-z0-9])\s*[-\u2010\u2011\u2012\u2013\u2014\u2212]\s*([a-z0-9])/g, '$1$2')
+      // remove zero-width chars
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      // normalize quotes/dashes
+      .replace(/[“”«»„]/g, '"')
+      .replace(/[‘’‚]/g, "'")
+      .replace(/[–—]/g, '-')
+      // remove most punctuation (keep basic math operators so "x+y" still roughly searchable)
+      .replace(/[()\[\]{}<>《》【】（）]/g, ' ')
+      .replace(/[.,;:!?]/g, ' ')
+      // math/operator symbols are highly inconsistent in PDF text extraction; treat them as separators
+      .replace(/[+\-*/=^<>]/g, ' ')
+      // keep digits/letters; turn others into spaces
+      .replace(/[^a-z0-9\s]/g, ' ')
+      // collapse spaces again
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Builds a normalized string PLUS a mapping from normalized indices -> original indices.
+   * This enables robust substring search on normalized text while still creating DOM ranges on original text.
+   */
+  function buildNormalizedIndexWithMap(original: string) {
+    const normChars: string[] = [];
+    const map: number[] = []; // normIdx -> origIdx
+
+    const pushNorm = (ch: string, origIdx: number) => {
+      normChars.push(ch);
+      map.push(origIdx);
+    };
+
+    const pushSpace = (origIdx: number) => {
+      if (normChars.length && normChars[normChars.length - 1] !== ' ') {
+        pushNorm(' ', origIdx);
+      }
+    };
+
+    const ligMap: Record<string, string> = {
+      '\uFB00': 'ff',
+      '\uFB01': 'fi',
+      '\uFB02': 'fl',
+      '\uFB03': 'ffi',
+      '\uFB04': 'ffl',
+      '\uFB05': 'ft',
+      '\uFB06': 'st',
+    };
+    const greekMap: Record<string, string> = {
+      'α': 'alpha',
+      'β': 'beta',
+      'γ': 'gamma',
+      'δ': 'delta',
+      'ε': 'epsilon',
+      'θ': 'theta',
+      'λ': 'lambda',
+      'μ': 'mu',
+      'π': 'pi',
+      'ρ': 'rho',
+      'ϱ': 'rho',
+      'σ': 'sigma',
+      'τ': 'tau',
+      'ω': 'omega',
+      'Δ': 'delta',
+      'Λ': 'lambda',
+      'Π': 'pi',
+      'Ρ': 'rho',
+      'Σ': 'sigma',
+      'Ω': 'omega',
+    };
+
+    const subDigitMap: Record<string, string> = {
+      '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+    };
+    const subLetterMap: Record<string, string> = {
+      'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm',
+      'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x',
+    };
+
+    let i = 0;
+    while (i < original.length) {
+      const ch = original[i];
+
+      // Zero-width / soft hyphen
+      if (/^[\u00AD\u200B-\u200D\uFEFF]$/.test(ch)) {
+        i += 1;
+        continue;
+      }
+
+      // Ligatures (fi/fl/etc)
+      if (/^[\uFB00-\uFB06]$/.test(ch)) {
+        const rep = ligMap[ch] ?? '';
+        for (const outCh of rep) pushNorm(outCh, i);
+        i += 1;
+        continue;
+      }
+
+      // Greek letters (keep as ASCII words so we can match formulas)
+      if (/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/.test(ch)) {
+        const rep = (greekMap[ch] ?? '').toLowerCase();
+        for (const outCh of rep) pushNorm(outCh, i);
+        i += 1;
+        continue;
+      }
+
+      // Subscript digits/letters (e.g., σₑ)
+      if (subDigitMap[ch]) {
+        pushNorm(subDigitMap[ch], i);
+        i += 1;
+        continue;
+      }
+      if (subLetterMap[ch]) {
+        pushNorm(subLetterMap[ch], i);
+        i += 1;
+        continue;
+      }
+
+      // Hyphenated line breaks: letter/digit + hyphen + whitespace + letter/digit => join (skip hyphen+spaces)
+      const nextSlice = original.slice(i);
+      const hyphenMatch = nextSlice.match(/^([A-Za-z0-9])\s*[-\u2010\u2011\u2012\u2013\u2014\u2212]\s*([A-Za-z0-9])/);
+      if (hyphenMatch) {
+        // emit first char and second char as consecutive (map them to their respective orig indices)
+        const firstOrigIdx = i;
+        const secondOrigIdx = i + (hyphenMatch[0].lastIndexOf(hyphenMatch[2]));
+        pushNorm(hyphenMatch[1].toLowerCase(), firstOrigIdx);
+        pushNorm(hyphenMatch[2].toLowerCase(), secondOrigIdx);
+        i = secondOrigIdx + 1;
+        continue;
+      }
+
+      // Whitespace (collapse to single space)
+      if (/[\s\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Parentheses/brackets -> space
+      if (/[()\[\]{}<>《》【】（）]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Common punctuation -> space
+      if (/[.,;:!?]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Quotes/dashes normalization
+      if (/[“”«»„]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[‘’‚]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[–—]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Alnum
+      if (/[A-Za-z0-9]/.test(ch)) {
+        pushNorm(ch.toLowerCase(), i);
+        i += 1;
+        continue;
+      }
+      // Operators are highly inconsistent in PDF text extraction; treat as separators
+      if (/[+\-*/=^<>]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Superscript digits: ⁰¹²³⁴⁵⁶⁷⁸⁹ and ² ³
+      if (/[\u2070\u00B9\u00B2\u00B3\u2074-\u2079]/.test(ch)) {
+        const superscriptMap: Record<string, string> = {
+          '\u2070': '0',
+          '\u00B9': '1',
+          '\u00B2': '2',
+          '\u00B3': '3',
+          '\u2074': '4',
+          '\u2075': '5',
+          '\u2076': '6',
+          '\u2077': '7',
+          '\u2078': '8',
+          '\u2079': '9',
+        };
+        pushNorm((superscriptMap[ch] ?? ' ').toLowerCase(), i);
+        i += 1;
+        continue;
+      }
+
+      // Common math operators/symbols
+      if (/[×∙·∗]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[÷]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[≤]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[≥]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Other symbols -> space
+      pushSpace(i);
+      i += 1;
+    }
+
+    // Collapse spaces and trim while keeping a 1:1 mapping (crucial for accurate DOM range creation).
+    const outChars: string[] = [];
+    const outMap: number[] = [];
+    for (let k = 0; k < normChars.length; k += 1) {
+      const ch = normChars[k];
+      const origIdx = map[k] ?? 0;
+      if (ch === ' ') {
+        // collapse multiple spaces and avoid leading spaces
+        if (outChars.length === 0) continue;
+        if (outChars[outChars.length - 1] === ' ') continue;
+        outChars.push(' ');
+        outMap.push(origIdx);
+      } else {
+        outChars.push(ch);
+        outMap.push(origIdx);
+      }
+    }
+    // trim trailing space
+    if (outChars.length && outChars[outChars.length - 1] === ' ') {
+      outChars.pop();
+      outMap.pop();
+    }
+
+    return { normalized: outChars.join(''), normToOrig: outMap };
+  }
+
+  function mapNormRangeToOrig(normStart: number, normEnd: number, normToOrig: number[], fallbackTextLength: number) {
+    const s = (normStart >= 0 && normStart < normToOrig.length) ? normToOrig[normStart] : -1;
+    const e = (normEnd - 1 >= 0 && normEnd - 1 < normToOrig.length) ? normToOrig[normEnd - 1] : -1;
+    if (s === -1 || e === -1) return null;
+    // end is inclusive in mapping; convert to exclusive index
+    return { start: s, end: Math.min(e + 1, fallbackTextLength) };
+  }
+
+  function buildCompactNormalizedIndexWithMap(original: string) {
+    const { normalized, normToOrig } = buildNormalizedIndexWithMap(original);
+    const compactChars: string[] = [];
+    const compactMap: number[] = [];
+    for (let i = 0; i < normalized.length; i += 1) {
+      const ch = normalized[i];
+      if (ch === ' ') continue;
+      compactChars.push(ch);
+      compactMap.push(normToOrig[i] ?? 0);
+    }
+    return { normalized: compactChars.join(''), normToOrig: compactMap };
+  }
+
+  function buildAlnumIndexWithMap(original: string) {
+    const { normalized, normToOrig } = buildNormalizedIndexWithMap(original);
+    const alnumChars: string[] = [];
+    const alnumMap: number[] = [];
+    for (let i = 0; i < normalized.length; i += 1) {
+      const ch = normalized[i];
+      if (!/[a-z0-9]/.test(ch)) continue;
+      alnumChars.push(ch);
+      alnumMap.push(normToOrig[i] ?? 0);
+    }
+    return { normalized: alnumChars.join(''), normToOrig: alnumMap };
+  }
+
+  function findBestNormSpan(haystack: string, query: string) {
+    if (!haystack || !query) return null;
+
+    const fullIdx = haystack.indexOf(query);
+    if (fullIdx !== -1) return { start: fullIdx, end: fullIdx + query.length, method: 'full' as const };
+
+    const words = query.split(' ').filter(Boolean);
+    if (words.length < 3) {
+      // No-spaces query (e.g., alnum compact). Try anchors by fixed-length chunks.
+      if (query.length < 20) return null;
+      const k = Math.min(25, Math.max(10, Math.floor(query.length / 3)));
+      const startCand = query.slice(0, k);
+      const endCand = query.slice(-k);
+      const sIdx = haystack.indexOf(startCand);
+      if (sIdx === -1) return null;
+      const eIdx = haystack.indexOf(endCand, sIdx + startCand.length);
+      if (eIdx === -1) return null;
+      const spanEnd = eIdx + endCand.length;
+      if (spanEnd <= sIdx) return null;
+      return { start: sIdx, end: spanEnd, method: 'anchors' as const };
+    }
+
+    const startNs = [40, 30, 20, 15, 12, 10, 8, 6, 5, 3].filter(n => n <= words.length);
+    const endNs = [40, 30, 20, 15, 12, 10, 8, 6, 5, 3].filter(n => n <= words.length);
+    const startCands = startNs.map(n => words.slice(0, n).join(' '));
+    const endCands = endNs.map(n => words.slice(words.length - n).join(' '));
+
+    let best: { start: number; end: number; method: 'anchors' } | null = null;
+    for (const sCand of startCands) {
+      const sIdx = haystack.indexOf(sCand);
+      if (sIdx === -1) continue;
+      const searchFrom = sIdx + Math.max(1, sCand.length);
+
+      for (const eCand of endCands) {
+        const eIdx = haystack.indexOf(eCand, searchFrom);
+        if (eIdx === -1) continue;
+        const spanEnd = eIdx + eCand.length;
+        if (spanEnd <= sIdx) continue;
+        // Avoid pathological spans (e.g., common tokens matching far away)
+        if (spanEnd - sIdx > 20000) continue;
+
+        // Choose the tightest span to avoid accidentally highlighting too much.
+        if (!best || (spanEnd - sIdx) < (best.end - best.start)) {
+          best = { start: sIdx, end: spanEnd, method: 'anchors' };
+        }
+      }
+    }
+
+    return best;
+  }
 
   /**
    * Calculates text similarity between two strings using normalized comparison
@@ -744,9 +1166,9 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
 
     const HYPHENS = '\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212';
     const HYPHEN_CLASS = `[${HYPHENS}]`;
-    // GAP: prefer spaces, but allow no space or hyphens (more restrictive)
-    // This reduces false matches while still handling PDF text quirks
-    const GAP = `(?:\\s+|\\s*${HYPHEN_CLASS}\\s*|[\\s\\u00A0]{0,2})`;
+    // Allow light punctuation between tokens (e.g., parentheses, commas) and varying spaces/hyphens
+    const PUNCT = `[\\(\\)\\[\\]\\{\\}\\<\\>\\,\\.\\;\\:\\!\\?\"'\\uFF08\\uFF09\\u3010\\u3011\\uFF3B\\uFF3D]*`;
+    const GAP = `(?:${PUNCT}\\s+|\\s*${HYPHEN_CLASS}\\s*|${PUNCT}[\\s\\u00A0]{0,3}${PUNCT})`;
 
     const SUP_DIGITS = '0-9\\u2070\\u00B2\\u00B3\\u2074-\\u2079';
     const DIGIT_CLASS = `[${SUP_DIGITS}]+`;
@@ -1168,7 +1590,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
    * @param debug - If true, logs detailed debugging information
    * @returns Number of matches found and highlighted
    */
-  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false, annotationId?: string) {
+  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false, annotationId?: string, originalQueryFragment?: string) {
     const nodes = getTextNodesIn(layer);
     if (!nodes.length) {
       if (debug) console.log('[PdfPreview] No text nodes in layer');
@@ -1193,217 +1615,36 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         console.log('[PdfPreview] Text length:', text.length);
         console.log('[PdfPreview] Text sample (first 300 chars):', text.substring(0, 300));
       }
-      
-      // Normalize both query and text for better matching
-      // Use a simpler normalization that preserves character positions better
-      const normalize = (s: string) => {
-        return s.toLowerCase()
-          .trim()
-          .replace(/\s+/g, ' ')  // Multiple spaces to single space
-          .replace(/[""]/g, '"')  // Normalize quotes
-          .replace(/['']/g, "'")  // Normalize apostrophes
-          .replace(/…/g, '...');  // Normalize ellipsis
-        // Don't remove other special chars - they might be important for position mapping
-      };
-      const queryLower = normalize(query);
-      const textLower = normalize(text);
-      
-      // Strategy 1: Exact substring match (normalized)
-      let normalizedIndex = textLower.indexOf(queryLower);
-      
-      // Convert normalized index to original text index
-      // Since we only collapsed whitespace, we can map back approximately
-      let index = -1;
-      if (normalizedIndex !== -1) {
-        // Find the corresponding position in original text
-        let normalizedPos = 0;
-        let originalPos = 0;
-        let lastWasSpace = false;
-        
-        while (originalPos < text.length && normalizedPos < normalizedIndex) {
-          const char = text[originalPos].toLowerCase();
-          const normalizedChar = normalize(text[originalPos]);
-          
-          if (normalizedChar && normalizedChar.length > 0) {
-            normalizedPos++;
-            lastWasSpace = false;
-          } else if ((char === ' ' || char === '\n' || char === '\t') && !lastWasSpace) {
-            normalizedPos++; // Count first space
-            lastWasSpace = true;
-          } else if (char === ' ' || char === '\n' || char === '\t') {
-            lastWasSpace = true;
-          } else {
-            lastWasSpace = false;
-          }
-          
-          originalPos++;
-        }
-        
-        index = originalPos;
+      const queryNorm = normalizeForMatch(query);
+      const { normalized: textNorm, normToOrig } = buildNormalizedIndexWithMap(text);
+
+      const span = findBestNormSpan(textNorm, queryNorm);
+
+      // Compact mode: remove spaces (and any remaining non-alnum) to handle "radiusr", "are2", "MrI", etc.
+      const queryCompact = queryNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+      const compactIndex = (!span && queryCompact.length >= 8) ? buildCompactNormalizedIndexWithMap(text) : null;
+      const spanCompact = (!span && compactIndex) ? findBestNormSpan(compactIndex.normalized, queryCompact) : null;
+
+      const selected = span
+        ? { normStart: span.start, normEnd: span.end, normToOrig: normToOrig, mode: 'norm' as const }
+        : (spanCompact && compactIndex)
+          ? { normStart: spanCompact.start, normEnd: spanCompact.end, normToOrig: compactIndex.normToOrig, mode: 'compact' as const }
+          : null;
+
+      if (debug) {
+        console.log('[PdfPreview] Simple match selected span:', {
+          mode: selected?.mode,
+          span: span ? { ...span, qLen: queryNorm.length } : null,
+          spanCompact: spanCompact ? { ...spanCompact, qLen: queryCompact.length } : null,
+        });
       }
-      
-      // Helper function to map normalized text index to original text index
-      function mapNormalizedToOriginal(normIdx: number, originalText: string, normFn: (s: string) => string): number {
-        if (normIdx === -1) return -1;
-        let normalizedPos = 0;
-        let originalPos = 0;
-        let lastWasSpace = false;
-        
-        while (originalPos < originalText.length && normalizedPos < normIdx) {
-          const char = originalText[originalPos].toLowerCase();
-          const normalizedChar = normFn(originalText[originalPos]);
-          
-          if (normalizedChar && normalizedChar.length > 0) {
-            normalizedPos++;
-            lastWasSpace = false;
-          } else if ((char === ' ' || char === '\n' || char === '\t') && !lastWasSpace) {
-            normalizedPos++; // Count first space
-            lastWasSpace = true;
-          } else if (char === ' ' || char === '\n' || char === '\t') {
-            lastWasSpace = true;
-          } else {
-            lastWasSpace = false;
-          }
-          
-          originalPos++;
-        }
-        
-        return originalPos;
-      }
-      
-      // Strategy 2: If exact match fails, try with first few words (more flexible but still precise)
-      if (index === -1) {
-        const words = query.split(/\s+/).filter(w => w.length > 0);
-        
-        // For very long queries, try with first 15 words
-        if (words.length >= 15) {
-          const firstWords = words.slice(0, 15).join(' ');
-          const firstWordsLower = normalize(firstWords);
-          normalizedIndex = textLower.indexOf(firstWordsLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using first 15 words');
-            }
-          }
-        }
-        
-        // Try with first 10 words (for long queries)
-        if (index === -1 && words.length >= 10) {
-          const firstWords = words.slice(0, 10).join(' ');
-          const firstWordsLower = normalize(firstWords);
-          normalizedIndex = textLower.indexOf(firstWordsLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using first 10 words');
-            }
-          }
-        }
-        
-        // Try with first 8 words
-        if (index === -1 && words.length >= 8) {
-          const firstWords = words.slice(0, 8).join(' ');
-          const firstWordsLower = normalize(firstWords);
-          normalizedIndex = textLower.indexOf(firstWordsLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using first 8 words');
-            }
-          }
-        }
-        
-        // Try with first 5 words (for shorter queries)
-        if (index === -1 && words.length >= 5) {
-          const firstWords = words.slice(0, 5).join(' ');
-          const firstWordsLower = normalize(firstWords);
-          normalizedIndex = textLower.indexOf(firstWordsLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using first 5 words');
-            }
-          }
-        }
-        
-        // Try with first 3 words (last resort, but still specific enough)
-        if (index === -1 && words.length >= 3) {
-          const firstWords = words.slice(0, 3).join(' ');
-          const firstWordsLower = normalize(firstWords);
-          normalizedIndex = textLower.indexOf(firstWordsLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using first 3 words');
-            }
-          }
-        }
-      }
-      
-      // Strategy 3: For very long fragments, try matching by sentence chunks
-      if (index === -1 && query.length > 100) {
-        // Split by sentences (period, exclamation, question mark, but keep the punctuation)
-        // Use a regex that splits but keeps the delimiter
-        const sentencePattern = /([^.!?]+[.!?]+)/g;
-        const sentences: string[] = [];
-        let match;
-        while ((match = sentencePattern.exec(query)) !== null && sentences.length < 3) {
-          const sentence = match[1].trim();
-          if (sentence.length > 20) {
-            sentences.push(sentence);
-          }
-        }
-        
-        // Try each sentence in order
-        for (const sentence of sentences) {
-          if (sentence.length > 30) {
-            const sentenceLower = normalize(sentence);
-            normalizedIndex = textLower.indexOf(sentenceLower);
-            if (normalizedIndex !== -1) {
-              index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-              if (debug && index !== -1) {
-                console.log('[PdfPreview] Found match using sentence:', sentence.substring(0, 50));
-              }
-              break; // Found a match, stop
-            }
-          }
-        }
-      }
-      
-      // Strategy 4: For very long fragments, try matching by key phrases
-      if (index === -1 && query.length > 150) {
-        // Extract key phrases (longer phrases that are likely unique)
-        const phrases: string[] = [];
-        const words = query.split(/\s+/).filter(w => w.length > 0);
-        
-        // Extract phrases of 6-8 words
-        for (let i = 0; i < words.length - 5; i++) {
-          const phrase = words.slice(i, i + 6).join(' ');
-          if (phrase.length > 40) {
-            phrases.push(phrase);
-          }
-        }
-        
-        // Try each phrase
-        for (const phrase of phrases.slice(0, 5)) { // Limit to first 5 phrases
-          const phraseLower = normalize(phrase);
-          normalizedIndex = textLower.indexOf(phraseLower);
-          if (normalizedIndex !== -1) {
-            index = mapNormalizedToOriginal(normalizedIndex, text, normalize);
-            if (debug && index !== -1) {
-              console.log('[PdfPreview] Found match using key phrase:', phrase.substring(0, 50));
-            }
-            break; // Found a match, stop
-          }
-        }
-      }
-      
-      if (index !== -1) {
-        const start = index;
-        const end = start + query.length;
+
+      if (selected) {
+        const origRange = mapNormRangeToOrig(selected.normStart, selected.normEnd, selected.normToOrig, text.length);
+        if (!origRange) return 0;
+        const start = origRange.start;
+        const end = origRange.end;
         const rng: any = indexToDomRange(start, end, map);
-        
         if (rng) {
           try { 
             if (!applier) {
@@ -1421,7 +1662,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
                 textLength: text.length
               });
             }
-            
             // Verify highlight was applied (check after a short delay)
             setTimeout(() => {
               const highlights = layer.querySelectorAll('mark.pdf-highlight, mark.pdf-highlight-alt');
@@ -1436,7 +1676,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
             console.error('[PdfPreview] ❌ Error applying highlight:', e);
       return 0;
     }
-    
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
             highlightRecordsRef.current.push({
@@ -1445,13 +1684,12 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               rangeStart: start,
               rangeEnd: end,
               fragment: text.substring(start, end),
-              queryFragment: query,
+              queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
             if (debug) console.log('[PdfPreview] Added highlight record to array');
           }
-          
           try { rng.detach?.(); } catch {}
           return 1;
         } else {
@@ -1496,28 +1734,25 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       if (pageEl) {
         const coords = coordsPageEncodedY(rng, pageEl, pageNum);
           const matchedFragment = exactMatch[0];
-          
           if (debug) {
             console.log('[PdfPreview] Exact match found:', {
-              queryFragment: query.substring(0, 100),
+              queryFragment: (originalQueryFragment || query).substring(0, 100),
               matchedFragment: matchedFragment.substring(0, 100),
               similarity: 1.0,
               annotationId: annotationId || 'none'
             });
           }
-          
         highlightRecordsRef.current.push({
           rangeType: 'text',
           rangePage: pageNum,
           rangeStart: start,
           rangeEnd: end,
             fragment: matchedFragment,
-            queryFragment: query,
+            queryFragment: originalQueryFragment || query,
           ...coords,
           ...(annotationId ? { annotation_id: annotationId } : {}),
         });
       }
-
       try { rng.detach?.(); } catch {}
         return 1; // Return immediately after exact match
       }
@@ -1542,10 +1777,8 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         const start = keyMatch.index;
         const end = start + keyMatch[0].length;
           const rng: any = indexToDomRange(start, end, map);
-
         if (rng) {
           try { applier.applyToRange(rng); } catch {}
-
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
             highlightRecordsRef.current.push({
@@ -1554,16 +1787,14 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               rangeStart: start,
               rangeEnd: end,
               fragment: keyMatch[0],
-              queryFragment: query,
+              queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
           }
-
           try { rng.detach?.(); } catch {}
           return 1; // Return first match found
         }
-        
         if (keyMatch[0].length === 0) {
           keyRe.lastIndex++;
           if (keyRe.lastIndex >= text.length) break;
@@ -1572,6 +1803,69 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     
     return 0; // No match found
+  }
+
+  /**
+   * Attempts to highlight a fragment that is split across page boundaries.
+   * Strategy: highlight a prefix on page i and a suffix on page i+1.
+   * Best-effort: only returns success if both sides are found.
+   */
+  function highlightAcrossTwoLayers(layers: Element[], fullFragment: string, idx: number, annotationId?: string) {
+    if (idx < 0 || idx >= layers.length - 1) return 0;
+    if (!fullFragment || !fullFragment.trim()) return 0;
+
+    const layerA = layers[idx];
+    const layerB = layers[idx + 1];
+    const nodesA = getTextNodesIn(layerA);
+    const nodesB = getTextNodesIn(layerB);
+    if (!nodesA.length || !nodesB.length) return 0;
+
+    const { text: textA } = buildIndex(nodesA);
+    const { text: textB } = buildIndex(nodesB);
+    const boundary = textA.length;
+
+    // Build a combined searchable text (best effort). We keep it contiguous to allow matches spanning boundary.
+    const combinedNodes = [...nodesA, ...nodesB];
+    const { text: combinedText } = buildIndex(combinedNodes);
+    const { normalized: combinedNorm, normToOrig } = buildNormalizedIndexWithMap(combinedText);
+    const qNorm = normalizeForMatch(fullFragment);
+
+    let span = findBestNormSpan(combinedNorm, qNorm);
+    let selectedMap = normToOrig;
+    if (!span) {
+      const qCompact = qNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+      if (qCompact.length >= 8) {
+        const compact = buildCompactNormalizedIndexWithMap(combinedText);
+        const spanC = findBestNormSpan(compact.normalized, qCompact);
+        if (spanC) {
+          span = { start: spanC.start, end: spanC.end, method: spanC.method };
+          selectedMap = compact.normToOrig;
+        }
+      }
+    }
+    if (!span) return 0;
+
+    const origSpan = mapNormRangeToOrig(span.start, span.end, selectedMap, combinedText.length);
+    if (!origSpan) return 0;
+
+    const origStart = origSpan.start;
+    const origEnd = origSpan.end;
+
+    // If match doesn't actually cross boundary, let normal per-layer logic handle it.
+    if (origEnd <= boundary) return 0;
+    if (origStart >= boundary) return 0;
+
+    const partA = combinedText.slice(origStart, boundary).trim();
+    const partB = combinedText.slice(boundary, origEnd).trim();
+    if (!partA || !partB) return 0;
+
+    const applierA = appliersRef.current.A || appliersRef.current.B;
+    const applierB = appliersRef.current.B || appliersRef.current.A;
+    if (!applierA || !applierB) return 0;
+
+    const m1 = highlightInLayer(layerA, partA, applierA, false, annotationId, fullFragment);
+    const m2 = highlightInLayer(layerB, partB, applierB, false, annotationId, fullFragment);
+    return (m1 > 0 && m2 > 0) ? (m1 + m2) : 0;
   }
 
   // Track if coords have been reported to avoid duplicate uploads
@@ -1694,7 +1988,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         const processFragment = async (q: string, i: number) => {
           return new Promise<void>((resolve) => {
             // Use setTimeout to yield to UI thread
-            setTimeout(() => {
+            setTimeout(async () => {
               try {
           console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
           
@@ -1711,54 +2005,56 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
           
           let fragmentTotal = 0;
-                // Check all layers to ensure we find the fragment (but limit to prevent blocking)
-                // For fragments that haven't been found, check more layers
-                const maxLayers = fragmentTotal === 0 && i > 0 ? 10 : 5;
-                const layersToProcess = layers.slice(0, maxLayers);
                 let foundInLayer = false;
-                
-                for (const layer of layersToProcess) {
-                  const layerIdx = layersToProcess.indexOf(layer);
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
+
                   if (!applier) {
-                    if (i === 0 && layerIdx === 0) {
-                      console.warn(`[PdfPreview] Applier not available for fragment ${i + 1}, layer ${layerIdx + 1}`);
-                    }
-                    continue;
-                  }
-                  if (q && q.trim()) {
-                    // Enable debug for fragments that are likely to fail (long fragments or later fragments)
+            console.warn(`[PdfPreview] Applier not available for fragment ${i + 1}`);
+          } else if (q && q.trim()) {
+            // Scan ALL pages, but yield between batches to avoid blocking.
+            const BATCH_SIZE = 10;
+            for (let start = 0; start < layers.length; start += BATCH_SIZE) {
+              const end = Math.min(start + BATCH_SIZE, layers.length);
+              for (let layerIdx = start; layerIdx < end; layerIdx += 1) {
+                const layer = layers[layerIdx];
                     const isDebug = (i === 0 && layerIdx === 0) || (q.length > 200 && layerIdx === 0);
-                    const matches = highlightInLayer(layer, q, applier, isDebug, annotationId);
+                const matches = highlightInLayer(layer, q, applier, isDebug, annotationId, q);
                     if (matches > 0) {
                       console.log(`[PdfPreview] ✅ Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               fragmentTotal += matches;
                       foundInLayer = true;
-                      // Stop after first match to avoid duplicate highlights
                       break;
-                    } else if (isDebug) {
-                      console.log(`[PdfPreview] ❌ No match found for fragment ${i + 1} in layer ${layerIdx + 1}`);
-                    }
+                }
+
+                // Try cross-page match opportunistically for long fragments (likely to cross boundary)
+                if (!foundInLayer && q.length > 120 && layerIdx < layers.length - 1) {
+                  const splitMatches = highlightAcrossTwoLayers(layers, q, layerIdx, annotationId);
+                  if (splitMatches > 0) {
+                    fragmentTotal += splitMatches;
+                    foundInLayer = true;
+                    console.log(`[PdfPreview] ✅ Cross-page split match for fragment ${i + 1} across layers ${layerIdx + 1} & ${layerIdx + 2}`);
+                    break;
+                  }
+                }
+              }
+              if (foundInLayer) break;
+              // yield to UI thread between batches
+              await new Promise<void>((r) => setTimeout(r, 0));
                   }
                 }
                 
                 if (fragmentTotal === 0) {
                   console.warn(`[PdfPreview] ⚠️ Fragment ${i + 1} not found in any layer:`, q.substring(0, 100));
                   console.warn(`[PdfPreview] Fragment text:`, q);
-                  // Log first 500 chars of each layer for debugging (especially for long fragments)
-                  layersToProcess.forEach((layer, idx) => {
+                  // Log first 500 chars of first 10 layers for debugging
+                  layers.slice(0, Math.min(10, layers.length)).forEach((layer, idx) => {
                     const layerText = layer.textContent || '';
-                    const normalizedQuery = q.toLowerCase().trim().replace(/\s+/g, ' ');
-                    const normalizedLayer = layerText.toLowerCase().replace(/\s+/g, ' ');
-                    
-                    // Try to find first few words in layer
                     const firstWords = q.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
-                    const foundInLayer = normalizedLayer.includes(firstWords);
-                    
+                    const foundInLayer2 = layerText.toLowerCase().replace(/\s+/g, ' ').includes(firstWords);
                     console.warn(`[PdfPreview] Layer ${idx + 1}:`, {
                       textLength: layerText.length,
                       textSample: layerText.substring(0, 500),
-                      firstWordsMatch: foundInLayer,
+                      firstWordsMatch: foundInLayer2,
                       firstWords: firstWords
                     });
                   });

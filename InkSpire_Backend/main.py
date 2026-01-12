@@ -307,6 +307,7 @@ class UserResponse(BaseModel):
 class LoginResponse(BaseModel):
     user: UserResponse
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     message: str = "Login successful"
 
@@ -327,7 +328,7 @@ class PublicUserResponse(BaseModel):
 # User authentication API
 # ======================================================
 
-@app.post("/api/users/register", response_model=UserResponse)
+@app.post("/api/users/register", response_model=LoginResponse)
 def register_user(
     payload: UserRegisterRequest,
     db: Session = Depends(get_db)
@@ -353,6 +354,10 @@ def register_user(
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
 
+        # Step 2.5: Extract tokens from response
+        access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
+
         # Step 3: Create record in custom users table
         user = create_user_from_supabase(
             db=db,
@@ -362,8 +367,14 @@ def register_user(
             role=payload.role,
         )
 
-        # Step 4: Return user data
-        return UserResponse(**user_to_dict(user))
+        # Step 4: Return tokens + user data (for frontend supabase.auth.setSession)
+        return LoginResponse(
+            user=UserResponse(**user_to_dict(user)),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            message="Registration successful",
+        )
 
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -395,19 +406,51 @@ def login_user(
 
         # Step 2: Extract JWT token from response
         access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
 
-        # Step 3: Get user from custom users table
-        user = get_user_by_email(db, payload.email)
+        supabase_user = supabase_response.get("user")
+        supabase_user_id = None
+        if supabase_user is not None and getattr(supabase_user, "id", None):
+            try:
+                supabase_user_id = uuid.UUID(supabase_user.id)
+            except Exception:
+                supabase_user_id = None
+
+        # Step 3: Get (or sync) user from custom users table
+        user = None
+        if supabase_user_id is not None:
+            user = get_user_by_supabase_id(db, supabase_user_id)
+
+        if not user:
+            user = get_user_by_email(db, payload.email)
+
+            if user and supabase_user_id is not None:
+                user.supabase_user_id = supabase_user_id
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            elif not user and supabase_user_id is not None:
+                meta = getattr(supabase_user, "user_metadata", None) or {}
+                resolved_name = meta.get("name") or payload.email.split("@")[0]
+                user = create_user_from_supabase(
+                    db=db,
+                    supabase_user_id=supabase_user_id,
+                    email=payload.email,
+                    name=resolved_name,
+                    role="instructor",
+                )
+
         if not user:
             raise HTTPException(
                 status_code=404,
-                detail="User profile not found. Please contact support."
+                detail="User not found in database"
             )
 
         # Step 4: Return JWT token + user data
         return LoginResponse(
             user=UserResponse(**user_to_dict(user)),
             access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             message="Login successful"
         )

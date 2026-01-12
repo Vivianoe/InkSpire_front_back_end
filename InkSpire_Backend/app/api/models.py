@@ -162,6 +162,7 @@ class EditDesignConsiderationsRequest(BaseModel):
 
 class ReadingUploadItem(BaseModel):
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: Optional[str] = None  # Optional for uploaded readings (will be generated)
     source_type: str = "uploaded"
     content_base64: Optional[str] = None  # Base64 encoded PDF content for uploaded readings
@@ -174,9 +175,18 @@ class BatchUploadReadingsRequest(BaseModel):
     readings: List[ReadingUploadItem]
 
 
+class CreateReadingFromStorageRequest(BaseModel):
+    instructor_id: str
+    title: str
+    file_path: str
+    perusall_reading_id: Optional[str] = None
+    source_type: str = "uploaded"
+
+
 class ReadingResponse(BaseModel):
     id: str
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: str
     source_type: str
     course_id: Optional[str] = None
@@ -190,6 +200,23 @@ class BatchUploadReadingsResponse(BaseModel):
     created_count: int
     readings: List[ReadingResponse]
     errors: List[Dict[str, Any]]
+
+
+class CreateReadingFromStorageResponse(BaseModel):
+    success: bool
+    reading: ReadingResponse
+
+
+class CreateReadingSignedUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str = "application/pdf"
+
+
+class CreateReadingSignedUploadUrlResponse(BaseModel):
+    success: bool
+    file_path: str
+    signed_url: str
+    token: str
 
 
 class ReadingContentResponse(BaseModel):
@@ -287,6 +314,7 @@ class PerusallAnnotationItem(BaseModel):
 
 
 class PerusallAnnotationRequest(BaseModel):
+    session_id: Optional[str] = None
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
 
@@ -383,5 +411,75 @@ class ImportedCourse(BaseModel):
 class PerusallImportResponse(BaseModel):
     success: bool
     imported_courses: List[ImportedCourse]
+    message: Optional[str] = None
+
+
+# Perusall Course Library (Readings)
+class PerusallReadingItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+    
+    id: str = Field(alias="_id")  # Perusall reading/document ID
+    name: str  # Reading name/title
+
+
+class PerusallLibraryReadingStatus(BaseModel):
+    """Status of a Perusall reading in the local database"""
+    perusall_reading_id: str
+    perusall_reading_name: str
+    is_uploaded: bool
+    local_reading_id: Optional[str] = None  # Local reading UUID if uploaded
+    local_reading_title: Optional[str] = None
+
+
+class PerusallLibraryResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    readings: List[PerusallLibraryReadingStatus]
+    message: Optional[str] = None
+
+
+# Perusall Assignments
+class PerusallAssignmentPart(BaseModel):
+    documentId: str
+    startPage: Optional[int] = None
+    endPage: Optional[int] = None
+
+
+class PerusallAssignmentItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+    
+    id: str = Field(alias="_id")  # Perusall assignment ID
+    name: str  # Assignment name/title
+    documentIds: Optional[List[str]] = None  # List of document IDs
+    parts: Optional[List[PerusallAssignmentPart]] = None  # List of parts with documentId, startPage, endPage
+    deadline: Optional[str] = None
+    assignTo: Optional[str] = None
+    documents: Optional[List[Dict[str, str]]] = None  # Legacy field for backward compatibility
+
+
+class PerusallAssignmentsResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    assignments: List[PerusallAssignmentItem]
+    message: Optional[str] = None
+
+
+# Assignment Reading Status
+class AssignmentReadingStatus(BaseModel):
+    """Status of a reading in an assignment"""
+    perusall_document_id: str
+    perusall_document_name: Optional[str] = None
+    is_uploaded: bool
+    local_reading_id: Optional[str] = None  # Local reading UUID if uploaded
+    local_reading_title: Optional[str] = None
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+
+
+class AssignmentReadingsResponse(BaseModel):
+    success: bool
+    assignment_id: str
+    assignment_name: str
+    readings: List[AssignmentReadingStatus]
     message: Optional[str] = None
 

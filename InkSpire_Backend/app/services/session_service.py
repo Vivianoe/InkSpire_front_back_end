@@ -15,6 +15,7 @@ def create_session(
     week_number: int,
     title: Optional[str] = None,
     status: str = "draft",
+    perusall_assignment_id: Optional[str] = None,
 ) -> Session:
     """
     Create a new session (identity only, no version data)
@@ -25,6 +26,7 @@ def create_session(
         week_number=week_number,
         title=title.strip() if title else None,
         status=status,
+        perusall_assignment_id=perusall_assignment_id,
     )
     
     db.add(session)
@@ -227,6 +229,7 @@ def session_to_dict(session: Session) -> Dict[str, Any]:
         "course_id": str(session.course_id),
         "week_number": session.week_number,
         "title": session.title,
+        "perusall_assignment_id": session.perusall_assignment_id,
         "current_version_id": str(session.current_version_id) if session.current_version_id else None,
         "status": session.status,
         "created_at": session.created_at.isoformat() if session.created_at else None,

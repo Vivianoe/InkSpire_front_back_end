@@ -37,6 +37,7 @@ class CreateSessionRequest(BaseModel):
     session_description: Optional[str] = None  # Session description
     assignment_description: Optional[str] = None  # Assignment description
     assignment_goal: Optional[str] = None  # Assignment goal
+    perusall_assignment_id: Optional[str] = None  # Perusall assignment ID
 
 
 class CreateSessionResponse(BaseModel):
@@ -63,6 +64,7 @@ class SessionResponse(BaseModel):
     course_id: str
     week_number: int
     title: Optional[str] = None
+    perusall_assignment_id: Optional[str] = None
     current_version_id: Optional[str] = None
     status: str
     created_at: Optional[str] = None
@@ -134,6 +136,7 @@ def create_session_with_readings(
         week_number=payload.week_number,
         title=payload.title or "Reading Session",
         status="draft",
+        perusall_assignment_id=payload.perusall_assignment_id,
     )
     
     # Add readings to session
@@ -227,6 +230,7 @@ def get_sessions_list(
             course_id=session_dict["course_id"],
             week_number=session_dict["week_number"],
             title=session_dict["title"],
+            perusall_assignment_id=session_dict.get("perusall_assignment_id"),
             current_version_id=session_dict["current_version_id"],
             status=session_dict["status"],
             created_at=session_dict["created_at"],
@@ -289,6 +293,7 @@ def get_session_detail(
         course_id=session_dict["course_id"],
         week_number=session_dict["week_number"],
         title=session_dict["title"],
+        perusall_assignment_id=session_dict.get("perusall_assignment_id"),
         current_version_id=session_dict["current_version_id"],
         status=session_dict["status"],
         created_at=session_dict["created_at"],

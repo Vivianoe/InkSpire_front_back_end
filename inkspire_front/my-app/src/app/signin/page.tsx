@@ -77,13 +77,12 @@ export default function SignInPage() {
     setLoading(true);
 
     try {
-      const endpoint = isSignUp ? '/api/auth/signup' : '/api/auth/signin';
+      const endpoint = isSignUp ? '/api/users/register' : '/api/users/login';
       const requestBody = {
         email: formData.email,
         password: formData.password,
         ...(isSignUp && {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
+          name: `${formData.firstName} ${formData.lastName}`,
         }),
       };
       
@@ -107,8 +106,8 @@ export default function SignInPage() {
       }
 
       // Store token if provided
-      if (data.token) {
-        localStorage.setItem('auth_token', data.token);
+      if (data.access_token) {
+        localStorage.setItem('auth_token', data.access_token);
       }
 
       // Store user info

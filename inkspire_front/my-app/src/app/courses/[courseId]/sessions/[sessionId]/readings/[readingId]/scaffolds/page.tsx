@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 // Dynamically import PdfPreview from components to avoid SSR issues
 const PdfPreview = dynamic(
@@ -244,7 +245,8 @@ export default function ScaffoldPage() {
           const sKey = keyForId(s.id);
           if (sKey === targetKey) {
             let nextStatus = s.status;
-            if (normalizedStatus === 'approved') nextStatus = 'ACCEPTED';
+            // Backend historically used both "approved" and "accepted"
+            if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') nextStatus = 'ACCEPTED';
             else if (normalizedStatus === 'rejected') nextStatus = 'REJECTED';
             else if (normalizedStatus === 'pending' || normalizedStatus === 'draft' || normalizedStatus === 'edit_pending') nextStatus = 'IN PROGRESS';
 
@@ -266,7 +268,10 @@ export default function ScaffoldPage() {
         return next;
       });
 
-      if (manualEditOpenId === targetKey && (normalizedStatus === 'approved' || normalizedStatus === 'rejected')) {
+      if (
+        manualEditOpenId === targetKey &&
+        (normalizedStatus === 'approved' || normalizedStatus === 'accepted' || normalizedStatus === 'rejected')
+      ) {
         setManualEditOpenId(null);
       }
 
@@ -589,21 +594,19 @@ export default function ScaffoldPage() {
 
   // Process scaffolds for display
   const processedScaffolds = scaffolds.map((scaffold, index) => {
-    // Map status: preserve ACCEPTED/REJECTED, convert pending/approved/rejected to display format
-    let displayStatus: string;
-    if (scaffold.status === 'ACCEPTED' || scaffold.status === 'REJECTED' || scaffold.status === 'IN PROGRESS') {
-      // Already in display format, use as-is
-      displayStatus = scaffold.status;
-    } else if (scaffold.status === 'pending' || scaffold.status === 'draft' || scaffold.status === 'edit_pending') {
-      displayStatus = 'IN PROGRESS';
-    } else if (scaffold.status === 'approved') {
-      displayStatus = 'ACCEPTED';
-    } else if (scaffold.status === 'rejected') {
-      displayStatus = 'REJECTED';
-    } else {
-      displayStatus = 'IN PROGRESS';
-    }
-    
+    const normalizedStatus = (typeof scaffold.status === 'string' ? scaffold.status : '').toLowerCase();
+    const displayStatus =
+      normalizedStatus === 'approved' || normalizedStatus === 'accepted'
+        ? 'ACCEPTED'
+        : normalizedStatus === 'rejected'
+          ? 'REJECTED'
+          : normalizedStatus === 'pending' ||
+            normalizedStatus === 'draft' ||
+            normalizedStatus === 'edit_pending' ||
+            normalizedStatus === 'in progress' ||
+            normalizedStatus === 'in_progress'
+            ? 'IN PROGRESS'
+            : 'IN PROGRESS';
     const processed = {
       ...scaffold,
       number: index + 1,
@@ -611,7 +614,7 @@ export default function ScaffoldPage() {
       type: 'Scaffold',
       backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][index % 5],
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
-      status: displayStatus
+      status: displayStatus,
     };
     return processed;
   });
@@ -700,10 +703,17 @@ ${scaffold.text || 'No scaffold text available'}
     try {
       setPublishLoading(true);
       setPublishError(null);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ annotation_ids: annotationIds }),
+        headers,
+        body: JSON.stringify({ session_id: sessionId, annotation_ids: annotationIds }),
       });
 
       const data = await response.json().catch((e) => {
@@ -771,7 +781,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div className={styles.loadingSpinner}>Loading scaffolds...</div>
@@ -787,7 +797,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <h1 className={styles.formTitle}>Reading Scaffolds</h1>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div style={{ color: '#dc2626', textAlign: 'center' }}>
@@ -833,9 +843,9 @@ ${scaffold.text || 'No scaffold text available'}
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
           <div className={styles.formCard}>
-            <div className={styles.formHeader}>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
-            </div>
+            {/* <div className={styles.formHeader}>
+              <h1 className={styles.formTitle}>Reading Scaffolds</h1> 
+            </div>*/}
             
             {/* Session Information Form */}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
@@ -875,6 +885,20 @@ ${scaffold.text || 'No scaffold text available'}
                 rows={3}
               />
             </div>
+
+            {/* The number of scaffolds you want to generate; to be changed to a number input to control the generation workflow */}
+            <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
+              <div className={styles.labelWithIcon}>
+                <label className={uiStyles.fieldLabel}>The number of scaffolds you want to generate</label>
+              </div>
+              <textarea
+                value={assignmentGoals}
+                onChange={(e) => setAssignmentGoals(e.target.value)}
+                className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
+                placeholder="Input the number of scaffolds you want to generate."
+                rows={2}
+              />
+            </div>
             
             {/* Session Info Display */}
             {/*
@@ -898,6 +922,20 @@ ${scaffold.text || 'No scaffold text available'}
             </div>
             */}
 
+            
+
+            {/* Generate Scaffolds Button */}
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+              <button
+                onClick={handleGenerateScaffolds}
+                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                disabled={generating}
+                style={{ width: '100%', maxWidth: '300px' }}
+              >
+                {generating ? 'Generating...' : 'Generate Scaffolds'}
+              </button>
+            </div>
+
             {/* Navigation buttons */}
             {enableNavigation && navigationData && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
@@ -919,18 +957,6 @@ ${scaffold.text || 'No scaffold text available'}
                 </button>
               </div>
             )}
-
-            {/* Generate Scaffolds Button */}
-            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-              <button
-                onClick={handleGenerateScaffolds}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                disabled={generating}
-                style={{ width: '100%', maxWidth: '300px' }}
-              >
-                {generating ? 'Generating...' : 'Generate Scaffolds'}
-              </button>
-            </div>
 
             {/* Back button */}
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>

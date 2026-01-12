@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, ChangeEvent } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
-import styles from '@/app/class-profile/[id]/session/create/page.module.css';
+import styles from '@/app/courses/[courseId]/sessions/create/page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 
@@ -32,6 +33,25 @@ type SessionListItem = {
   createdAt?: string;
   readingIds?: string[];
   currentVersionId?: string;
+  perusall_assignment_id?: string;
+};
+
+type PerusallAssignment = {
+  id: string;
+  name: string;
+  documentIds?: string[];
+  parts?: Array<{ documentId: string; startPage?: number; endPage?: number }>;
+  documents?: Array<{ _id?: string; id?: string }>;
+};
+
+type AssignmentReadingStatus = {
+  perusall_document_id: string;
+  perusall_document_name?: string;
+  is_uploaded: boolean;
+  local_reading_id?: string | null;
+  local_reading_title?: string | null;
+  start_page?: number | null;
+  end_page?: number | null;
 };
 
 type PersistedReadingSelection = {
@@ -67,7 +87,16 @@ export default function SessionCreationPage() {
   const [selectedReadingIds, setSelectedReadingIds] = useState<string[]>([]);
   const [readings, setReadings] = useState<ReadingListItem[]>([]);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [perusallAssignments, setPerusallAssignments] = useState<PerusallAssignment[]>([]);
+  const [loadingPerusallAssignments, setLoadingPerusallAssignments] = useState(false);
+  const [assignmentReadings, setAssignmentReadings] = useState<AssignmentReadingStatus[]>([]);
+  const [loadingAssignmentReadings, setLoadingAssignmentReadings] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+  const [selectedPerusallAssignmentId, setSelectedPerusallAssignmentId] = useState<string | null>(null);
+  const [selectedAssignmentName, setSelectedAssignmentName] = useState<string>('');
+  const [uploadingReading, setUploadingReading] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const readingUploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -126,15 +155,57 @@ export default function SessionCreationPage() {
         assignmentGoal: currentVersionData?.assignment_goals_json?.goal || '',
         selectedReadingIds: currentVersionData?.reading_ids || sessionData.reading_ids || [],
       });
-
-      // Switch to create mode for editing
-      setMode('create');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load existing session.');
     } finally {
       setIsLoadingExistingSession(false);
     }
   }, []);
+
+  // Fetch Perusall assignments
+  const fetchPerusallAssignments = useCallback(async () => {
+    setLoadingPerusallAssignments(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/perusall/assignments`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = data?.detail || data?.message || 'Failed to load Perusall assignments.';
+        if (response.status === 400 && typeof detail === 'string' && detail.includes('Perusall course ID')) {
+          setPerusallAssignments([]);
+          console.log('Perusall not configured for this course:', detail);
+          return;
+        }
+        throw new Error(detail);
+      }
+
+      const assignmentsRaw = Array.isArray(data?.assignments) ? data.assignments : [];
+      const normalizedAssignments = assignmentsRaw
+        .map((a: any) => ({
+          ...a,
+          id: a?.id ?? a?._id,
+        }))
+        .filter((a: any) => typeof a?.id === 'string' && a.id.length > 0);
+      setPerusallAssignments(normalizedAssignments);
+    } catch (err) {
+      console.error('Perusall assignments fetch error:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to load Perusall assignments.');
+      }
+    } finally {
+      setLoadingPerusallAssignments(false);
+    }
+  }, [courseId]);
 
   // Load initial data
   useEffect(() => {
@@ -177,7 +248,13 @@ export default function SessionCreationPage() {
             createdAt: item.created_at,
             readingIds: item.reading_ids || [],
             currentVersionId: item.current_version_id,
+            perusall_assignment_id: item.perusall_assignment_id,
           })));
+        }
+
+        // Load Perusall assignments if not loading existing session
+        if (!urlSessionId) {
+          fetchPerusallAssignments();
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data.');
@@ -187,11 +264,12 @@ export default function SessionCreationPage() {
     if (courseId) {
       loadData();
     }
-  }, [courseId, resolvedInstructorId]);
+  }, [courseId, resolvedInstructorId, urlSessionId, fetchPerusallAssignments]);
 
   // Load existing session if sessionId is in URL
   useEffect(() => {
     if (urlSessionId) {
+      setMode('edit');
       loadExistingSession(urlSessionId);
     }
   }, [urlSessionId, loadExistingSession]);
@@ -209,8 +287,9 @@ export default function SessionCreationPage() {
     );
   }, [originalDraft, sessionTitle, weekNumber, sessionDescription, assignmentDescription, assignmentGoal, selectedReadingIds]);
 
-  const handleCreateNew = () => {
+  const handleCreateNew = (perusallAssignmentId?: string) => {
     setSelectedSessionId('');
+    setSelectedPerusallAssignmentId(perusallAssignmentId || null);
     setSessionTitle('');
     setWeekNumber(1);
     setSessionDescription('');
@@ -222,6 +301,69 @@ export default function SessionCreationPage() {
     setMode('create');
   };
 
+  const fetchAssignmentReadings = useCallback(async (assignmentId: string) => {
+    setLoadingAssignmentReadings(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/perusall/assignments/${assignmentId}/readings`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || 'Failed to load assignment readings.');
+      }
+
+      if (data?.success && Array.isArray(data?.readings)) {
+        setAssignmentReadings(data.readings);
+        setSelectedAssignmentName(data.assignment_name || '');
+      } else {
+        setAssignmentReadings([]);
+      }
+    } catch (err) {
+      console.error('Assignment readings fetch error:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to load assignment readings.');
+      }
+    } finally {
+      setLoadingAssignmentReadings(false);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
+    if (selectedPerusallAssignmentId) {
+      fetchAssignmentReadings(selectedPerusallAssignmentId);
+    }
+  }, [selectedPerusallAssignmentId, fetchAssignmentReadings]);
+
+  const handleSelectAssignment = async (assignmentId: string) => {
+    setSelectedPerusallAssignmentId(assignmentId);
+    setSelectedReadingIds([]);
+    
+    // Fetch assignment readings status
+    await fetchAssignmentReadings(assignmentId);
+    
+    // Check if a session already exists for this assignment
+    const existingSession = sessions.find(s => s.perusall_assignment_id === assignmentId);
+    if (existingSession) {
+      // Open existing session directly in the unified edit UI
+      setSelectedSessionId(existingSession.id);
+      setMode('edit');
+      loadExistingSession(existingSession.id);
+    } else {
+      // Create new session for this assignment
+      handleCreateNew(assignmentId);
+    }
+  };
+
+  /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
@@ -233,7 +375,6 @@ export default function SessionCreationPage() {
       setError(null);
 
       let sessionId: string;
-      let shouldCreateNewVersion = false;
 
       // If continuing existing session, check if dirty and create new version if needed
       if (urlSessionId || selectedSessionId) {
@@ -273,7 +414,7 @@ export default function SessionCreationPage() {
           setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
         }
       } else {
-        // Create new session
+        // Create new session with perusall_assignment_id
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
@@ -281,6 +422,7 @@ export default function SessionCreationPage() {
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
+          perusall_assignment_id: selectedPerusallAssignmentId || undefined,
         };
 
         const response = await fetch(`/api/courses/${courseId}/sessions`, {
@@ -295,7 +437,6 @@ export default function SessionCreationPage() {
         }
 
         sessionId = data.session_id;
-        shouldCreateNewVersion = true; // New session always creates version 1
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -367,8 +508,9 @@ export default function SessionCreationPage() {
     // Use RESTful URL structure
     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
   };
+  */
 
-  const handleStartScaffoldsGeneration = async () => {
+  const handleStartWorkingOnReadings = async () => {
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -380,45 +522,42 @@ export default function SessionCreationPage() {
 
       let sessionId: string;
 
+      const ensureSessionVersionIsCurrent = async (existingSessionId: string) => {
+        if (!isDraftDirty) {
+          return;
+        }
+
+        const payload = {
+          session_info_json: {
+            description: sessionDescription || undefined,
+          },
+          assignment_info_json: {
+            description: assignmentDescription || undefined,
+          },
+          assignment_goals_json: {
+            goal: assignmentGoal || undefined,
+          },
+          reading_ids: selectedReadingIds,
+        };
+
+        const response = await fetch(`/api/courses/${courseId}/sessions/${existingSessionId}/versions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.detail || data?.message || 'Failed to create new version.');
+        }
+      };
+
       // If continuing existing session, check if we need to create new version
       if (urlSessionId || selectedSessionId) {
         sessionId = urlSessionId || selectedSessionId!;
-        
-        // If draft is dirty, we'll create a new version when navigating
-        if (isDraftDirty) {
-          const payload = {
-            session_info_json: {
-              description: sessionDescription || undefined,
-            },
-            assignment_info_json: {
-              description: assignmentDescription || undefined,
-            },
-            assignment_goals_json: {
-              goal: assignmentGoal || undefined,
-            },
-            reading_ids: selectedReadingIds,
-          };
-
-          const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/versions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(data?.detail || data?.message || 'Failed to create new version.');
-          }
-
-          setError(null);
-          setSuccess('New version created successfully! Click "Start scaffolds generation" to proceed.');
-        } else {
-          // No changes, just confirm session is ready
-          setError(null);
-          setSuccess('Session ready. Click "Start scaffolds generation" to proceed.');
-        }
+        await ensureSessionVersionIsCurrent(sessionId);
       } else {
-        // Create new session
+        // Create new session with perusall_assignment_id
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
@@ -426,6 +565,7 @@ export default function SessionCreationPage() {
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
+          perusall_assignment_id: selectedPerusallAssignmentId || undefined,
         };
 
         const response = await fetch(`/api/courses/${courseId}/sessions`, {
@@ -440,10 +580,10 @@ export default function SessionCreationPage() {
         }
 
         sessionId = data.session_id;
-        setError(null);
-        setSuccess('Session created successfully! Click "Start scaffolds generation" to proceed.');
-        // Refresh sessions list
-        // fetchSessions();
+
+        // Keep UI semantics consistent: newly created session is now an existing session we can edit
+        setSelectedSessionId(sessionId);
+        setMode('edit');
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
@@ -458,18 +598,21 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId,
+            profileId: profileId || '',
             instructorId: resolvedInstructorId,
           })
         );
       }
-      
-      // Navigate to scaffold display page with navigation context (but don't generate scaffolds yet)
-      setTimeout(() => {
-        router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
-      }, 1000);
+
+      setError(null);
+      setSuccess('Session saved. Redirecting...');
+
+      // Navigate to scaffolds page (user can generate scaffolds there)
+      router.push(
+        `/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start scaffolds generation. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to start working on readings. Please try again.');
     } finally {
       setCreating(false);
     }
@@ -481,6 +624,186 @@ export default function SessionCreationPage() {
     } else {
       setSelectedReadingIds(prev => prev.filter(id => id !== readingId));
     }
+  };
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === 'string') {
+          const base64 = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64 || '');
+        } else {
+          reject(new Error('Unable to read file'));
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleUploadReadingForAssignment = async (perusallDocumentId: string, file: File) => {
+    setUploadingReading(perusallDocumentId);
+    setError(null);
+    try {
+      const MAX_PDF_UPLOAD_BYTES = 100 * 1024 * 1024;
+      if (file.size > MAX_PDF_UPLOAD_BYTES) {
+        throw new Error(
+          `PDF is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max allowed is ${(MAX_PDF_UPLOAD_BYTES / (1024 * 1024)).toFixed(0)} MB.`
+        );
+      }
+
+      // Use document name from assignment readings if available
+      const assignmentReading = assignmentReadings.find(ar => ar.perusall_document_id === perusallDocumentId);
+      const readingName = assignmentReading?.perusall_document_name || file.name.replace(/\.pdf$/i, '');
+
+      const signedUrlResp = await fetch(`/api/courses/${courseId}/readings/signed-upload-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: 'application/pdf' }),
+      });
+
+      const signedUrlData = await signedUrlResp.json().catch(() => null);
+      if (!signedUrlResp.ok) {
+        const fallbackText = signedUrlData ? '' : await signedUrlResp.text().catch(() => '');
+        throw new Error(
+          (signedUrlData as any)?.detail ||
+            (signedUrlData as any)?.message ||
+            (fallbackText || 'Failed to create signed upload URL.')
+        );
+      }
+
+      const filePath = (signedUrlData as any)?.file_path as string | undefined;
+      const signedUrl = (signedUrlData as any)?.signed_url as string | undefined;
+      const token = (signedUrlData as any)?.token as string | undefined;
+
+      if (!filePath || !signedUrl || !token) {
+        throw new Error('Signed upload URL response missing file_path/signed_url/token.');
+      }
+
+      const uploadResp = await fetch(signedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/pdf',
+          'x-upsert': 'true',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: file,
+      });
+
+      if (!uploadResp.ok) {
+        const t = await uploadResp.text().catch(() => '');
+        throw new Error(t || `Failed to upload PDF to signed URL (HTTP ${uploadResp.status}).`);
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/readings/from-storage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructor_id: resolvedInstructorId,
+          title: readingName,
+          file_path: filePath,
+          perusall_reading_id: perusallDocumentId,
+          source_type: 'uploaded',
+        }),
+      });
+      
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const fallbackText = data ? '' : await response.text().catch(() => '');
+        throw new Error(
+          (data as any)?.detail ||
+            (data as any)?.message ||
+            (fallbackText || 'Failed to save reading from storage.')
+        );
+      }
+      
+      // If upload successful and we have assignment context, create Perusall mapping
+      if (selectedPerusallAssignmentId && data?.reading?.id) {
+        const createdReading = data.reading;
+        try {
+          // Get course to find perusall_course_id
+          const courseResponse = await fetch(`/api/courses/${courseId}`);
+          const courseData = await courseResponse.json().catch(() => ({}));
+          
+          if (courseResponse.ok && courseData.perusall_course_id) {
+            // Create Perusall mapping
+            const mappingPayload = {
+              course_id: courseId,
+              reading_id: createdReading.id,
+              perusall_course_id: courseData.perusall_course_id,
+              perusall_assignment_id: selectedPerusallAssignmentId,
+              perusall_document_id: perusallDocumentId,
+            };
+            
+            const { data: { session } } = await supabase.auth.getSession();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (session?.access_token) {
+              headers['Authorization'] = `Bearer ${session.access_token}`;
+            }
+            
+            await fetch(`/api/courses/${courseId}/readings/${createdReading.id}/perusall/mapping`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(mappingPayload),
+            });
+          }
+        } catch (mappingError) {
+          console.error('Failed to create Perusall mapping:', mappingError);
+          // Don't fail the upload if mapping creation fails
+        }
+      }
+      
+      // Refresh assignment readings status
+      if (selectedPerusallAssignmentId) {
+        await fetchAssignmentReadings(selectedPerusallAssignmentId);
+      }
+      
+      // Refresh readings list
+      const readingsQuery = new URLSearchParams({
+        course_id: courseId,
+        instructor_id: resolvedInstructorId,
+      });
+      const readingsResponse = await fetch(`/api/readings?${readingsQuery.toString()}`);
+      const readingsData = await readingsResponse.json().catch(() => ({}));
+      if (readingsResponse.ok && Array.isArray(readingsData?.readings)) {
+        setReadings(readingsData.readings.map((item: any) => ({
+          id: item.id,
+          title: item.title ?? 'Untitled reading',
+          instructorId: item.instructor_id,
+          courseId: item.course_id,
+          filePath: item.file_path,
+          sourceType: item.source_type,
+          createdAt: item.created_at,
+          readingChunks: item.reading_chunks,
+          hasChunks: Array.isArray(item.reading_chunks) && item.reading_chunks.length > 0,
+          sizeLabel: item.size_label,
+          usageCount: typeof item.usage_count === 'number' ? item.usage_count : 0,
+          lastUsedAt: item.last_used_at,
+          mimeType: item.mime_type,
+        })));
+      }
+      
+      setSuccess('Reading uploaded successfully!');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload reading.');
+    } finally {
+      setUploadingReading(null);
+    }
+  };
+
+  const handleReadingFileSelect = async (perusallDocumentId: string, event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    const file = files[0];
+    if (file.type !== 'application/pdf') {
+      setError('Please upload a PDF file.');
+      return;
+    }
+    
+    await handleUploadReadingForAssignment(perusallDocumentId, file);
+    event.target.value = '';
   };
 
   const displayReadings = useMemo(
@@ -569,7 +892,7 @@ export default function SessionCreationPage() {
               {creating ? 'Creating...' : `Save Session (${selectedReadingIds.length} selected)`}
             </button>
             <button
-              onClick={handleStartScaffoldsGeneration}
+              onClick={handleStartWorkingOnReadings}
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
               disabled={creating || !selectedReadingIds.length}
             >
@@ -593,73 +916,82 @@ export default function SessionCreationPage() {
           <div className={styles.emptyState}>Loading existing session...</div>
         )}
 
-        {!isLoadingExistingSession && mode === 'select' && (
-          <section className={styles.selectionSection}>
-            <div className={styles.selectionHeader}>
-              <div>
-                <h2 className={styles.sectionTitle}>Select Existing Session</h2>
-                <p className={styles.sectionHelper}>
-                  Choose an existing session to continue, or create a new one.
-                </p>
-              </div>
-              <button
-                onClick={handleCreateNew}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-              >
-                Create New Session
-              </button>
+        {!isLoadingExistingSession && mode === 'select' ? (
+        <section className={styles.selectionSection}>
+          <div className={styles.selectionHeader}>
+            <div>
+              <h2 className={styles.sectionTitle}>Select Perusall Assignment</h2>
+              <p className={styles.sectionHelper}>
+                Choose a Perusall assignment to create or open a session.
+              </p>
             </div>
+          </div>
 
-            <div className={styles.readingList}>
-              {sessions.length === 0 ? (
-                <div className={styles.emptyState}>
-                  No sessions found. Click "Create New Session" to get started.
-                </div>
-              ) : (
-                sessions.map(session => {
-                  const isSelected = selectedSessionId === session.id;
-                  return (
-                    <div
-                      key={session.id}
-                      className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                      onClick={() => setSelectedSessionId(session.id)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className={styles.readingMeta}>
-                        <div>
-                          <p className={styles.readingName}>
-                            {session.title || `Week ${session.weekNumber} Session`}
-                          </p>
-                          <p className={styles.readingDetails}>
-                            Week {session.weekNumber} · {session.readingIds?.length || 0} reading{(session.readingIds?.length || 0) !== 1 ? 's' : ''}
-                            {session.createdAt && (
-                              <> · {new Date(session.createdAt).toLocaleDateString()}</>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      <div className={styles.readingActions}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleContinueWithSession();
-                          }}
-                          className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
-                          disabled={!isSelected}
-                        >
-                          Use This Session
-                        </button>
+          <div className={styles.readingList}>
+            {loadingPerusallAssignments ? (
+              <div className={styles.emptyState}>Loading Perusall assignments…</div>
+            ) : perusallAssignments.length === 0 ? (
+              <div className={styles.emptyState}>
+                No Perusall assignments found. Please configure Perusall integration for this course.
+              </div>
+            ) : (
+              perusallAssignments.map(assignment => {
+                const existingSession = sessions.find(s => s.perusall_assignment_id === assignment.id);
+                const isSelected = selectedPerusallAssignmentId === assignment.id;
+                return (
+                  <div
+                    key={assignment.id}
+                    className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
+                    onClick={() => handleSelectAssignment(assignment.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className={styles.readingMeta}>
+                      <div>
+                        <p className={styles.readingName}>
+                          {assignment.name}
+                          {existingSession && (
+                            <span style={{
+                              marginLeft: '8px',
+                              padding: '2px 8px',
+                              backgroundColor: '#10b981',
+                              color: 'white',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: '500'
+                            }}>
+                              ✓ Session Exists
+                            </span>
+                          )}
+                        </p>
+                        <p className={styles.readingDetails}>
+                          {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
+                          {existingSession && (
+                            <> · {existingSession.readingIds?.length || 0} reading{(existingSession.readingIds?.length || 0) !== 1 ? 's' : ''}</>
+                          )}
+                        </p>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        )}
+                    <div className={styles.readingActions}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectAssignment(assignment.id);
+                        }}
+                        className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
+                      >
+                        {existingSession ? 'Open Session' : 'Create Session'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+        ) : null}
 
-        {!isLoadingExistingSession && mode === 'create' && (
+        {!isLoadingExistingSession && (mode === 'create' || mode === 'edit') && (
           <>
             {sessions.length > 0 && (
               <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -703,7 +1035,7 @@ export default function SessionCreationPage() {
             <div className={styles.formRow}>
               <div className={styles.formGroup}>
                 <label htmlFor="sessionTitle" className={styles.label}>
-                  Session Title (Optional)
+                  Session Title
                 </label>
                 <input
                   id="sessionTitle"
@@ -780,12 +1112,19 @@ export default function SessionCreationPage() {
             <div>
               <h2 className={styles.sectionTitle}>Select Readings</h2>
               <p className={styles.sectionHelper}>
-                Choose which readings to include in this session for scaffold generation.
+                Choose which readings to work on.
+                {selectedPerusallAssignmentId && (
+                  <> Only readings from the selected assignment are shown (and only uploaded ones can be selected).</>
+                )}
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div className={styles.selectionCount}>
-                {selectedReadingIds.length} of {readings.length} selected
+                {selectedReadingIds.length} of {
+                  selectedPerusallAssignmentId
+                    ? assignmentReadings.filter(r => r.is_uploaded).length
+                    : readings.length
+                } selected
               </div>
               {/*
               <button
@@ -798,74 +1137,143 @@ export default function SessionCreationPage() {
               </button>
               */}
               <button
-                onClick={handleStartScaffoldsGeneration}
+                onClick={handleStartWorkingOnReadings}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                disabled={creating || !selectedReadingIds.length}
+                disabled={
+                  creating || 
+                  !selectedReadingIds.length
+                }
                 style={{ whiteSpace: 'nowrap' }}
+                title={
+                  undefined
+                }
               >
-                {creating ? 'Starting...' : `Start scaffolds generation`}
+                {creating ? 'Starting...' : 'Start to work on readings'}
               </button>
             </div>
           </div>
 
           <div className={styles.readingList}>
-            {readings.length === 0 ? (
+            {selectedPerusallAssignmentId ? (
+              loadingAssignmentReadings ? (
+                <div className={styles.emptyState}>Loading assignment readings…</div>
+              ) : assignmentReadings.length === 0 ? (
+                <div className={styles.emptyState}>
+                  No readings found for this assignment.
+                </div>
+              ) : (
+                assignmentReadings.map((ar) => {
+                    const localId = ar.local_reading_id || '';
+                    const canSelect = Boolean(ar.is_uploaded && localId);
+                    const isSelected = canSelect && selectedReadingIds.includes(localId);
+
+                    return (
+                      <div
+                        key={ar.perusall_document_id}
+                        className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
+                        style={{
+                          borderLeft: ar.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
+                        }}
+                      >
+                        <div className={styles.readingMeta}>
+                          <div>
+                            <p className={styles.readingName}>
+                              {ar.perusall_document_name || `Document ${ar.perusall_document_id}`}
+                            </p>
+                            <p className={styles.readingDetails}>
+                              <span style={{
+                                padding: '2px 6px',
+                                backgroundColor: ar.is_uploaded ? '#10b981' : '#ef4444',
+                                color: 'white',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: '500',
+                                marginRight: '8px'
+                              }}>
+                                {ar.is_uploaded ? '✓ Uploaded' : '✗ Missing PDF'}
+                              </span>
+                              {ar.start_page && ar.end_page ? `Pages ${ar.start_page}-${ar.end_page}` : ''}
+                            </p>
+                            {ar.is_uploaded && ar.local_reading_title && (
+                              <p className={styles.readingSecondaryDetail}>
+                                Local reading: {ar.local_reading_title}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.readingActions}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canSelect) return;
+                              handleReadingSelect(localId, !isSelected);
+                            }}
+                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                            disabled={creating || !canSelect}
+                            title={!ar.is_uploaded ? 'Upload PDF before selecting' : !localId ? 'Missing local reading mapping' : undefined}
+                          >
+                            {isSelected ? 'Selected' : 'Select'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )
+            ) : readings.length === 0 ? (
               <div className={styles.emptyState}>
                 No readings available. Please upload readings first.
               </div>
             ) : (
               displayReadings.map(reading => {
-                const isSelected = selectedReadingIds.includes(reading.id);
-                return (
-                  <div
-                    key={reading.id}
-                    className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                  >
-                    <div className={styles.readingMeta}>
-                      <div>
-                        <p className={styles.readingName}>{reading.title}</p>
-                        <p className={styles.readingDetails}>
-                          {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
-                          {reading.displayDate ? `· ${reading.displayDate}` : ''}
-                          {reading.hasChunks && (
-                            <span style={{ 
-                              marginLeft: '8px', 
-                              padding: '2px 6px', 
-                              backgroundColor: '#10b981', 
-                              color: 'white', 
-                              borderRadius: '4px', 
-                              fontSize: '11px',
-                              fontWeight: '500'
-                            }}>
-                              Processed
-                            </span>
-                          )}
-                        </p>
-                        {reading.filePath && (
-                          <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
-                        )}
-                        {reading.hasChunks && reading.readingChunks && (
-                          <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                            {reading.readingChunks.length} chunks available
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className={styles.readingActions}>
-                      <button
-                        type="button"
-                        onClick={() => handleReadingSelect(reading.id, !isSelected)}
-                        className={`${styles.selectionButton} ${
-                          isSelected ? styles.selectionButtonActive : ''
-                        }`}
-                        disabled={creating}
+                    const isSelected = selectedReadingIds.includes(reading.id);
+                    return (
+                      <div
+                        key={reading.id}
+                        className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
                       >
-                        {isSelected ? 'Selected' : 'Select'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
+                        <div className={styles.readingMeta}>
+                          <div>
+                            <p className={styles.readingName}>{reading.title}</p>
+                            <p className={styles.readingDetails}>
+                              {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
+                              {reading.displayDate ? `· ${reading.displayDate}` : ''}
+                              {reading.hasChunks && (
+                                <span style={{
+                                  marginLeft: '8px',
+                                  padding: '2px 6px',
+                                  backgroundColor: '#10b981',
+                                  color: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: '500'
+                                }}>
+                                  Processed
+                                </span>
+                              )}
+                            </p>
+                            {reading.filePath && (
+                              <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
+                            )}
+                            {reading.hasChunks && reading.readingChunks && (
+                              <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
+                                {reading.readingChunks.length} chunks available
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.readingActions}>
+                          <button
+                            type="button"
+                            onClick={() => handleReadingSelect(reading.id, !isSelected)}
+                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                            disabled={creating}
+                          >
+                            {isSelected ? 'Selected' : 'Select'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
             )}
           </div>
         </section>

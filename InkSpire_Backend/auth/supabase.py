@@ -112,16 +112,28 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
     Returns:
         Dict containing:
         - user: Supabase user object
-        - session: Session object with access_token
+        - session: Session object with access_token (may be None if email confirmation is required)
 
     Raises:
         AuthenticationError: If signup fails
     """
+    import os
+    from supabase import create_client
+    
     try:
-        client = get_supabase_client()
+        # For auth operations, we should use the anon key, not service role key
+        # Service role key bypasses RLS and may cause issues with auth flows
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_anon_key = os.getenv("SUPABASE_KEY")
+        
+        if not supabase_url or not supabase_anon_key:
+            raise AuthenticationError("Supabase configuration missing: SUPABASE_URL and SUPABASE_KEY are required")
+        
+        # Create a client specifically for auth operations using anon key
+        auth_client = create_client(supabase_url, supabase_anon_key)
 
         # Sign up user with Supabase
-        response = client.auth.sign_up({
+        response = auth_client.auth.sign_up({
             "email": email,
             "password": password,
             "options": {
@@ -147,10 +159,13 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
             "session": response.session,
         }
 
+    except AuthenticationError:
+        # Re-raise AuthenticationError as-is
+        raise
     except Exception as e:
         # Handle Supabase API errors
         error_message = str(e)
-        if "already registered" in error_message.lower():
+        if "already registered" in error_message.lower() or "already exists" in error_message.lower():
             raise AuthenticationError("Email already registered")
         raise AuthenticationError(f"Signup failed: {error_message}")
 
@@ -172,11 +187,22 @@ def supabase_login(email: str, password: str) -> Dict[str, Any]:
     Raises:
         AuthenticationError: If login fails
     """
+    import os
+    from supabase import create_client
+    
     try:
-        client = get_supabase_client()
+        # For auth operations, we should use the anon key, not service role key
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_anon_key = os.getenv("SUPABASE_KEY")
+        
+        if not supabase_url or not supabase_anon_key:
+            raise AuthenticationError("Supabase configuration missing: SUPABASE_URL and SUPABASE_KEY are required")
+        
+        # Create a client specifically for auth operations using anon key
+        auth_client = create_client(supabase_url, supabase_anon_key)
 
         # Sign in with email and password
-        response = client.auth.sign_in_with_password({
+        response = auth_client.auth.sign_in_with_password({
             "email": email,
             "password": password,
         })
@@ -192,6 +218,9 @@ def supabase_login(email: str, password: str) -> Dict[str, Any]:
             "session": response.session,
         }
 
+    except AuthenticationError:
+        # Re-raise AuthenticationError as-is
+        raise
     except Exception as e:
         error_message = str(e)
         if "invalid" in error_message.lower() or "credentials" in error_message.lower():

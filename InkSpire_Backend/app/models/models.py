@@ -231,6 +231,7 @@ class Reading(Base):
     title = Column(Text, nullable=False)
     file_path = Column(Text, nullable=False)  # Supabase Storage path
     source_type = Column(String(50), nullable=False)  # uploaded / reused
+    perusall_reading_id = Column(Text, nullable=True)  # Perusall document/reading ID for integration
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     # Relationships
@@ -279,6 +280,7 @@ class Session(Base):
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
     week_number = Column(Integer, nullable=False)  # Week number (1, 2, 3...)
     title = Column(Text, nullable=True)  # Session title (optional)
+    perusall_assignment_id = Column(Text, nullable=True)  # Perusall assignment ID for integration
     current_version_id = Column(UUID(as_uuid=True), ForeignKey("session_versions.id"), nullable=True, index=True)  # Current active version
     status = Column(String(50), nullable=False, default="draft")  # draft, active, archived, etc.
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())

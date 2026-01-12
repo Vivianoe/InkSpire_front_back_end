@@ -30,6 +30,10 @@ from app.utils.pdf_chunk_utils import pdf_to_chunks
 from app.api.models import (
     BatchUploadReadingsRequest,
     BatchUploadReadingsResponse,
+    CreateReadingFromStorageRequest,
+    CreateReadingFromStorageResponse,
+    CreateReadingSignedUploadUrlRequest,
+    CreateReadingSignedUploadUrlResponse,
     ReadingListResponse,
     ReadingResponse,
     ReadingUploadItem,
@@ -37,6 +41,167 @@ from app.api.models import (
 )
 
 router = APIRouter()
+
+
+MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024
+
+
+@router.post("/courses/{course_id}/readings/from-storage", response_model=CreateReadingFromStorageResponse)
+def create_reading_from_storage(
+    course_id: str,
+    payload: CreateReadingFromStorageRequest,
+    db: Session = Depends(get_db)
+):
+    """Create a reading from an existing Supabase Storage object (direct-upload flow)."""
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+
+    if not payload.instructor_id:
+        raise HTTPException(status_code=400, detail="instructor_id is required and cannot be null")
+    try:
+        instructor_uuid = uuid.UUID(payload.instructor_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid instructor_id format: {payload.instructor_id}")
+
+    if not payload.file_path or not str(payload.file_path).strip():
+        raise HTTPException(status_code=400, detail="file_path is required")
+
+    instructor = get_user_by_id(db, instructor_uuid)
+    if not instructor:
+        raise HTTPException(status_code=404, detail=f"Instructor {payload.instructor_id} not found")
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(status_code=404, detail=f"Course {course_id} not found")
+
+    supabase_client = get_supabase_client()
+    bucket_name = "readings"
+
+    reading = None
+    try:
+        reading = create_reading(
+            db=db,
+            instructor_id=instructor_uuid,
+            course_id=course_uuid,
+            title=payload.title,
+            file_path=payload.file_path,
+            source_type=payload.source_type,
+            perusall_reading_id=payload.perusall_reading_id,
+        )
+
+        try:
+            pdf_bytes = supabase_client.storage.from_(bucket_name).download(payload.file_path)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to download PDF from storage at {payload.file_path}: {str(e)}",
+            )
+
+        try:
+            document_id = payload.title.replace(' ', '_').lower()[:50]
+            chunks = pdf_to_chunks(
+                pdf_source=pdf_bytes,
+                document_id=document_id,
+            )
+
+            chunks_data = []
+            for chunk in chunks:
+                chunks_data.append({
+                    "chunk_index": chunk["chunk_index"],
+                    "content": chunk["content"],
+                    "chunk_metadata": {
+                        "document_id": chunk["document_id"],
+                        "token_count": chunk["token_count"],
+                    },
+                })
+
+            create_reading_chunks_batch(
+                db=db,
+                reading_id=reading.id,
+                chunks=chunks_data,
+            )
+        except Exception as chunk_error:
+            print(f"Warning: Failed to convert PDF to chunks for {payload.title}: {str(chunk_error)}")
+
+        db.refresh(reading)
+        reading_dict = reading_to_dict(reading, include_chunks=False)
+        return CreateReadingFromStorageResponse(
+            success=True,
+            reading=ReadingResponse(**reading_dict),
+        )
+    except HTTPException:
+        if reading is not None:
+            db.delete(reading)
+            db.commit()
+        raise
+    except Exception as e:
+        if reading is not None:
+            db.delete(reading)
+            db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to create reading from storage: {str(e)}")
+
+
+@router.post(
+    "/courses/{course_id}/readings/signed-upload-url",
+    response_model=CreateReadingSignedUploadUrlResponse,
+)
+def create_reading_signed_upload_url(
+    course_id: str,
+    payload: CreateReadingSignedUploadUrlRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(status_code=404, detail=f"Course {course_id} not found")
+
+    if not payload.filename or not str(payload.filename).strip():
+        raise HTTPException(status_code=400, detail="filename is required")
+
+    # Supabase Storage object keys can be strict; avoid unicode characters in filenames.
+    safe_filename = "".join(
+        c if (("a" <= c.lower() <= "z") or ("0" <= c <= "9") or (c in ".-_")) else "_"
+        for c in payload.filename
+    )
+    if not safe_filename.lower().endswith(".pdf"):
+        safe_filename += ".pdf"
+
+    # Keep object key reasonably short (avoid provider limits / long URLs)
+    if len(safe_filename) > 120:
+        base = safe_filename[:-4] if safe_filename.lower().endswith(".pdf") else safe_filename
+        safe_filename = f"{base[:116]}.pdf"
+
+    file_path = f"course_{course_id}/{uuid.uuid4()}_{safe_filename}"
+    supabase_client = get_supabase_client()
+    bucket_name = "readings"
+
+    try:
+        result = supabase_client.storage.from_(bucket_name).create_signed_upload_url(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create signed upload url: {str(e)}")
+
+    signed_url = None
+    token = None
+
+    if isinstance(result, dict):
+        signed_url = result.get("signedURL") or result.get("signed_url") or result.get("url")
+        token = result.get("token")
+
+    if not signed_url or not token:
+        raise HTTPException(status_code=500, detail=f"Unexpected signed upload url response: {result}")
+
+    return CreateReadingSignedUploadUrlResponse(
+        success=True,
+        file_path=file_path,
+        signed_url=signed_url,
+        token=token,
+    )
 
 
 @router.post("/courses/{course_id}/readings/batch-upload", response_model=BatchUploadReadingsResponse)
@@ -122,14 +287,31 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=temp_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
                 reading_id = reading.id
                 
                 # Step 2: Upload file to Supabase Storage if content_base64 is provided
                 if reading_item.content_base64:
                     try:
-                        # Decode base64 content
-                        pdf_bytes = base64.b64decode(reading_item.content_base64)
+                        base64_len = len(reading_item.content_base64)
+                        estimated_bytes = (base64_len * 3) // 4
+                        if estimated_bytes > MAX_PDF_UPLOAD_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=(
+                                    f"PDF is too large ({estimated_bytes / (1024 * 1024):.1f} MB). "
+                                    f"Max allowed is {MAX_PDF_UPLOAD_BYTES / (1024 * 1024):.0f} MB."
+                                )
+                            )
+
+                        try:
+                            pdf_bytes = base64.b64decode(reading_item.content_base64)
+                        except Exception:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Invalid base64 PDF content."
+                            )
                         
                         # Determine original filename
                         original_filename = reading_item.original_filename or reading_item.title
@@ -233,7 +415,16 @@ def batch_upload_readings(
                     title=reading_item.title,
                     file_path=final_file_path,
                     source_type=reading_item.source_type,
+                    perusall_reading_id=getattr(reading_item, "perusall_reading_id", None),
                 )
+            
+            # If perusall_reading_id is provided and we have assignment context, create Perusall mapping
+            if hasattr(reading_item, "perusall_reading_id") and reading_item.perusall_reading_id:
+                # Check if we need to create a Perusall mapping
+                # We need perusall_course_id and perusall_assignment_id to create mapping
+                # For now, we'll store the perusall_reading_id in the reading table
+                # The mapping will be created when the assignment is known
+                pass
             
             # Refresh reading to ensure it's up to date
             db.refresh(reading)
