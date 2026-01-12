@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React 前端地址
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React 前端地址
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2559,7 +2559,7 @@ from typing import List, Optional
 
 
 # ---- Perusall environment variables ----
-PERUSALL_BASE_URL = "https://app.perusall.com/api/v1"
+PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 
 X_INSTITUTION = os.getenv("PERUSALL_INSTITUTION")
 X_API_TOKEN = os.getenv("PERUSALL_API_TOKEN")

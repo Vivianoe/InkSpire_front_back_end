@@ -14,7 +14,7 @@ from app.services.course_service import create_course
 logger = logging.getLogger(__name__)
 
 # Perusall API configuration
-PERUSALL_BASE_URL = "https://app.perusall.com/api/v1"
+PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 PERUSALL_API_TIMEOUT = 30  # seconds
 
 

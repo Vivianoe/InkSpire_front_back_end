@@ -12,7 +12,7 @@ from app.services.user_service import (
     get_user_by_supabase_id,
     user_to_dict,
 )
-from auth.supabase import supabase_signup, supabase_login, AuthenticationError
+from auth.supabase import supabase_signup, supabase_login, resend_confirmation_email, AuthenticationError
 from auth.dependencies import get_current_user
 from app.api.models import (
     UserRegisterRequest,
@@ -34,9 +34,9 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
 
-        # Extract tokens from response
-        access_token = supabase_response["access_token"]
-        refresh_token = supabase_response["refresh_token"]
+        # Extract tokens from response (may be None if email confirmation required)
+        access_token = supabase_response.get("access_token")
+        refresh_token = supabase_response.get("refresh_token")
 
         # Create user record in our database
         user = create_user_from_supabase(
@@ -47,7 +47,8 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             role=req.role or "instructor",
         )
 
-        # Return LoginResponse with both access and refresh tokens
+        # Return LoginResponse with tokens (will be None if email unconfirmed)
+        message = "Registration successful. Please check your email to confirm your account." if not access_token else "Registration successful"
         return LoginResponse(
             user=UserResponse(
                 id=str(user.id),
@@ -58,7 +59,7 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
             ),
             access_token=access_token,
             refresh_token=refresh_token,
-            message="Registration successful"
+            message=message
         )
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -153,11 +154,31 @@ def get_user_by_email_endpoint(email: str, db: Session = Depends(get_db)):
     user = get_user_by_email(db, email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return PublicUserResponse(
         id=str(user.id),
         email=user.email,
         name=user.name,
         role=user.role,
     )
+
+@router.post("/users/resend-confirmation")
+def resend_confirmation(req: dict):
+    """
+    Resend email confirmation to user
+
+    This endpoint allows users who didn't receive their confirmation email
+    or whose link expired to request a new confirmation email.
+    """
+    try:
+        email = req.get("email")
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        result = resend_confirmation_email(email)
+        return result
+    except AuthenticationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resend confirmation: {str(e)}")
 

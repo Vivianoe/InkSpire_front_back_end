@@ -8,6 +8,7 @@ import jwt
 from jwt.exceptions import PyJWTError
 from supabase import Client
 from app.core.database import get_supabase_client
+from auth.constants import get_email_confirmation_url
 
 # Load JWT secret for token validation
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
@@ -138,25 +139,21 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
             "options": {
                 "data": {
                     "name": name,
-                }
+                },
+                "email_redirect_to": get_email_confirmation_url()  # Redirect to confirm page
             }
         })
 
         if not response.user:
             raise AuthenticationError("Signup failed: no user returned")
 
-        # Check if session is available (may be None if email confirmation is required)
-        if not response.session:
-            # If email confirmation is enabled, user exists but session is not available yet
-            # In this case, we should still return the user but indicate that confirmation is needed
-            raise AuthenticationError(
-                "Signup successful but email confirmation required. "
-                "Please check your email to confirm your account before signing in."
-            )
+        # When email confirmations are enabled, session will be None until email is confirmed
+        access_token = response.session.access_token if response.session else None
+        refresh_token = response.session.refresh_token if response.session else None
 
         return {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "user": response.user,
             "session": response.session,
@@ -247,3 +244,42 @@ def supabase_logout(access_token: str) -> None:
 
     except Exception as e:
         raise AuthenticationError(f"Logout failed: {str(e)}")
+
+
+def resend_confirmation_email(email: str) -> Dict[str, Any]:
+    """
+    Resend email confirmation to user
+
+    This is useful when users don't receive the initial confirmation email
+    or when the confirmation link has expired.
+
+    Args:
+        email: User's email address
+
+    Returns:
+        Dict containing success message
+
+    Raises:
+        AuthenticationError: If resend fails
+    """
+    try:
+        client = get_supabase_client()
+
+        # Resend confirmation email using Supabase Auth API
+        response = client.auth.resend({
+            "type": "signup",
+            "email": email,
+            "options": {
+                "email_redirect_to": get_email_confirmation_url()
+            }
+        })
+
+        return {"message": "Confirmation email sent"}
+
+    except Exception as e:
+        error_message = str(e)
+        if "not found" in error_message.lower():
+            raise AuthenticationError("User not found with this email")
+        elif "already confirmed" in error_message.lower():
+            raise AuthenticationError("Email already confirmed")
+        raise AuthenticationError(f"Failed to resend confirmation email: {error_message}")

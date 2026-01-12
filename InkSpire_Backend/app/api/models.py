@@ -65,8 +65,8 @@ class UserResponse(BaseModel):
 
 class LoginResponse(BaseModel):
     user: UserResponse
-    access_token: str
-    refresh_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     message: str = "Login successful"
 
