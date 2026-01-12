@@ -269,6 +269,16 @@ The InkSpire platform uses **Supabase Auth** for user management combined with a
    - Custom user record created in users table with role assignment (default: "instructor")
    - Access token (JWT) and refresh token returned to frontend
    - Frontend stores session using Supabase SDK's `setSession()`
+   - Frontend shows email confirmation modal
+   - User receives confirmation email and clicks verification link
+   - Frontend detects email confirmation via Supabase auth state changes
+   - Email confirmed modal appears, user clicks "Continue to Perusall Setup" to proceed
+   - Frontend shows Perusall setup modal
+   - User enters Perusall institution ID and API token
+   - Backend validates credentials and creates user_perusall_credentials record
+   - User selects courses to import from Perusall
+   - Backend imports courses and creates course records
+   - User is redirected to dashboard
 
 **2. Login**:
    - User submits email and password to `/api/users/login`
