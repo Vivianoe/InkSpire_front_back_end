@@ -297,7 +297,7 @@ def generate_scaffolds_with_session(
     # Handle session_id from path parameter
     # If session_id is "new", create a new session; otherwise use existing session
     # need to handle the dirtystate existing session (as handled in sessions.py)
-    if session_id.lower() == "new":
+    '''if session_id.lower() == "new":
         # Create a new session (default week_number = 1, title = "Reading Session")
         session = create_session(
             db=db,
@@ -327,7 +327,7 @@ def generate_scaffolds_with_session(
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid session_id format: {session_id}. Use UUID or 'new' to create a new session",
-            )
+            )'''
     
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)

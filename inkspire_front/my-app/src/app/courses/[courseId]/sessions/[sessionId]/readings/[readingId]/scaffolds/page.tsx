@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 // Dynamically import PdfPreview from components to avoid SSR issues
 const PdfPreview = dynamic(
@@ -702,10 +703,17 @@ ${scaffold.text || 'No scaffold text available'}
     try {
       setPublishLoading(true);
       setPublishError(null);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ annotation_ids: annotationIds }),
+        headers,
+        body: JSON.stringify({ session_id: sessionId, annotation_ids: annotationIds }),
       });
 
       const data = await response.json().catch((e) => {

@@ -289,6 +289,7 @@ class PerusallAnnotationItem(BaseModel):
 
 
 class PerusallAnnotationRequest(BaseModel):
+    session_id: Optional[str] = None
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
 

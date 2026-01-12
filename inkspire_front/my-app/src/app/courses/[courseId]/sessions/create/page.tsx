@@ -337,12 +337,15 @@ export default function SessionCreationPage() {
     }
   }, [courseId]);
 
-  const handleSelectAssignment = async (assignmentId: string) => {
-    if (!assignmentId || assignmentId === 'undefined') {
-      setError('Invalid assignment id. Please refresh the page and try again.');
-      return;
+  useEffect(() => {
+    if (selectedPerusallAssignmentId) {
+      fetchAssignmentReadings(selectedPerusallAssignmentId);
     }
+  }, [selectedPerusallAssignmentId, fetchAssignmentReadings]);
+
+  const handleSelectAssignment = async (assignmentId: string) => {
     setSelectedPerusallAssignmentId(assignmentId);
+    setSelectedReadingIds([]);
     
     // Fetch assignment readings status
     await fetchAssignmentReadings(assignmentId);
@@ -360,6 +363,7 @@ export default function SessionCreationPage() {
     }
   };
 
+  /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
@@ -504,8 +508,9 @@ export default function SessionCreationPage() {
     // Use RESTful URL structure
     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
   };
+  */
 
-  const handleStartScaffoldsGeneration = async () => {
+  const handleStartWorkingOnReadings = async () => {
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -842,7 +847,7 @@ export default function SessionCreationPage() {
               {creating ? 'Creating...' : `Save Session (${selectedReadingIds.length} selected)`}
             </button>
             <button
-              onClick={handleStartScaffoldsGeneration}
+              onClick={handleStartWorkingOnReadings}
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
               disabled={creating || !selectedReadingIds.length}
             >
@@ -1057,161 +1062,21 @@ export default function SessionCreationPage() {
           </div>
         </section>
 
-        {/* Show assignment readings status if assignment is selected */}
-        {selectedPerusallAssignmentId && assignmentReadings.length > 0 && (
-          <section className={styles.selectionSection} style={{ marginBottom: '2rem' }}>
-            <div className={styles.selectionHeader}>
-              <div>
-                <h2 className={styles.sectionTitle}>Assignment Readings: {selectedAssignmentName}</h2>
-                <p className={styles.sectionHelper}>
-                  Readings from the selected Perusall assignment. Please ensure all readings have uploaded PDFs.
-                </p>
-              </div>
-            </div>
-
-            {loadingAssignmentReadings ? (
-              <div className={styles.emptyState}>Loading assignment readings…</div>
-            ) : (
-              <>
-                {assignmentReadings.some(r => !r.is_uploaded) && (
-                  <div style={{
-                    padding: '12px 16px',
-                    backgroundColor: '#fef3c7',
-                    border: '1px solid #fbbf24',
-                    borderRadius: '8px',
-                    marginBottom: '16px',
-                    color: '#92400e'
-                  }}>
-                    <strong>⚠️ Missing Uploads:</strong> {assignmentReadings.filter(r => !r.is_uploaded).length} reading(s) do not have uploaded PDFs. Please upload PDFs for all readings before proceeding.
-                    <div style={{ marginTop: '8px' }}>
-                      <button
-                        onClick={() => {
-                          if (profileId) {
-                            router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
-                          } else {
-                            router.push(`/courses/${courseId}/readings`);
-                          }
-                        }}
-                        className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                        style={{ marginRight: '8px' }}
-                      >
-                        Go to Reading Uploads
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className={styles.readingList}>
-                  {assignmentReadings.map((reading) => (
-                    <div
-                      key={reading.perusall_document_id}
-                      className={styles.readingCard}
-                      style={{
-                        borderLeft: reading.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
-                      }}
-                    >
-                      <div className={styles.readingMeta}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            <p className={styles.readingName}>
-                              {reading.perusall_document_name || `Document ${reading.perusall_document_id}`}
-                            </p>
-                            <span style={{
-                              padding: '2px 8px',
-                              backgroundColor: reading.is_uploaded ? '#10b981' : '#ef4444',
-                              color: 'white',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '500'
-                            }}>
-                              {reading.is_uploaded ? '✓ Uploaded' : '✗ Missing'}
-                            </span>
-                            {reading.start_page && reading.end_page && (
-                              <span style={{
-                                padding: '2px 8px',
-                                backgroundColor: '#e5e7eb',
-                                color: '#374151',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                fontWeight: '500'
-                              }}>
-                                Pages {reading.start_page}-{reading.end_page}
-                              </span>
-                            )}
-                          </div>
-                          {reading.is_uploaded && reading.local_reading_title && (
-                            <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                              Local reading: {reading.local_reading_title}
-                            </p>
-                          )}
-                          {!reading.is_uploaded && (
-                            <p className={styles.readingSecondaryDetail} style={{ color: '#ef4444', fontSize: '12px' }}>
-                              PDF upload required
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className={styles.readingActions}>
-                        {!reading.is_uploaded && (
-                          <>
-                            <input
-                              type="file"
-                              accept=".pdf,application/pdf"
-                              ref={(el) => {
-                                readingUploadRefs.current[reading.perusall_document_id] = el;
-                              }}
-                              onChange={(e) => handleReadingFileSelect(reading.perusall_document_id, e)}
-                              style={{ display: 'none' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (profileId) {
-                                  router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
-                                } else {
-                                  router.push(`/courses/${courseId}/readings`);
-                                }
-                              }}
-                              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                              style={{ fontSize: '12px', padding: '6px 12px', marginRight: '8px' }}
-                            >
-                              Go to Uploads
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => readingUploadRefs.current[reading.perusall_document_id]?.click()}
-                              className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                              style={{ fontSize: '12px', padding: '6px 12px' }}
-                              disabled={uploadingReading === reading.perusall_document_id}
-                            >
-                              {uploadingReading === reading.perusall_document_id ? 'Uploading...' : 'Upload PDF'}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
-        )}
-
         <section className={styles.selectionSection}>
           <div className={styles.selectionHeader}>
             <div>
               <h2 className={styles.sectionTitle}>Select Readings</h2>
               <p className={styles.sectionHelper}>
-                Choose which readings to include in this session for scaffold generation.
-                {selectedPerusallAssignmentId && assignmentReadings.length > 0 && (
-                  <> Only readings from the assignment that have uploaded PDFs are available.</>
+                Choose which readings to work on.
+                {selectedPerusallAssignmentId && (
+                  <> Only readings from the selected assignment are shown (and only uploaded ones can be selected).</>
                 )}
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div className={styles.selectionCount}>
                 {selectedReadingIds.length} of {
-                  selectedPerusallAssignmentId && assignmentReadings.length > 0
+                  selectedPerusallAssignmentId
                     ? assignmentReadings.filter(r => r.is_uploaded).length
                     : readings.length
                 } selected
@@ -1227,18 +1092,15 @@ export default function SessionCreationPage() {
               </button>
               */}
               <button
-                onClick={handleStartScaffoldsGeneration}
+                onClick={handleStartWorkingOnReadings}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
                 disabled={
                   creating || 
-                  !selectedReadingIds.length ||
-                  (selectedPerusallAssignmentId ? assignmentReadings.some(r => !r.is_uploaded) : false)
+                  !selectedReadingIds.length
                 }
                 style={{ whiteSpace: 'nowrap' }}
                 title={
-                  selectedPerusallAssignmentId && assignmentReadings.some(r => !r.is_uploaded)
-                    ? 'Please upload PDFs for all assignment readings before proceeding'
-                    : undefined
+                  undefined
                 }
               >
                 {creating ? 'Starting...' : 'Start to work on readings'}
@@ -1247,81 +1109,126 @@ export default function SessionCreationPage() {
           </div>
 
           <div className={styles.readingList}>
-            {readings.length === 0 ? (
+            {selectedPerusallAssignmentId ? (
+              loadingAssignmentReadings ? (
+                <div className={styles.emptyState}>Loading assignment readings…</div>
+              ) : assignmentReadings.length === 0 ? (
+                <div className={styles.emptyState}>
+                  No readings found for this assignment.
+                </div>
+              ) : (
+                assignmentReadings.map((ar) => {
+                    const localId = ar.local_reading_id || '';
+                    const canSelect = Boolean(ar.is_uploaded && localId);
+                    const isSelected = canSelect && selectedReadingIds.includes(localId);
+
+                    return (
+                      <div
+                        key={ar.perusall_document_id}
+                        className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
+                        style={{
+                          borderLeft: ar.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
+                        }}
+                      >
+                        <div className={styles.readingMeta}>
+                          <div>
+                            <p className={styles.readingName}>
+                              {ar.perusall_document_name || `Document ${ar.perusall_document_id}`}
+                            </p>
+                            <p className={styles.readingDetails}>
+                              <span style={{
+                                padding: '2px 6px',
+                                backgroundColor: ar.is_uploaded ? '#10b981' : '#ef4444',
+                                color: 'white',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: '500',
+                                marginRight: '8px'
+                              }}>
+                                {ar.is_uploaded ? '✓ Uploaded' : '✗ Missing PDF'}
+                              </span>
+                              {ar.start_page && ar.end_page ? `Pages ${ar.start_page}-${ar.end_page}` : ''}
+                            </p>
+                            {ar.is_uploaded && ar.local_reading_title && (
+                              <p className={styles.readingSecondaryDetail}>
+                                Local reading: {ar.local_reading_title}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.readingActions}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canSelect) return;
+                              handleReadingSelect(localId, !isSelected);
+                            }}
+                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                            disabled={creating || !canSelect}
+                            title={!ar.is_uploaded ? 'Upload PDF before selecting' : !localId ? 'Missing local reading mapping' : undefined}
+                          >
+                            {isSelected ? 'Selected' : 'Select'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )
+            ) : readings.length === 0 ? (
               <div className={styles.emptyState}>
                 No readings available. Please upload readings first.
               </div>
             ) : (
-              displayReadings
-                .filter(reading => {
-                  // If assignment is selected, only show readings that are in the assignment and uploaded
-                  if (selectedPerusallAssignmentId && assignmentReadings.length > 0) {
-                    const assignmentReading = assignmentReadings.find(
-                      ar => ar.local_reading_id === reading.id
-                    );
-                    return assignmentReading?.is_uploaded === true;
-                  }
-                  return true;
-                })
-                .map(reading => {
-                  const isSelected = selectedReadingIds.includes(reading.id);
-                  const assignmentReading = selectedPerusallAssignmentId && assignmentReadings.length > 0
-                    ? assignmentReadings.find(ar => ar.local_reading_id === reading.id)
-                    : null;
-                  
-                  return (
-                    <div
-                      key={reading.id}
-                      className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                    >
-                      <div className={styles.readingMeta}>
-                        <div>
-                          <p className={styles.readingName}>{reading.title}</p>
-                          <p className={styles.readingDetails}>
-                            {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
-                            {reading.displayDate ? `· ${reading.displayDate}` : ''}
-                            {assignmentReading?.start_page && assignmentReading?.end_page && (
-                              <> · Pages {assignmentReading.start_page}-{assignmentReading.end_page}</>
-                            )}
-                            {reading.hasChunks && (
-                              <span style={{ 
-                                marginLeft: '8px', 
-                                padding: '2px 6px', 
-                                backgroundColor: '#10b981', 
-                                color: 'white', 
-                                borderRadius: '4px', 
-                                fontSize: '11px',
-                                fontWeight: '500'
-                              }}>
-                                Processed
-                              </span>
-                            )}
-                          </p>
-                          {reading.filePath && (
-                            <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
-                          )}
-                          {reading.hasChunks && reading.readingChunks && (
-                            <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                              {reading.readingChunks.length} chunks available
+              displayReadings.map(reading => {
+                    const isSelected = selectedReadingIds.includes(reading.id);
+                    return (
+                      <div
+                        key={reading.id}
+                        className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
+                      >
+                        <div className={styles.readingMeta}>
+                          <div>
+                            <p className={styles.readingName}>{reading.title}</p>
+                            <p className={styles.readingDetails}>
+                              {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
+                              {reading.displayDate ? `· ${reading.displayDate}` : ''}
+                              {reading.hasChunks && (
+                                <span style={{
+                                  marginLeft: '8px',
+                                  padding: '2px 6px',
+                                  backgroundColor: '#10b981',
+                                  color: 'white',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: '500'
+                                }}>
+                                  Processed
+                                </span>
+                              )}
                             </p>
-                          )}
+                            {reading.filePath && (
+                              <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
+                            )}
+                            {reading.hasChunks && reading.readingChunks && (
+                              <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
+                                {reading.readingChunks.length} chunks available
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.readingActions}>
+                          <button
+                            type="button"
+                            onClick={() => handleReadingSelect(reading.id, !isSelected)}
+                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                            disabled={creating}
+                          >
+                            {isSelected ? 'Selected' : 'Select'}
+                          </button>
                         </div>
                       </div>
-                      <div className={styles.readingActions}>
-                        <button
-                          type="button"
-                          onClick={() => handleReadingSelect(reading.id, !isSelected)}
-                          className={`${styles.selectionButton} ${
-                            isSelected ? styles.selectionButtonActive : ''
-                          }`}
-                          disabled={creating}
-                        >
-                          {isSelected ? 'Selected' : 'Select'}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  })
             )}
           </div>
         </section>
