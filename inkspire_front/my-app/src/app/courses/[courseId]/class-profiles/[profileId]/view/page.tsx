@@ -363,6 +363,7 @@ export default function ViewClassProfilePage() {
   });
   const [isBasicInfoEditing, setIsBasicInfoEditing] = useState(false);
   const [basicInfoSnapshot, setBasicInfoSnapshot] = useState<ClassProfile | null>(null);
+  const [designEditedSinceRegeneration, setDesignEditedSinceRegeneration] = useState(false);
 
   const isDirty = useMemo(() => {
     if (!formData || !initialData) return false;
@@ -685,16 +686,38 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setDesignDraft({ ...designConsiderations });
   };
 
-  const handleSaveDesignEdit = () => {
+  const handleSaveDesignEdit = async () => {
+    if (!formData) return;
+
+    // Step 1: Normalize the design considerations
     const normalized = normalizeDesignConsiderations(designDraft);
-    setDesignConsiderations(normalized);
-    setFormData(prev => (prev ? { ...prev, designConsiderations: normalized } : prev));
-    updateProfileSections(prev => ({
-      ...prev,
+
+    // Step 2: Create updated profile sections with new design text
+    const updatedSections: ProfileSections = {
+      ...profileSections,
       design: formatDesignConsiderations(normalized),
-    }));
-    setEditingDesign(false);
-    setDesignDraft({ ...normalized });
+    };
+
+    // Step 3: Compose the new profile narrative (includes design section)
+    const newProfileText = composeProfileNarrative(updatedSections);
+
+    // Step 4: Create updated form data with both designConsiderations AND generatedProfile
+    const updatedFormData: ClassProfile = {
+      ...formData,
+      designConsiderations: normalized,
+      generatedProfile: newProfileText,
+    };
+
+    // Step 5: Save to database - handleSave will update state on success
+    const success = await handleSave(updatedFormData);
+
+    // Step 6: Only clear editing state if save succeeded
+    if (success) {
+      setEditingDesign(false);
+      setDesignDraft({ ...normalized });
+      setDesignEditedSinceRegeneration(true);
+    }
+    // If save failed, user remains in edit mode with their draft intact
   };
 
   const handleRegenerate = async (target: RegenerateTarget) => {
@@ -706,6 +729,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setProfileDraft('');
     setEditingDesign(false);
     setDesignDraft(createDefaultDesignConsiderations());
+    setDesignEditedSinceRegeneration(false);
 
     try {
       const payload = buildRunClassProfileRequest(formData);
@@ -1209,13 +1233,27 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             </button>*/}
 
             {isCreateMode ? null : (
-              <button
-                onClick={handleStartSession}
-                className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
-                disabled={saving || generating || !formData}
-              >
-                {startSessionLabel}
-              </button>
+              <div className={styles.regenerateInfoWrapper}>
+                <button
+                  onClick={handleStartSession}
+                  className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
+                  disabled={saving || generating || !formData || designEditedSinceRegeneration}
+                >
+                  {startSessionLabel}
+                </button>
+                {designEditedSinceRegeneration && (
+                  <span
+                    tabIndex={0}
+                    className={styles.regenerateInfoTrigger}
+                    aria-label="You must regenerate the class profile after editing Design Considerations before uploading readings."
+                  >
+                    <InformationCircleIcon aria-hidden="true" className={styles.regenerateInfoIcon} />
+                    <span className={styles.regenerateTooltip}>
+                      You must regenerate the class profile after editing Design Considerations before uploading readings.
+                    </span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
