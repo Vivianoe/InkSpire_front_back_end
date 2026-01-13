@@ -636,24 +636,41 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setProfileDraft('');
   };
 
-  const handleSaveProfileEdit = () => {
-    if (!editingProfileLevel) return;
+  const handleSaveProfileEdit = async () => {
+    if (!editingProfileLevel || !formData) return;
 
+    // Create the updated sections first
+    let updatedSections: ProfileSections;
     if (editingProfileLevel === 'all') {
-      updateProfileSections(prev => ({
-        ...prev,
+      updatedSections = {
+        ...profileSections,
         overall: profileDraft.trim(),
-      }));
+      };
     } else {
-      const normalized = profileDraft.trim();
-      updateProfileSections(prev => ({
-        ...prev,
-        [editingProfileLevel]: normalized,
-      }));
+      updatedSections = {
+        ...profileSections,
+        [editingProfileLevel]: profileDraft.trim(),
+      };
     }
 
-    setEditingProfileLevel(null);
-    setProfileDraft('');
+    // Create the new profile text
+    const newProfileText = composeProfileNarrative(updatedSections);
+
+    // Create updated form data with the new profile text
+    const updatedFormData = {
+      ...formData,
+      generatedProfile: newProfileText,
+    };
+
+    // Save first - handleSave will update state on success
+    const success = await handleSave(updatedFormData);
+
+    // Only clear editing state if save succeeded
+    if (success) {
+      setEditingProfileLevel(null);
+      setProfileDraft('');
+    }
+    // If save failed, user remains in edit mode with their draft intact
   };
 
   const handleStartDesignEdit = () => {
@@ -957,12 +974,17 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
   };
 
-  const handleSave = async (options: SaveOptions = {}) => {
-    if (!formData) return false;
+  const handleSave = async (
+    dataToSave?: ClassProfile,
+    options: SaveOptions = {}
+  ): Promise<boolean> => {
+    const saveData = dataToSave || formData;
+    if (!saveData) return false;
+    
     setSaving(true);
     setError(null);
     try {
-      const hasExistingId = formData.id && formData.id !== 'new';
+      const hasExistingId = saveData.id && saveData.id !== 'new';
 
       // Get course_id from URL params
       const courseIdParam = urlCourseId;
@@ -972,24 +994,24 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       }
 
       const endpoint = hasExistingId
-        ? `/api/courses/${courseIdParam}/class-profiles/${formData.id}/edit`
+        ? `/api/courses/${courseIdParam}/class-profiles/${saveData.id}/edit`
         : '/api/class-profiles';
       const method = 'POST'; // Backend uses POST for both create and edit
 
       const payload = hasExistingId
         ? {
             // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
-            text: serializeProfileForExport(formData)
+            text: serializeProfileForExport(saveData)
           }
         : {
             // For create endpoint - matches existing structure
             // Get instructor_id from URL params instead of using mock
             instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
-            title: formData.courseInfo.courseName || 'Untitled Class',
-            course_code: formData.courseInfo.courseCode || 'TBD',
-            description: formData.courseInfo.description || 'Draft class profile',
-            class_input: buildClassInputPayload(formData),
-            generated_profile: formData.generatedProfile,
+            title: saveData.courseInfo.courseName || 'Untitled Class',
+            course_code: saveData.courseInfo.courseCode || 'TBD',
+            description: saveData.courseInfo.description || 'Draft class profile',
+            class_input: buildClassInputPayload(saveData),
+            generated_profile: saveData.generatedProfile,
           };
 
       const response = await fetch(endpoint, {
@@ -1003,18 +1025,19 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to save profile');
       }
-      const savedProfile = (data?.profile as ClassProfile | undefined) ?? formData;
+      const savedProfile = (data?.profile as ClassProfile | undefined) ?? saveData;
       const normalized = normalizeProfile(savedProfile);
       setFormData(cloneProfile(normalized));
       setInitialData(cloneProfile(normalized));
       setSuccess(true);
+      
       const savedId =
         normalized.id && normalized.id !== 'new'
           ? normalized.id
           : typeof data?.profile?.id === 'string'
             ? data.profile.id
             : hasExistingId
-              ? formData.id
+              ? saveData.id
               : undefined;
 
       if (!hasExistingId && savedId && savedId !== 'new' && profileId === 'new') {
@@ -1044,7 +1067,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            updated_text: serializeProfileForExport(formData),
+            updated_text: serializeProfileForExport(saveData),
           }),
         });
         const approveData = await approveResponse.json().catch(() => ({}));
@@ -1076,7 +1099,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
   };
 
   const handleSaveClick = () => {
-    void handleSave({ approveAfter: true });
+    void handleSave(undefined, { approveAfter: true });
   };
 
   const handleStartSession = () => {
