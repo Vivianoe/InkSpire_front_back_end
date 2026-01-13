@@ -572,14 +572,9 @@ export default function SessionCreationPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-          <div>
-            <h1 className={styles.title}>Save Session</h1>
-            <p className={styles.subtitle}>
-              Select readings for scaffold generation and create a session.
-            </p>
-          </div>
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
+              type="button"
               onClick={() => {
                 // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
                 if (resolvedCourseId && profileId) {
@@ -593,11 +588,20 @@ export default function SessionCreationPage() {
                   router.push(`/class-profile/${profileId}/reading${queryString ? `?${queryString}` : ''}`);
                 }
               }}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              className={styles.backIconButton}
+              aria-label="Back to Readings"
               disabled={creating}
             >
-              ← Back to Readings
+              <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
             </button>
+            <div>
+              <h1 className={styles.title}>Save Session</h1>
+              <p className={styles.subtitle}>
+                Select readings for scaffold generation and create a session.
+              </p>
+            </div>
+          </div>
+          <div className={styles.headerActions}>
             <button
               onClick={handleCreateSession}
               className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}

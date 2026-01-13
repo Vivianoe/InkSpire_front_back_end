@@ -1100,6 +1100,15 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         </div>
         <div className={styles.header}>
           <div className={styles.headerLeft}>
+            <button
+              type="button"
+              onClick={handleBackToDashboard}
+              className={styles.backIconButton}
+              aria-label="Back to Dashboard"
+              disabled={saving || generating}
+            >
+              <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
+            </button>
             <div>
               <h1 className={`${styles.title} ${styles.titleWithCode}`}>
                 <span>{profileHeading}</span>
@@ -1113,13 +1122,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             </div>
           </div>
           <div className={styles.headerActions}>
-            <button
-              onClick={handleBackToDashboard}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-              disabled={saving || generating}
-            >
-              ← Back to Dashboard
-            </button>
             <button
               onClick={handleSaveClick}
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}

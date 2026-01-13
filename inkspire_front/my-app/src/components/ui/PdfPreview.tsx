@@ -1599,7 +1599,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           span: span ? { ...span, qLen: queryNorm.length } : null,
           spanCompact: spanCompact ? { ...spanCompact, qLen: queryCompact.length } : null,
         });
-      }
+          }
 
       if (selected) {
         const origRange = mapNormRangeToOrig(selected.normStart, selected.normEnd, selected.normToOrig, text.length);

@@ -442,23 +442,26 @@ export default function EditCoursePage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-          <div>
-            <h1 className={styles.title}>
-              {isEdit ? 'Edit Class Profile' : 'Create New Class Profile'}
-            </h1>
-            <p className={styles.subtitle}>
-              Fill in the details below to generate your class profile
-            </p>
-          </div>
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
               type="button"
               onClick={handleCancel}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              className={styles.backIconButton}
+              aria-label="Back to Dashboard"
               disabled={generating || saving}
             >
-              ← Back to Dashboard
+              <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
             </button>
+            <div>
+              <h1 className={styles.title}>
+                {isEdit ? 'Edit Class Profile' : 'Create New Class Profile'}
+              </h1>
+              <p className={styles.subtitle}>
+                Fill in the details below to generate your class profile
+              </p>
+            </div>
+          </div>
+          <div className={styles.headerActions}>
             <button
               type="button"
               onClick={handleGenerateProfile}
