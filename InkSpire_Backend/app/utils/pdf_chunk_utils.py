@@ -87,6 +87,22 @@ def extract_text_from_pdf(pdf_source: Union[str, Path, bytes, io.BytesIO]) -> st
     return "\n".join(pages)
 
 
+def extract_text_pages_from_pdf(pdf_source: Union[str, Path, bytes, io.BytesIO]) -> List[str]:
+    if isinstance(pdf_source, (str, Path)):
+        reader = PdfReader(str(pdf_source))
+    elif isinstance(pdf_source, bytes):
+        reader = PdfReader(io.BytesIO(pdf_source))
+    elif isinstance(pdf_source, io.BytesIO):
+        reader = PdfReader(pdf_source)
+    else:
+        raise ValueError(f"Unsupported pdf_source type: {type(pdf_source)}")
+
+    pages: List[str] = []
+    for page in reader.pages:
+        pages.append(page.extract_text() or "")
+    return pages
+
+
 # ------------------------------------------------------------
 # Chunking logic (base 450–700 tokens, 10–15% overlap)
 # ------------------------------------------------------------
@@ -196,8 +212,7 @@ def pdf_to_chunks(
             "token_count": int
         }
     """
-    # Extract text from PDF
-    text = extract_text_from_pdf(pdf_source)
+    pages_text = extract_text_pages_from_pdf(pdf_source)
     
     # Determine document_id
     if document_id is None:
@@ -208,23 +223,18 @@ def pdf_to_chunks(
     
     # Get tokenizer
     tokenizer = get_tokenizer(model_name)
-    
-    # Chunk the text
-    chunks = chunk_text(
-        text=text,
-        document_id=document_id,
-        tokenizer_fn=tokenizer,
-    )
-    
-    # Convert to list of dictionaries
-    result = []
-    for chunk in chunks:
-        result.append({
-            "document_id": chunk.document_id,
-            "chunk_index": chunk.chunk_index,
-            "content": chunk.content,
-            "token_count": chunk.token_count,
-        })
+
+    result: List[dict] = []
+    for chunk_index, page_text in enumerate(pages_text, start=0):
+        tokens = tokenizer(page_text or "")
+        result.append(
+            {
+                "document_id": document_id,
+                "chunk_index": chunk_index,
+                "content": page_text or "",
+                "token_count": len(tokens),
+            }
+        )
     
     return result
 

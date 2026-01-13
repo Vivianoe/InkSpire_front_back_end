@@ -224,7 +224,27 @@ export default function ReadingUploadPage() {
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to remove reading.');
       }
-      await fetchReadings();
+
+      // Keep any persisted reading selection in sync
+      try {
+        if (typeof window !== 'undefined') {
+          const raw = window.sessionStorage.getItem(SELECTED_READING_STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              window.sessionStorage.setItem(
+                SELECTED_READING_STORAGE_KEY,
+                JSON.stringify(parsed.filter((r: any) => String(r?.id) !== String(id)))
+              );
+            }
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+
+      // Refresh both readings and Perusall library (so deleted reading shows as missing)
+      await Promise.all([fetchReadings(), fetchPerusallLibrary()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove reading.');
     } finally {

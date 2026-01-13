@@ -28,8 +28,10 @@ from app.services.reading_service import get_reading_by_id
 from app.services.reading_chunk_service import get_reading_chunks_by_reading_id
 from app.services.class_profile_service import get_class_profile_by_course_id
 from app.services.session_service import (
-    create_session,
     get_session_by_id,
+)
+from app.services.session_service import (
+    create_session,
     get_session_readings,
     add_reading_to_session,
     get_latest_session_version,
@@ -37,6 +39,10 @@ from app.services.session_service import (
     create_session_version,
     get_next_version_number,
     set_current_version,
+)
+from app.services.session_reading_service import (
+    get_active_session_readings,
+    rederive_session_readings_for_session,
 )
 from app.workflows.scaffold_workflow import (
     build_workflow as build_scaffold_workflow,
@@ -295,8 +301,8 @@ def generate_scaffolds_with_session(
         )
     
     # Handle session_id from path parameter
-    # If session_id is "new", create a new session; otherwise use existing session
-    # need to handle the dirtystate existing session (as handled in sessions.py)
+    # If session_id is "new", return with an error demanding creatation of a new session first
+    # no need to handle the dirtystate existing session (as handled in sessions.py)
     
     if session_id.lower() == "new":
         raise HTTPException(
@@ -358,36 +364,12 @@ def generate_scaffolds_with_session(
             detail=f"Failed to parse class profile JSON from database: {str(json_error)}",
         )
     
-    # Load or get current session version
-    # Get current version from session, or create one if it doesn't exist
-    session = get_session_by_id(db, session_uuid)
-    if not session:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_uuid} not found",
-        )
-    
+
+    # Get current version from session
     current_version = None
     if session.current_version_id:
         current_version = get_session_version_by_id(db, session.current_version_id)
-    
-    # If no current version exists, create version 1
-    if not current_version:
-        # Get reading IDs for this session
-        session_readings = get_session_readings(db, session_uuid)
-        reading_ids = [str(sr.reading_id) for sr in session_readings]
-        
-        current_version = create_session_version(
-            db=db,
-            session_id=session_uuid,
-            version_number=1,
-            session_info_json=None,
-            assignment_info_json=None,
-            assignment_goals_json=None,
-            reading_ids=reading_ids,
-        )
-        session = set_current_version(db, session_uuid, current_version.id)
-        print(f"[generate_scaffolds_with_session] Created new session version 1 for session {session_uuid}")
+
     
     # Load reading_chunks from database
     chunks = get_reading_chunks_by_reading_id(db, reading_uuid)
@@ -396,6 +378,61 @@ def generate_scaffolds_with_session(
             status_code=404,
             detail=f"No chunks found for reading {reading_uuid}. Please upload and process the reading first.",
         )
+
+    # Filter chunks based on assignment-derived session_readings (Perusall pages are 1-based; chunk_index is 0-based)
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+
+    def coerce_int(v: Any) -> Optional[int]:
+        try:
+            if v is None:
+                return None
+            return int(v)
+        except Exception:
+            return None
+
+    session_readings = get_active_session_readings(db, session_uuid)
+    sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
+    if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
+        start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
+        end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
+
+    # Backfill: older sessions may have session_readings rows without assignment-derived metadata.
+    if sr_for_reading and (start_page is None and end_page is None):
+        try:
+            rederive_session_readings_for_session(db, session_uuid)
+        except Exception:
+            pass
+        session_readings = get_active_session_readings(db, session_uuid)
+        sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
+        if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
+            start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
+            end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
+
+    if start_page is None and end_page is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Assignment-derived session_readings page range not available for this session/reading. "
+                "Please sync the Perusall assignment (and re-derive session_readings) first."
+            ),
+        )
+
+    filtered_chunks = chunks
+    start_idx = max(0, (start_page - 1) if start_page else 0)
+    end_idx = (end_page - 1) if end_page else None
+    if end_idx is not None and end_idx < start_idx:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid assignment page range: start_page={start_page}, end_page={end_page}",
+        )
+    if end_idx is None:
+        filtered_chunks = [c for c in chunks if c.chunk_index >= start_idx]
+    else:
+        filtered_chunks = [c for c in chunks if start_idx <= c.chunk_index <= end_idx]
+    print(
+        f"[generate_scaffolds_with_session] Using page range start_page={start_page}, end_page={end_page} -> chunk_index {start_idx}..{end_idx}; selected {len(filtered_chunks)}/{len(chunks)} chunks"
+    )
     
     # Convert to workflow format: {"chunks": [...]}
     reading_chunks_data = {
@@ -407,7 +444,7 @@ def generate_scaffolds_with_session(
                 "content": chunk.content,
                 "token_count": chunk.chunk_metadata.get("token_count") if chunk.chunk_metadata else None,
             }
-            for chunk in chunks
+            for chunk in filtered_chunks
         ]
     }
     

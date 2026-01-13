@@ -181,6 +181,7 @@ export default function DashboardPage() {
             <h1 className={styles.welcomeTitle}>
               {user ? `Welcome Back, ${getUserFirstName()}` : 'Welcome to InkSpire!'}
             </h1>
+            {/* 
             {process.env.NODE_ENV === 'development' && !loading && (
               <div style={{
                 display: 'flex',
@@ -214,7 +215,7 @@ export default function DashboardPage() {
                   Test
                 </button>
               </div>
-            )}
+            )} */}
           </div>
 
           {loading ? (

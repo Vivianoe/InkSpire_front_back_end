@@ -455,6 +455,7 @@ class PerusallAssignmentItem(BaseModel):
     deadline: Optional[str] = None
     assignTo: Optional[str] = None
     documents: Optional[List[Dict[str, str]]] = None  # Legacy field for backward compatibility
+    has_session: Optional[bool] = False  # Whether this assignment already has a session
 
 
 class PerusallAssignmentsResponse(BaseModel):

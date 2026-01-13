@@ -322,8 +322,18 @@ export default function SessionCreationPage() {
       if (data?.success && Array.isArray(data?.readings)) {
         setAssignmentReadings(data.readings);
         setSelectedAssignmentName(data.assignment_name || '');
+
+        // If PDFs were removed (soft-delete) or uploads are missing, ensure previously-selected
+        // local reading ids are automatically deselected.
+        const selectableLocalIds = new Set(
+          data.readings
+            .filter((r: any) => Boolean(r?.is_uploaded && r?.local_reading_id))
+            .map((r: any) => String(r.local_reading_id))
+        );
+        setSelectedReadingIds((prev) => prev.filter((id) => selectableLocalIds.has(id)));
       } else {
         setAssignmentReadings([]);
+        setSelectedReadingIds([]);
       }
     } catch (err) {
       console.error('Assignment readings fetch error:', err);
@@ -1202,6 +1212,25 @@ export default function SessionCreationPage() {
                           </div>
                         </div>
                         <div className={styles.readingActions}>
+                          {!ar.is_uploaded && (
+                            <label
+                              className={styles.selectionButton}
+                              style={{
+                                cursor: uploadingReading === ar.perusall_document_id ? 'not-allowed' : 'pointer',
+                                opacity: uploadingReading === ar.perusall_document_id ? 0.6 : 1,
+                              }}
+                              title="Upload a PDF to enable selection"
+                            >
+                              {uploadingReading === ar.perusall_document_id ? 'Uploading…' : 'Upload PDF'}
+                              <input
+                                type="file"
+                                accept="application/pdf"
+                                onChange={(e) => handleReadingFileSelect(ar.perusall_document_id, e)}
+                                disabled={creating || uploadingReading === ar.perusall_document_id}
+                                style={{ display: 'none' }}
+                              />
+                            </label>
+                          )}
                           <button
                             type="button"
                             onClick={() => {

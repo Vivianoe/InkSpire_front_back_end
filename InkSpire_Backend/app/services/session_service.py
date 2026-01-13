@@ -6,7 +6,8 @@ import uuid
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
-from app.models.models import Session, SessionReading, Reading, SessionVersion
+from app.models.models import Session, SessionReading, Reading, SessionVersion, PerusallAssignment
+from app.services.session_reading_service import get_active_session_readings
 
 
 def create_session(
@@ -15,10 +16,11 @@ def create_session(
     week_number: int,
     title: Optional[str] = None,
     status: str = "draft",
-    perusall_assignment_id: Optional[str] = None,
+    perusall_assignment_id: Optional[uuid.UUID] = None,
 ) -> Session:
     """
     Create a new session (identity only, no version data)
+    perusall_assignment_id should be a UUID referencing perusall_assignments.id
     """
     session = Session(
         id=uuid.uuid4(),
@@ -101,8 +103,17 @@ def add_reading_to_session(
     order_index: Optional[int] = None,
 ) -> SessionReading:
     """
-    Add a reading to a session (create session_reading relationship)
+    Legacy helper. Prefer deriving SessionReadings from Perusall assignment parts.
+
+    This will only create a SessionReading if the session has a perusall_assignment_id,
+    because session_readings must always reference a valid Perusall assignment.
     """
+    session = get_session_by_id(db, session_id)
+    if not session:
+        raise ValueError(f"Session {session_id} not found")
+    if not session.perusall_assignment_id:
+        raise ValueError("Cannot add session_readings without perusall_assignment_id on session")
+
     # Check if relationship already exists
     existing = db.query(SessionReading).filter(
         and_(
@@ -114,23 +125,51 @@ def add_reading_to_session(
     if existing:
         # Update order_index if provided
         if order_index is not None:
-            existing.order_index = order_index
+            existing.position = order_index
             db.commit()
             db.refresh(existing)
         return existing
     
-    # If no order_index provided, get the next available index
+    # If no order_index provided, get the next available position
     if order_index is None:
-        max_index = db.query(SessionReading).filter(
+        max_pos = db.query(SessionReading).filter(
             SessionReading.session_id == session_id
-        ).order_by(desc(SessionReading.order_index)).first()
-        order_index = (max_index.order_index + 1) if max_index and max_index.order_index is not None else 0
-    
+        ).order_by(desc(SessionReading.position)).first()
+        order_index = (max_pos.position + 1) if max_pos and max_pos.position is not None else 0
+
+    # Derive assignment-structural metadata (perusall_document_id, assigned_pages)
+    perusall_document_id = None
+    assigned_pages = None
+    reading = db.query(Reading).filter(Reading.id == reading_id).first()
+    assignment = None
+    if reading and reading.perusall_reading_id:
+        assignment = (
+            db.query(PerusallAssignment)
+            .filter(PerusallAssignment.id == session.perusall_assignment_id)
+            .first()
+        )
+    if assignment and isinstance(assignment.parts, list):
+        for part in assignment.parts:
+            if not isinstance(part, dict):
+                continue
+            doc_id = part.get("documentId")
+            if doc_id and str(doc_id) == str(reading.perusall_reading_id):
+                perusall_document_id = str(doc_id)
+                assigned_pages = {
+                    "start_page": part.get("startPage"),
+                    "end_page": part.get("endPage"),
+                }
+                break
+
     session_reading = SessionReading(
         id=uuid.uuid4(),
         session_id=session_id,
         reading_id=reading_id,
-        order_index=order_index,
+        perusall_assignment_id=session.perusall_assignment_id,
+        perusall_document_id=perusall_document_id,
+        assigned_pages=assigned_pages,
+        position=order_index,
+        is_active=True,
     )
     
     db.add(session_reading)
@@ -169,11 +208,10 @@ def get_session_readings(
     session_id: uuid.UUID,
 ) -> List[SessionReading]:
     """
-    Get all readings for a session, ordered by order_index
+    Get active session_readings for a session, ordered by position.
+    Filters out inactive rows and soft-deleted readings.
     """
-    return db.query(SessionReading).filter(
-        SessionReading.session_id == session_id
-    ).order_by(SessionReading.order_index).all()
+    return get_active_session_readings(db, session_id)
 
 
 def get_sessions_by_reading(
@@ -200,7 +238,7 @@ def update_reading_order(
     reading_orders: List[Dict[str, Any]],  # [{"reading_id": "...", "order_index": 0}, ...]
 ) -> bool:
     """
-    Update the order of readings in a session
+    Update the order of readings in a session (position field).
     """
     for item in reading_orders:
         reading_id = uuid.UUID(item["reading_id"])
@@ -214,7 +252,7 @@ def update_reading_order(
         ).first()
         
         if session_reading:
-            session_reading.order_index = order_index
+            session_reading.position = order_index
     
     db.commit()
     return True
@@ -224,12 +262,17 @@ def session_to_dict(session: Session) -> Dict[str, Any]:
     """
     Convert Session model to dictionary
     """
+    # Get perusall_assignment_id string from the relationship if available
+    perusall_assignment_id_str = None
+    if session.perusall_assignment:
+        perusall_assignment_id_str = session.perusall_assignment.perusall_assignment_id
+    
     return {
         "id": str(session.id),
         "course_id": str(session.course_id),
         "week_number": session.week_number,
         "title": session.title,
-        "perusall_assignment_id": session.perusall_assignment_id,
+        "perusall_assignment_id": perusall_assignment_id_str,  # Return the Perusall assignment ID string, not UUID
         "current_version_id": str(session.current_version_id) if session.current_version_id else None,
         "status": session.status,
         "created_at": session.created_at.isoformat() if session.created_at else None,
@@ -246,7 +289,11 @@ def session_reading_to_dict(session_reading: SessionReading) -> Dict[str, Any]:
         "session_id": str(session_reading.session_id),
         "reading_id": str(session_reading.reading_id),
         "added_at": session_reading.added_at.isoformat() if session_reading.added_at else None,
-        "order_index": session_reading.order_index,
+        "position": session_reading.position,
+        "perusall_assignment_id": str(session_reading.perusall_assignment_id) if session_reading.perusall_assignment_id else None,
+        "perusall_document_id": session_reading.perusall_document_id,
+        "assigned_pages": session_reading.assigned_pages,
+        "is_active": session_reading.is_active,
     }
 
 

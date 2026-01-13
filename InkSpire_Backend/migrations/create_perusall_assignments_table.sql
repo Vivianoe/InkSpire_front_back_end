@@ -1,0 +1,143 @@
+-- Migration: Create perusall_assignments table and update sessions table
+-- This migration enforces a strict 1:1 relationship between Perusall assignments and Inkspire sessions
+
+-- Step 1: Create perusall_assignments table
+CREATE TABLE IF NOT EXISTS perusall_assignments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    perusall_course_id TEXT NOT NULL,
+    perusall_assignment_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    document_ids JSONB,  -- Array of Perusall reading IDs
+    parts JSONB,  -- JSONB with documentId + page ranges
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Ensure unique combination of perusall_course_id and perusall_assignment_id
+    CONSTRAINT unique_perusall_assignment UNIQUE (perusall_course_id, perusall_assignment_id)
+);
+
+-- Create indexes for perusall_assignments
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_id ON perusall_assignments(perusall_course_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_assignment_id ON perusall_assignments(perusall_assignment_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_composite ON perusall_assignments(perusall_course_id, perusall_assignment_id);
+
+-- Step 2: Migrate existing data from sessions.perusall_assignment_id to perusall_assignments
+-- First, create a temporary column to store the UUID reference
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS perusall_assignment_uuid UUID;
+
+-- Migrate existing data: create perusall_assignments entries for existing sessions with perusall_assignment_id
+-- Note: This migration assumes we can get perusall_course_id from courses table
+-- For sessions that have perusall_assignment_id but we can't determine the course, we'll skip them
+DO $$
+DECLARE
+    session_record RECORD;
+    course_record RECORD;
+    assignment_uuid UUID;
+    assignment_info JSONB;
+    document_ids_array JSONB;
+    parts_data JSONB;
+BEGIN
+    FOR session_record IN 
+        SELECT s.id, s.perusall_assignment_id, s.perusall_assignment_info, s.course_id
+        FROM sessions s
+        WHERE s.perusall_assignment_id IS NOT NULL
+    LOOP
+        -- Get course to find perusall_course_id
+        SELECT c.perusall_course_id INTO course_record
+        FROM courses c
+        WHERE c.id = session_record.course_id;
+        
+        IF course_record.perusall_course_id IS NOT NULL THEN
+            -- Extract data from perusall_assignment_info if available
+            assignment_info := session_record.perusall_assignment_info;
+            
+            -- Extract document_ids and parts from assignment_info
+            IF assignment_info IS NOT NULL THEN
+                -- Try to extract document_ids from readings array
+                IF assignment_info ? 'readings' AND jsonb_typeof(assignment_info->'readings') = 'array' THEN
+                    SELECT jsonb_agg(elem->>'perusall_document_id') INTO document_ids_array
+                    FROM jsonb_array_elements(assignment_info->'readings') elem;
+                END IF;
+                
+                -- Build parts from readings array
+                IF assignment_info ? 'readings' AND jsonb_typeof(assignment_info->'readings') = 'array' THEN
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'documentId', elem->>'perusall_document_id',
+                            'startPage', (elem->>'start_page')::int,
+                            'endPage', (elem->>'end_page')::int
+                        )
+                    ) INTO parts_data
+                    FROM jsonb_array_elements(assignment_info->'readings') elem;
+                END IF;
+            END IF;
+            
+            -- Check if assignment already exists
+            SELECT id INTO assignment_uuid
+            FROM perusall_assignments
+            WHERE perusall_course_id = course_record.perusall_course_id
+              AND perusall_assignment_id = session_record.perusall_assignment_id;
+            
+            -- If not exists, create it
+            IF assignment_uuid IS NULL THEN
+                INSERT INTO perusall_assignments (
+                    perusall_course_id,
+                    perusall_assignment_id,
+                    name,
+                    document_ids,
+                    parts
+                ) VALUES (
+                    course_record.perusall_course_id,
+                    session_record.perusall_assignment_id,
+                    COALESCE(assignment_info->>'perusall_assignment_name', 'Untitled'),
+                    document_ids_array,
+                    parts_data
+                )
+                RETURNING id INTO assignment_uuid;
+            END IF;
+            
+            -- Update session with UUID reference
+            UPDATE sessions
+            SET perusall_assignment_uuid = assignment_uuid
+            WHERE id = session_record.id;
+        END IF;
+    END LOOP;
+END $$;
+
+-- Step 3: Drop old columns and add new foreign key column
+-- First, drop the old perusall_assignment_id and perusall_assignment_info columns
+ALTER TABLE sessions DROP COLUMN IF EXISTS perusall_assignment_id;
+ALTER TABLE sessions DROP COLUMN IF EXISTS perusall_assignment_info;
+
+-- Rename the temporary column to the final name
+ALTER TABLE sessions RENAME COLUMN perusall_assignment_uuid TO perusall_assignment_id;
+
+-- Step 4: Add foreign key constraint with UNIQUE constraint
+-- This ensures each Perusall assignment can map to at most one session
+ALTER TABLE sessions 
+ADD CONSTRAINT fk_sessions_perusall_assignment 
+FOREIGN KEY (perusall_assignment_id) 
+REFERENCES perusall_assignments(id) 
+ON DELETE SET NULL;
+
+-- Add UNIQUE constraint to enforce 1:1 relationship
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_unique 
+ON sessions(perusall_assignment_id) 
+WHERE perusall_assignment_id IS NOT NULL;
+
+-- Create index for the foreign key
+CREATE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_id ON sessions(perusall_assignment_id);
+
+-- Step 5: Create trigger to update updated_at for perusall_assignments
+CREATE OR REPLACE FUNCTION update_perusall_assignments_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_perusall_assignments_updated_at ON perusall_assignments;
+CREATE TRIGGER update_perusall_assignments_updated_at
+    BEFORE UPDATE ON perusall_assignments
+    FOR EACH ROW
+    EXECUTE FUNCTION update_perusall_assignments_updated_at();

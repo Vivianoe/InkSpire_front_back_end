@@ -108,6 +108,9 @@ export default function ScaffoldPage() {
       if (!courseId) return; // Wait for courseId to be available
       
       try {
+        setError(null);
+        setScaffolds([]);
+        setPdfUrl(null);
         setLoading(true);
         
         const response = await fetch(
@@ -887,6 +890,7 @@ ${scaffold.text || 'No scaffold text available'}
             </div>
 
             {/* The number of scaffolds you want to generate; to be changed to a number input to control the generation workflow */}
+            {/* 
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
                 <label className={uiStyles.fieldLabel}>The number of scaffolds you want to generate</label>
@@ -898,7 +902,7 @@ ${scaffold.text || 'No scaffold text available'}
                 placeholder="Input the number of scaffolds you want to generate."
                 rows={2}
               />
-            </div>
+            </div>*/}
             
             {/* Session Info Display */}
             {/*

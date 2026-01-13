@@ -24,6 +24,8 @@ from app.services.session_service import (
 )
 from app.services.course_service import get_course_by_id
 from app.services.reading_service import get_reading_by_id
+from app.services.perusall_assignment_service import get_perusall_assignment_by_ids
+from app.services.session_reading_service import get_expected_session_readings
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -64,13 +66,14 @@ class SessionResponse(BaseModel):
     course_id: str
     week_number: int
     title: Optional[str] = None
-    perusall_assignment_id: Optional[str] = None
+    perusall_assignment_id: Optional[str] = None  # Perusall assignment ID string (not UUID)
     current_version_id: Optional[str] = None
     status: str
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     current_version: Optional[SessionVersionResponse] = None
     reading_ids: List[str] = []
+    expected_readings: List[Dict[str, Any]] = []
 
 
 class SessionListResponse(BaseModel):
@@ -104,6 +107,13 @@ def create_session_with_readings(
             detail=f"Course {course_id} not found"
         )
     
+    # Require a Perusall assignment for structural session_readings
+    if not payload.perusall_assignment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="perusall_assignment_id is required. session_readings is assignment-derived structural data.",
+        )
+
     # Validate reading_ids
     reading_uuids = []
     for reading_id_str in payload.reading_ids:
@@ -129,6 +139,37 @@ def create_session_with_readings(
                 detail=f"Invalid reading_id format: {reading_id_str}"
             )
     
+    # Resolve perusall_assignment_id
+    perusall_assignment_uuid = None
+    # payload.perusall_assignment_id is the Perusall assignment ID string
+    # We need to find the corresponding perusall_assignments record
+    if not course.perusall_course_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot link Perusall assignment: course {course_id} does not have perusall_course_id configured"
+        )
+    
+    perusall_assignment = get_perusall_assignment_by_ids(
+        db=db,
+        perusall_course_id=course.perusall_course_id,
+        perusall_assignment_id=payload.perusall_assignment_id,
+    )
+    
+    if not perusall_assignment:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Perusall assignment {payload.perusall_assignment_id} not found. Please fetch assignments first via /api/courses/{course_id}/perusall/assignments"
+        )
+    
+    # Check if this assignment is already linked to a session
+    if perusall_assignment.session:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Perusall assignment {payload.perusall_assignment_id} is already linked to session {perusall_assignment.session.id}"
+        )
+    
+    perusall_assignment_uuid = perusall_assignment.id
+    
     # Create session (identity only)
     session = create_session(
         db=db,
@@ -136,7 +177,7 @@ def create_session_with_readings(
         week_number=payload.week_number,
         title=payload.title or "Reading Session",
         status="draft",
-        perusall_assignment_id=payload.perusall_assignment_id,
+        perusall_assignment_id=perusall_assignment_uuid,
     )
     
     # Add readings to session
@@ -209,7 +250,7 @@ def get_sessions_list(
     sessions_data = []
     for session in sessions:
         session_dict = session_to_dict(session)
-        # Get reading IDs from current version or session_readings
+        # reading_ids must come from structural session_readings (assignment-derived)
         reading_ids = []
         current_version_data = None
         
@@ -217,13 +258,16 @@ def get_sessions_list(
             current_version = get_session_version_by_id(db, session.current_version_id)
             if current_version:
                 version_dict = session_version_to_dict(current_version)
-                reading_ids = version_dict.get("reading_ids", [])
                 current_version_data = SessionVersionResponse(**version_dict)
-        
-        # Fallback to session_readings if no version
-        if not reading_ids:
-            session_readings = get_session_readings(db, session.id)
-            reading_ids = [str(sr.reading_id) for sr in session_readings]
+
+        session_readings = get_session_readings(db, session.id)
+        reading_ids = [str(sr.reading_id) for sr in session_readings]
+
+        expected_readings = []
+        try:
+            expected_readings = get_expected_session_readings(db, session.id)
+        except Exception:
+            expected_readings = []
         
         sessions_data.append(SessionResponse(
             id=session_dict["id"],
@@ -237,6 +281,7 @@ def get_sessions_list(
             updated_at=session_dict["updated_at"],
             current_version=current_version_data,
             reading_ids=reading_ids,
+            expected_readings=expected_readings,
         ))
     
     return SessionListResponse(
@@ -272,7 +317,7 @@ def get_session_detail(
     
     # Convert to response format
     session_dict = session_to_dict(session)
-    # Get reading IDs from current version or session_readings
+    # reading_ids must come from structural session_readings (assignment-derived)
     reading_ids = []
     current_version_data = None
     
@@ -280,13 +325,16 @@ def get_session_detail(
         current_version = get_session_version_by_id(db, session.current_version_id)
         if current_version:
             version_dict = session_version_to_dict(current_version)
-            reading_ids = version_dict.get("reading_ids", [])
             current_version_data = SessionVersionResponse(**version_dict)
-    
-    # Fallback to session_readings if no version
-    if not reading_ids:
-        session_readings = get_session_readings(db, session.id)
-        reading_ids = [str(sr.reading_id) for sr in session_readings]
+
+    session_readings = get_session_readings(db, session.id)
+    reading_ids = [str(sr.reading_id) for sr in session_readings]
+
+    expected_readings = []
+    try:
+        expected_readings = get_expected_session_readings(db, session.id)
+    except Exception:
+        expected_readings = []
     
     return SessionResponse(
         id=session_dict["id"],
@@ -300,6 +348,7 @@ def get_session_detail(
         updated_at=session_dict["updated_at"],
         current_version=current_version_data,
         reading_ids=reading_ids,
+        expected_readings=expected_readings,
     )
 
 

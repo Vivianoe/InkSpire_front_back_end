@@ -7,6 +7,9 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.models.models import Reading
+from datetime import datetime, timezone
+from app.services.session_reading_service import deactivate_session_readings_for_reading
+from sqlalchemy.exc import ProgrammingError
 
 
 def create_reading(
@@ -53,14 +56,35 @@ def get_readings_by_course(db: Session, course_id: uuid.UUID) -> List[Reading]:
     """
     Get all readings for a course
     """
-    return db.query(Reading).filter(Reading.course_id == course_id).order_by(desc(Reading.created_at)).all()
+    try:
+        return db.query(Reading).filter(
+            Reading.course_id == course_id,
+            Reading.deleted_at.is_(None),
+        ).order_by(desc(Reading.created_at)).all()
+    except ProgrammingError as e:
+        # Backward compatibility: DB may not yet have readings.deleted_at
+        if "deleted_at" in str(e):
+            return db.query(Reading).filter(
+                Reading.course_id == course_id,
+            ).order_by(desc(Reading.created_at)).all()
+        raise
 
 
 def get_readings_by_instructor(db: Session, instructor_id: uuid.UUID) -> List[Reading]:
     """
     Get all readings for an instructor
     """
-    return db.query(Reading).filter(Reading.instructor_id == instructor_id).order_by(desc(Reading.created_at)).all()
+    try:
+        return db.query(Reading).filter(
+            Reading.instructor_id == instructor_id,
+            Reading.deleted_at.is_(None),
+        ).order_by(desc(Reading.created_at)).all()
+    except ProgrammingError as e:
+        if "deleted_at" in str(e):
+            return db.query(Reading).filter(
+                Reading.instructor_id == instructor_id,
+            ).order_by(desc(Reading.created_at)).all()
+        raise
 
 
 def get_readings_by_course_and_instructor(
@@ -71,10 +95,19 @@ def get_readings_by_course_and_instructor(
     """
     Get all readings for a specific course and instructor
     """
-    return db.query(Reading).filter(
-        Reading.course_id == course_id,
-        Reading.instructor_id == instructor_id
-    ).order_by(desc(Reading.created_at)).all()
+    try:
+        return db.query(Reading).filter(
+            Reading.course_id == course_id,
+            Reading.instructor_id == instructor_id,
+            Reading.deleted_at.is_(None),
+        ).order_by(desc(Reading.created_at)).all()
+    except ProgrammingError as e:
+        if "deleted_at" in str(e):
+            return db.query(Reading).filter(
+                Reading.course_id == course_id,
+                Reading.instructor_id == instructor_id,
+            ).order_by(desc(Reading.created_at)).all()
+        raise
 
 
 def update_reading(
@@ -114,8 +147,12 @@ def delete_reading(db: Session, reading_id: uuid.UUID) -> bool:
     if not reading:
         raise ValueError(f"Reading {reading_id} not found")
     
-    db.delete(reading)
-    db.commit()
+    if reading.deleted_at is None:
+        reading.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(reading)
+
+    deactivate_session_readings_for_reading(db, reading_id)
     
     return True
 
