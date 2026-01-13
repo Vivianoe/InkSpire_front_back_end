@@ -963,19 +963,34 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setError(null);
     try {
       const hasExistingId = formData.id && formData.id !== 'new';
+
+      // Get course_id from URL params
+      const courseIdParam = urlCourseId;
+
+      if (hasExistingId && !courseIdParam) {
+        throw new Error('course_id is required for updating profile');
+      }
+
       const endpoint = hasExistingId
-      // TODO: update endpoints
-        ? `/api/class-profiles/${formData.id}`
+        ? `/api/courses/${courseIdParam}/class-profiles/${formData.id}/edit`
         : '/api/class-profiles';
-      const method = hasExistingId ? 'PUT' : 'POST';
-      const payload = {
-        instructor_id: MOCK_INSTRUCTOR_ID,
-        title: formData.courseInfo.courseName || 'Untitled Class',
-        course_code: formData.courseInfo.courseCode || 'TBD',
-        description: formData.courseInfo.description || 'Draft class profile',
-        class_input: buildClassInputPayload(formData),
-        generated_profile: formData.generatedProfile,
-      };
+      const method = 'POST'; // Backend uses POST for both create and edit
+
+      const payload = hasExistingId
+        ? {
+            // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
+            text: serializeProfileForExport(formData)
+          }
+        : {
+            // For create endpoint - matches existing structure
+            // Get instructor_id from URL params instead of using mock
+            instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+            title: formData.courseInfo.courseName || 'Untitled Class',
+            course_code: formData.courseInfo.courseCode || 'TBD',
+            description: formData.courseInfo.description || 'Draft class profile',
+            class_input: buildClassInputPayload(formData),
+            generated_profile: formData.generatedProfile,
+          };
 
       const response = await fetch(endpoint, {
         method,

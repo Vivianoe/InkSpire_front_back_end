@@ -133,6 +133,7 @@ def create_class_profile_version(
     if profile:
         profile.current_version_id = version.id
         profile.description = content.strip()  # Update current description
+        profile.metadata_json = metadata_json  # Sync with version's metadata
         db.commit()
         db.refresh(profile)
     

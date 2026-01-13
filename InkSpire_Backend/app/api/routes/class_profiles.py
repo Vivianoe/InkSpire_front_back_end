@@ -658,11 +658,40 @@ def edit_class_profile(
         metadata_json = {
             "profile": new_json.get("profile"),
             "design_consideration": new_json.get("design_consideration"),
+            "class_input": new_json.get("class_input"),
         }
     except json.JSONDecodeError:
         metadata_json = None
-    
-    # Create a new version
+
+    # Add course basic info versioning (FIRST - input data)
+    class_input = new_json.get("class_input") if new_json else None
+
+    if class_input:
+        # Get the basic info record via course_id
+        basic_info = get_course_basic_info_by_course_id(db, profile.course_id)
+
+        if basic_info:
+            # Extract the three info sections from class_input
+            discipline_info = class_input.get("discipline_info")
+            course_info = class_input.get("course_info")
+            class_info = class_input.get("class_info")
+
+            # Create version with old values and update to new values
+            try:
+                update_course_basic_info(
+                    db=db,
+                    basic_info_id=basic_info.id,
+                    discipline_info_json=discipline_info,
+                    course_info_json=course_info,
+                    class_info_json=class_info,
+                    change_type="manual_edit",
+                    created_by="User",
+                )
+            except Exception as e:
+                # Log but don't fail the request - versioning is supplementary
+                print(f"Warning: Failed to create course basic info version: {e}")
+
+    # Create a new class profile version (SECOND - output/generated data)
     create_class_profile_version(
         db=db,
         class_profile_id=profile.id,
@@ -670,13 +699,19 @@ def edit_class_profile(
         metadata_json=metadata_json,
         created_by="User",  # Could be extracted from auth token
     )
-    
+
     # Refresh profile to get updated data
     db.refresh(profile)
-    
-    
+
+
     profile_text = _get_current_profile_text(profile, db)
-    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
+    frontend_profile = _build_frontend_profile(
+        profile_text,
+        str(profile.id),
+        db=db,
+        course_id=profile.course_id,
+        metadata_json=metadata_json
+    )
 
     return {
     "profile_id": str(profile.id),
@@ -739,14 +774,30 @@ def llm_refine_class_profile(
     # Refine using LLM
     llm_refine_profile(temp_review, payload.prompt, llm)
     refined_content = temp_review["text"]
-    
+
     # Parse refined content to extract metadata
     try:
         refined_json = json.loads(refined_content)
+
+        # Preserve class_input from current version (LLM doesn't modify this)
+        current_class_input = None
+        if profile.metadata_json and isinstance(profile.metadata_json.get("class_input"), dict):
+            current_class_input = profile.metadata_json["class_input"]
+        elif profile.course_id:
+            # Fallback: query course_basic_info
+            basic_info = get_course_basic_info_by_course_id(db, profile.course_id)
+            if basic_info:
+                current_class_input = {
+                    "discipline_info": basic_info.discipline_info_json or {},
+                    "course_info": basic_info.course_info_json or {},
+                    "class_info": basic_info.class_info_json or {},
+                }
+
         metadata_json = {
             "class_id": refined_json.get("class_id"),
             "profile": refined_json.get("profile"),
             "design_consideration": refined_json.get("design_consideration"),
+            "class_input": current_class_input,
         }
     except json.JSONDecodeError:
         metadata_json = None
@@ -762,10 +813,16 @@ def llm_refine_class_profile(
     
     # Refresh profile
     db.refresh(profile)
-    
-    
+
+
     profile_text = _get_current_profile_text(profile, db)
-    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
+    frontend_profile = _build_frontend_profile(
+        profile_text,
+        str(profile.id),
+        db=db,
+        course_id=profile.course_id,
+        metadata_json=metadata_json
+    )
 
     return {
     "profile_id": str(profile.id),
