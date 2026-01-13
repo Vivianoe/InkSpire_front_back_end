@@ -146,7 +146,35 @@ def _build_frontend_profile(
     try:
         parsed = json.loads(profile_text)
         if isinstance(parsed, dict):
-            if isinstance(parsed.get("profile"), str):
+            # Handle the new JSON structure from the workflow
+            if isinstance(parsed.get("profile"), dict):
+                profile_obj = parsed.get("profile")
+                # Convert the structured profile to the format expected by parseProfileSections
+                profile_parts = []
+                
+                if profile_obj.get("overall_profile"):
+                    profile_parts.append(profile_obj.get("overall_profile", ""))
+                
+                if profile_obj.get("discipline_paragraph"):
+                    profile_parts.append("Discipline level:")
+                    profile_parts.append(profile_obj.get("discipline_paragraph", ""))
+                
+                if profile_obj.get("course_paragraph"):
+                    profile_parts.append("Course level:")
+                    profile_parts.append(profile_obj.get("course_paragraph", ""))
+                
+                if profile_obj.get("class_paragraph"):
+                    profile_parts.append("Class level:")
+                    profile_parts.append(profile_obj.get("class_paragraph", ""))
+                
+                # Add design considerations if available
+                design_consideration = parsed.get("design_consideration")
+                if isinstance(design_consideration, str) and design_consideration.strip():
+                    profile_parts.append("Design Considerations:")
+                    profile_parts.append(design_consideration.strip())
+                
+                result["generatedProfile"] = "\n\n".join(filter(None, profile_parts))
+            elif isinstance(parsed.get("profile"), str):
                 result["generatedProfile"] = parsed.get("profile") or ""
             elif isinstance(parsed.get("text"), str):
                 result["generatedProfile"] = parsed.get("text") or ""

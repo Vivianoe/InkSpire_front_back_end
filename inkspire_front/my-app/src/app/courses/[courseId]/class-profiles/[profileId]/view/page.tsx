@@ -60,6 +60,7 @@ type RegenerateTarget =
   | 'design';
 
 type ProfileSections = {
+  overall: string;
   discipline: string;
   course: string;
   class: string;
@@ -67,6 +68,7 @@ type ProfileSections = {
 };
 
 const EMPTY_PROFILE_SECTIONS: ProfileSections = {
+  overall: '',
   discipline: '',
   course: '',
   class: '',
@@ -192,6 +194,7 @@ const SECTION_REGEX = /(Discipline level:|Course level:|Class level:|Design Cons
 const parseProfileSections = (rawText?: string): ProfileSections => {
   const text = rawText?.trim() ? rawText : DEFAULT_CLASS_PROFILE_TEXT;
   const sections: ProfileSections = {
+    overall: '',
     discipline: '',
     course: '',
     class: '',
@@ -199,7 +202,10 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
   };
 
   const chunks = text.split(SECTION_REGEX);
-  let intro = chunks.shift()?.trim() ?? '';
+  const intro = chunks.shift()?.trim() ?? '';
+
+  // Store intro as overall_profile
+  sections.overall = intro;
 
   for (let i = 0; i < chunks.length; i += 2) {
     const heading = chunks[i];
@@ -207,8 +213,7 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
 
     switch (heading) {
       case 'Discipline level:':
-        sections.discipline = [intro, body].filter(Boolean).join('\n\n').trim();
-        intro = '';
+        sections.discipline = body;
         break;
       case 'Course level:':
         sections.course = body;
@@ -224,15 +229,16 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
     }
   }
 
-  if (intro && !sections.discipline) {
-    sections.discipline = intro;
-  }
-
   return sections;
 };
 
 const composeProfileNarrative = (sections: ProfileSections, includeDesign = true) => {
   const blocks: string[] = [];
+
+  // Add overall_profile first (no header)
+  if (sections.overall?.trim()) {
+    blocks.push(sections.overall.trim());
+  }
 
   PROFILE_STACK_LEVELS.forEach(level => {
     const text = sections[level]?.trim();
@@ -615,7 +621,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
   const getEditableTextForLevel = (level: ProfileLevel) =>
     level === 'all'
-      ? composeProfileNarrative(profileSections, false)
+      ? profileSections.overall
       : profileSections[level];
 
   const handleStartProfileEdit = () => {
@@ -634,12 +640,9 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     if (!editingProfileLevel) return;
 
     if (editingProfileLevel === 'all') {
-      const parsed = parseProfileSections(profileDraft);
       updateProfileSections(prev => ({
         ...prev,
-        discipline: parsed.discipline,
-        course: parsed.course,
-        class: parsed.class,
+        overall: profileDraft.trim(),
       }));
     } else {
       const normalized = profileDraft.trim();
@@ -899,7 +902,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     };
 
     const hasContent =
-      trimmedSections.discipline || trimmedSections.course || trimmedSections.class;
+      profileSections.overall.trim() ||
+      trimmedSections.discipline ||
+      trimmedSections.course ||
+      trimmedSections.class;
 
     if (!hasContent) {
       return (
@@ -910,19 +916,18 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
 
     if (activeProfileLevel === 'all') {
+      const overallText = profileSections.overall.trim();
+      if (!overallText) {
+        return (
+          <div className={styles.profileEmptyState}>
+            Add details on the left or regenerate with AI to populate this view.
+          </div>
+        );
+      }
       return (
-        <div className={styles.profileStack}>
-          {PROFILE_STACK_LEVELS.map(level => {
-            const text = trimmedSections[level];
-            if (!text) return null;
-            return (
-              <section key={level} className={styles.profileSectionBlock}>
-                <p className={styles.profileSectionLabel}>{PROFILE_SECTION_LABELS[level]}</p>
-                <p className={styles.profileTextBlock}>{text}</p>
-              </section>
-            );
-          })}
-        </div>
+        <section className={styles.profileSectionBlock}>
+          <p className={styles.profileTextBlock}>{overallText}</p>
+        </section>
       );
     }
 
