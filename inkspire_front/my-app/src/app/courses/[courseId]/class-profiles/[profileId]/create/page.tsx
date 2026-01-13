@@ -444,9 +444,8 @@ export default function EditClassProfilePage() {
       );
 
       const mergedDesign: DesignConsiderations = {
-        ...parsedDesign,
-        userDefined:
-          formData.designConsiderations.userDefined?.trim() || parsedDesign.userDefined || '',
+        ...parsedDesign,                           // LLM-generated values as base
+		    ...formData.designConsiderations,          // User-entered values override LLM
       };
 
       const nextId =

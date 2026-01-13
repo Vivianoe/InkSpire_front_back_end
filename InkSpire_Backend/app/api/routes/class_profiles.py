@@ -101,7 +101,8 @@ def _build_frontend_profile(
     profile_text: str,
     profile_id: str,
     db: Session = None,
-    course_id: uuid.UUID = None
+    course_id: uuid.UUID = None,
+    metadata_json: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Build the ClassProfile shape expected by /class-profile/[id]/view.
@@ -152,9 +153,14 @@ def _build_frontend_profile(
             else:
                 result["generatedProfile"] = profile_text
 
-            dc = parsed.get("design_consideration") or parsed.get("design_considerations")
-            if isinstance(dc, dict):
-                result["designConsiderations"] = dc
+            # Check metadata_json first for design considerations (takes precedence)
+            if metadata_json and isinstance(metadata_json.get("design_consideration"), dict):
+                result["designConsiderations"] = metadata_json["design_consideration"]
+            else:
+                # Fallback to parsed JSON
+                dc = parsed.get("design_consideration") or parsed.get("design_considerations")
+                if isinstance(dc, dict):
+                    result["designConsiderations"] = dc
             # Check for class_input in parsed JSON first
             class_input = parsed.get("class_input")
             # If not in JSON and db/course_id provided, query course_basic_info table
@@ -205,9 +211,16 @@ def _build_frontend_profile(
                         "priorKnowledge": cl.get("prior_knowledge", "") or "",
                     }
 
+                # Also check class_input for design_considerations if not already set
                 dc2 = class_input.get("design_considerations")
                 if isinstance(dc2, dict) and not result["designConsiderations"]:
                     result["designConsiderations"] = dc2
+
+            # Final check: if metadata_json has class_input, use it
+            if metadata_json and isinstance(metadata_json.get("class_input"), dict):
+                dc3 = metadata_json["class_input"].get("design_considerations")
+                if isinstance(dc3, dict) and not result["designConsiderations"]:
+                    result["designConsiderations"] = dc3
 
             return result
     except Exception:
@@ -329,9 +342,15 @@ def create_class_profile(
     # Parse the profile JSON to extract metadata
     try:
         profile_json = json.loads(profile_text)
+
+        # Get user-entered design considerations from class_input
+        # This preserves exactly what the user entered, including empty fields
+        user_design_considerations = payload.class_input.get("design_considerations", {})
+
         metadata_json = {
             "profile": profile_json.get("profile"),
-            "design_consideration": profile_json.get("design_consideration"),
+            "design_consideration": user_design_considerations,  # Store user input only
+            "class_input": payload.class_input,  # Store full class_input for reference
         }
     except json.JSONDecodeError:
         metadata_json = None
@@ -361,7 +380,8 @@ def create_class_profile(
         profile_text,
         str(class_profile.id),
         db=db,
-        course_id=class_profile.course_id
+        course_id=class_profile.course_id,
+        metadata_json=metadata_json  # Pass the metadata_json we just created
     )
 
     return {
@@ -411,7 +431,8 @@ def get_class_profile(
         profile_text,
         str(profile.id),
         db=db,
-        course_id=profile.course_id
+        course_id=profile.course_id,
+        metadata_json=profile.metadata_json  # Pass metadata_json for design considerations
     )
 
     return {
