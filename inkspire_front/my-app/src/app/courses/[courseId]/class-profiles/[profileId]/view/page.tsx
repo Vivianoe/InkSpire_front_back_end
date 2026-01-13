@@ -964,6 +964,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     try {
       const hasExistingId = formData.id && formData.id !== 'new';
       const endpoint = hasExistingId
+      // TODO: update endpoints
         ? `/api/class-profiles/${formData.id}`
         : '/api/class-profiles';
       const method = hasExistingId ? 'PUT' : 'POST';
@@ -1264,16 +1265,34 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                         >
                           {field.label}
                         </label>
-                        <textarea
-                          id={`design-${field.key}`}
-                          className={styles.designTextarea}
-                          rows={field.key === 'userDefined' ? 4 : 3}
-                          value={designDraft[field.key]}
-                          onChange={(event) =>
-                            handleDesignDraftChange(field.key, event.target.value)
-                          }
-                          placeholder={field.placeholder}
-                        />
+                        {field.key === 'theoryFocus' && field.options ? (
+                          <select
+                            id={`design-${field.key}`}
+                            className={`${styles.editInput} ${styles.editSelect}`}
+                            value={designDraft[field.key]}
+                            onChange={(event) =>
+                              handleDesignDraftChange(field.key, event.target.value)
+                            }
+                          >
+                            <option value="">Select theory focus</option>
+                            {field.options.map(option => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <textarea
+                            id={`design-${field.key}`}
+                            className={styles.designTextarea}
+                            rows={field.key === 'userDefined' ? 4 : 3}
+                            value={designDraft[field.key]}
+                            onChange={(event) =>
+                              handleDesignDraftChange(field.key, event.target.value)
+                            }
+                            placeholder={field.placeholder}
+                          />
+                        )}
                       </div>
                     ))}
                   </div>

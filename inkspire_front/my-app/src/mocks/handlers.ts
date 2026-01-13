@@ -4,7 +4,7 @@ import { http, HttpResponse, delay } from 'msw';
 import {
   createDefaultDesignConsiderations,
   normalizeDesignConsiderations,
-} from '@/app/class-profile/designConsiderations';
+} from '@/app/courses/[courseId]/class-profiles/designConsiderations';
 
 /**
  * =========================================================
