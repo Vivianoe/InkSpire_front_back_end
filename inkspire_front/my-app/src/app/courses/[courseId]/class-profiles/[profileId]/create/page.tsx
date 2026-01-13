@@ -424,6 +424,7 @@ export default function EditClassProfilePage() {
       }
 
       const review = data.review ?? null;
+      const completeProfile = data.profile; // Backend returns reconstructed profile with all basic info
 
       const { profileText, design } = extractProfileFromReview(review);
       const textToUse = profileText || formData.generatedProfile || '';
@@ -455,12 +456,18 @@ export default function EditClassProfilePage() {
         formData.id ||
         'new';
 
-      setFormData(prev => ({
-        ...prev,
-        id: typeof nextId === 'string' ? nextId : prev.id,
+      // Update formData with complete profile including all basic info from backend
+      const updatedFormData = {
+        ...formData,
+        id: typeof nextId === 'string' ? nextId : formData.id,
+        disciplineInfo: completeProfile?.disciplineInfo || formData.disciplineInfo,
+        courseInfo: completeProfile?.courseInfo || formData.courseInfo,
+        classInfo: completeProfile?.classInfo || formData.classInfo,
         generatedProfile: textToUse,
         designConsiderations: mergedDesign,
-      }));
+      };
+
+      setFormData(updatedFormData);
 
       if (typeof nextId === 'string' && nextId !== 'new') {
         // Use RESTful URL structure if courseId is available, otherwise fallback to old structure

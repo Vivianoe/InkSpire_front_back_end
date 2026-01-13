@@ -97,9 +97,15 @@ def _get_current_profile_text(profile: Any, db: Session) -> str:
     return current_content or ""
 
 
-def _build_frontend_profile(profile_text: str, profile_id: str) -> Dict[str, Any]:
+def _build_frontend_profile(
+    profile_text: str,
+    profile_id: str,
+    db: Session = None,
+    course_id: uuid.UUID = None
+) -> Dict[str, Any]:
     """
     Build the ClassProfile shape expected by /class-profile/[id]/view.
+    Queries course_basic_info table if db and course_id provided to retrieve discipline_info, course_info, and class_info.
     """
     result: Dict[str, Any] = {
         "id": profile_id,
@@ -149,8 +155,19 @@ def _build_frontend_profile(profile_text: str, profile_id: str) -> Dict[str, Any
             dc = parsed.get("design_consideration") or parsed.get("design_considerations")
             if isinstance(dc, dict):
                 result["designConsiderations"] = dc
-
+            # Check for class_input in parsed JSON first
             class_input = parsed.get("class_input")
+            # If not in JSON and db/course_id provided, query course_basic_info table
+            if not class_input and db and course_id:
+                from app.services.course_service import get_course_basic_info_by_course_id
+                basic_info = get_course_basic_info_by_course_id(db, course_id)
+                if basic_info:
+                    class_input = {
+                        "discipline_info": basic_info.discipline_info_json or {},
+                        "course_info": basic_info.course_info_json or {},
+                        "class_info": basic_info.class_info_json or {},
+                    }
+
             if isinstance(class_input, dict):
                 di = class_input.get("discipline_info") or {}
                 ci = class_input.get("course_info") or {}
@@ -340,7 +357,12 @@ def create_class_profile(
 
     # Build frontend profile format
     profile_text = _get_current_profile_text(class_profile, db)
-    frontend_profile = _build_frontend_profile(profile_text, str(class_profile.id))
+    frontend_profile = _build_frontend_profile(
+        profile_text,
+        str(class_profile.id),
+        db=db,
+        course_id=class_profile.course_id
+    )
 
     return {
         "profile_id": str(class_profile.id),
@@ -380,19 +402,18 @@ def get_class_profile(
                 detail=f"Invalid course_id format: {course_id}"
             )
     
-    return RunClassProfileResponse(
-        review=profile_to_model(profile, db),
-        course_id=str(profile.course_id) if profile.course_id else None,
-        instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
-    )
-    
     # Refresh profile to get updated data
     db.refresh(profile)
     
     # Build frontend profile format
     profile_text = _get_current_profile_text(profile, db)
-    frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
-    
+    frontend_profile = _build_frontend_profile(
+        profile_text,
+        str(profile.id),
+        db=db,
+        course_id=profile.course_id
+    )
+
     return {
         "profile_id": str(profile.id),
         "status": getattr(profile, "status", None) or "OK",

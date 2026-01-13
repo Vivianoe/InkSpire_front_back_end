@@ -103,9 +103,12 @@ class UpdateClassProfileRequest(BaseModel):
 
 
 class RunClassProfileResponse(BaseModel):
+    profile: Dict[str, Any]  # Complete profile with all basic info (disciplineInfo, courseInfo, classInfo)
     review: ReviewedProfileModel
     course_id: Optional[str] = None  # Course ID associated with this profile
     instructor_id: Optional[str] = None  # Instructor ID associated with this profile
+    profile_id: Optional[str] = None  # Profile ID
+    status: Optional[str] = None  # Status (e.g., "CREATED", "OK")
 
 
 class ApproveProfileRequest(BaseModel):
