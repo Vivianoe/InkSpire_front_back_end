@@ -131,6 +131,21 @@ class ClassProfileListResponse(BaseModel):
     profiles: List[Dict[str, Any]]
 
 
+class ClassProfileVersionResponse(BaseModel):
+    id: str
+    class_profile_id: str
+    version_number: int
+    content: str
+    metadata_json: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ClassProfileVersionsListResponse(BaseModel):
+    versions: List[ClassProfileVersionResponse]
+    total: int
+
+
 # ======================================================
 # Course Models
 # ======================================================

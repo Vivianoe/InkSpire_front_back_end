@@ -16,6 +16,7 @@ from app.services.class_profile_service import (
     get_class_profiles_by_instructor,
     get_class_profile_versions,
     get_class_profile_version_by_id,
+    class_profile_version_to_dict,
 )
 from app.services.course_service import (
     create_course,
@@ -40,6 +41,8 @@ from app.api.models import (
     LLMRefineProfileRequest,
     ExportedClassProfileResponse,
     ClassProfileListResponse,
+    ClassProfileVersionResponse,
+    ClassProfileVersionsListResponse,
     ReviewedProfileModel,
     HistoryEntryModel,
 )
@@ -723,6 +726,47 @@ def edit_class_profile(
     }
 
 
+@router.get("/class-profiles/{profile_id}/versions", response_model=ClassProfileVersionsListResponse)
+def get_class_profile_versions_list(
+    profile_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all versions for a class profile.
+    Returns versions ordered by version_number descending (newest first).
+    """
+    # Validate profile_id
+    try:
+        profile_uuid = uuid.UUID(profile_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid profile_id format: {profile_id}"
+        )
+
+    # Verify profile exists
+    profile = get_class_profile_by_id(db, profile_uuid)
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class profile {profile_id} not found"
+        )
+
+    # Get all versions using existing service function
+    versions = get_class_profile_versions(db, profile_uuid)
+
+    # Convert to response format
+    versions_data = []
+    for version in versions:
+        version_dict = class_profile_version_to_dict(version)
+        versions_data.append(ClassProfileVersionResponse(**version_dict))
+
+    return ClassProfileVersionsListResponse(
+        versions=versions_data,
+        total=len(versions_data)
+    )
+
+
 @router.post("/courses/{course_id}/class-profiles/{profile_id}/llm-refine", response_model=RunClassProfileResponse)
 def llm_refine_class_profile(
     course_id: str,
@@ -832,3 +876,44 @@ def llm_refine_class_profile(
     "course_id": str(profile.course_id) if profile.course_id else None,
     "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
     }
+
+
+@router.get("/class-profiles/{profile_id}/versions", response_model=ClassProfileVersionsListResponse)
+def get_class_profile_versions_list(
+    profile_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all versions for a class profile.
+    Returns versions ordered by version_number descending (newest first).
+    """
+    # Validate profile_id
+    try:
+        profile_uuid = uuid.UUID(profile_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid profile_id format: {profile_id}"
+        )
+
+    # Verify profile exists
+    profile = get_class_profile_by_id(db, profile_uuid)
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class profile {profile_id} not found"
+        )
+
+    # Get all versions using existing service function
+    versions = get_class_profile_versions(db, profile_uuid)
+
+    # Convert to response format
+    versions_data = []
+    for version in versions:
+        version_dict = class_profile_version_to_dict(version)
+        versions_data.append(ClassProfileVersionResponse(**version_dict))
+
+    return ClassProfileVersionsListResponse(
+        versions=versions_data,
+        total=len(versions_data)
+    )

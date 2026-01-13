@@ -19,6 +19,7 @@ import {
   formatDesignConsiderations,
   normalizeDesignConsiderations,
   parseDesignConsiderations,
+  areDesignConsiderationsEqual,
 } from '@/app/courses/[courseId]/class-profiles/designConsiderations';
 import styles from './page.module.css';
 
@@ -363,18 +364,31 @@ export default function ViewClassProfilePage() {
   });
   const [isBasicInfoEditing, setIsBasicInfoEditing] = useState(false);
   const [basicInfoSnapshot, setBasicInfoSnapshot] = useState<ClassProfile | null>(null);
-  const [designEditedSinceRegeneration, setDesignEditedSinceRegeneration] = useState(false);
+  const [initialDesignConsiderations, setInitialDesignConsiderations] = useState<DesignConsiderations | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   const isDirty = useMemo(() => {
     if (!formData || !initialData) return false;
     return JSON.stringify(formData) !== JSON.stringify(initialData);
   }, [formData, initialData]);
 
+  const hasDesignConsiderationsChanged = useMemo(() => {
+    // If no initial version found, allow button (edge case: profile created before versioning)
+    if (!initialDesignConsiderations) {
+      return false;
+    }
+
+    // Compare current design considerations with initial version
+    const current = formData?.designConsiderations;
+    return !areDesignConsiderationsEqual(current, initialDesignConsiderations);
+  }, [formData?.designConsiderations, initialDesignConsiderations]);
+
   useEffect(() => {
     if (!profileId || profileId === 'new') {
       const defaults = createDefaultProfile(profileId || 'new');
       setFormData(cloneProfile(defaults));
       setInitialData(cloneProfile(defaults));
+      setInitialDesignConsiderations(null);
       setLoading(false);
       setError(null);
       setSuccess(false);
@@ -382,6 +396,7 @@ export default function ViewClassProfilePage() {
       return;
     }
     loadProfile();
+    loadInitialVersion();
   }, [profileId]);
 
   useEffect(() => {
@@ -553,6 +568,61 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
   };
 
+  const extractDesignConsiderationsFromVersion = (version: any): DesignConsiderations => {
+    // Try metadata_json first (stored directly)
+    if (version.metadata_json?.design_consideration) {
+      return normalizeDesignConsiderations(version.metadata_json.design_consideration);
+    }
+
+    // Fallback: parse content JSON
+    try {
+      const contentJson = JSON.parse(version.content);
+      if (contentJson.design_consideration) {
+        return normalizeDesignConsiderations(contentJson.design_consideration);
+      }
+    } catch (e) {
+      console.error('Failed to parse version content:', e);
+    }
+
+    return createDefaultDesignConsiderations();
+  };
+
+  const loadInitialVersion = async () => {
+    if (!profileId || profileId === 'new') {
+      setInitialDesignConsiderations(null);
+      return;
+    }
+
+    setLoadingVersions(true);
+    try {
+      const response = await fetch(`/api/class-profiles/${profileId}/versions`);
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        console.error('Failed to load versions:', data?.message);
+        return;
+      }
+
+      // Find version_number = 1 (the very first generated version)
+      const initialVersion = data.versions?.find((v: any) => v.version_number === 1);
+
+      if (!initialVersion) {
+        console.warn('No initial version (version_number = 1) found');
+        setInitialDesignConsiderations(null);
+        return;
+      }
+
+      // Extract design considerations from initial version
+      const extracted = extractDesignConsiderationsFromVersion(initialVersion);
+      setInitialDesignConsiderations(extracted);
+    } catch (err) {
+      console.error('Failed to load initial version:', err);
+      setInitialDesignConsiderations(null);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
   const handleFieldChange = (
     section: 'disciplineInfo' | 'courseInfo' | 'classInfo',
     field: string,
@@ -715,7 +785,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     if (success) {
       setEditingDesign(false);
       setDesignDraft({ ...normalized });
-      setDesignEditedSinceRegeneration(true);
     }
     // If save failed, user remains in edit mode with their draft intact
   };
@@ -729,7 +798,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setProfileDraft('');
     setEditingDesign(false);
     setDesignDraft(createDefaultDesignConsiderations());
-    setDesignEditedSinceRegeneration(false);
 
     try {
       const payload = buildRunClassProfileRequest(formData);
@@ -1237,11 +1305,11 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                 <button
                   onClick={handleStartSession}
                   className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
-                  disabled={saving || generating || !formData || designEditedSinceRegeneration}
+                  disabled={saving || generating || !formData || hasDesignConsiderationsChanged}
                 >
                   {startSessionLabel}
                 </button>
-                {designEditedSinceRegeneration && (
+                {hasDesignConsiderationsChanged && (
                   <span
                     tabIndex={0}
                     className={styles.regenerateInfoTrigger}
