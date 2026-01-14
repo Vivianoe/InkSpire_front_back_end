@@ -800,18 +800,39 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setDesignDraft(createDefaultDesignConsiderations());
 
     try {
-      const payload = buildRunClassProfileRequest(formData);
-      
       // Get course_id from URL params, or use "new" to create a new course
       const courseIdForRequest = urlCourseId || 'new';
-      
-      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+
+      // Determine if this is an existing profile or a new one
+      const isExistingProfile = profileId && profileId !== 'new';
+
+      let response;
+
+      if (isExistingProfile) {
+        // For existing profiles, use llm-refine endpoint with class_input for full regeneration
+        response = await fetch(
+          `/api/courses/${courseIdForRequest}/class-profiles/${profileId}/llm-refine`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              class_input: buildClassInputPayload(formData),
+            }),
+          }
+        );
+      } else {
+        // For new profiles, use create endpoint
+        const payload = buildRunClassProfileRequest(formData);
+        response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      }
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -829,33 +850,28 @@ const createDefaultProfile = (id: string): ClassProfile => ({
               ...formData.designConsiderations,
               ...(design as Record<string, string>),
             }
-          : parseDesignConsiderations(textToUse)
+          : formData.designConsiderations
       );
 
+      // Prepare merged design fields for design target
+      const parsedDesignFields = parsedDesign;
+      const mergedDesignFields: DesignConsiderations = {
+        ...parsedDesignFields,
+        userDefined:
+          (formData?.designConsiderations.userDefined?.trim() ?? '') ||
+          parsedDesignFields.userDefined ||
+          '',
+      };
+
       if (target === 'design') {
-        const parsedDesignFields = parsedDesign;
-        const mergedDesignFields: DesignConsiderations = {
-          ...parsedDesignFields,
-          userDefined:
-            (formData?.designConsiderations.userDefined?.trim() ?? '') ||
-            parsedDesignFields.userDefined ||
-            '',
-        };
         setDesignConsiderations(mergedDesignFields);
         if (!editingDesign) {
           setDesignDraft({ ...mergedDesignFields });
         }
-        setFormData(prev =>
-          prev
-            ? {
-                ...prev,
-                designConsiderations: mergedDesignFields,
-              }
-            : prev
-        );
       }
 
-      updateProfileSections(prev => {
+      // Update profile sections directly (no nested setState!)
+      setProfileSections(prev => {
         switch (target) {
           case 'profile-all':
             return {
@@ -876,6 +892,30 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             return prev;
         }
       });
+
+      // Update formData once for all targets (no nesting!)
+      setFormData(prev => {
+        if (!prev) return prev;
+
+        if (target === 'design') {
+          return {
+            ...prev,
+            designConsiderations: mergedDesignFields,
+          };
+        } else {
+          return {
+            ...prev,
+            generatedProfile: textToUse,
+            designConsiderations: parsedDesign,
+          };
+        }
+      });
+
+      // Reload profile data from backend to ensure we have the latest state
+      if (isExistingProfile) {
+        await loadProfile();
+        await loadInitialVersion();
+      }
 
       const nextId =
         data.class_profile?.id ||

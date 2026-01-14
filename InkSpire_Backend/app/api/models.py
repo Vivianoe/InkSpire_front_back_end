@@ -85,7 +85,7 @@ class PublicUserResponse(BaseModel):
 
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
-    course_id: str
+    # course_id: str
     title: str
     course_code: Optional[str] = None
     perusall_course_id: Optional[str] = None
@@ -120,7 +120,8 @@ class EditProfileRequest(BaseModel):
 
 
 class LLMRefineProfileRequest(BaseModel):
-    prompt: str
+    prompt: Optional[str] = None
+    class_input: Optional[Dict[str, Any]] = None
 
 
 class ExportedClassProfileResponse(BaseModel):
