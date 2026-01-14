@@ -1585,7 +1585,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     type="button"
                     className={styles.sectionButton}
                     onClick={handleStartBasicInfoEdit}
-                    disabled={!formData || saving || generating}
+                    disabled={!formData || saving || generating || busyRegenerating}
                   >
                     Edit
                   </button>
