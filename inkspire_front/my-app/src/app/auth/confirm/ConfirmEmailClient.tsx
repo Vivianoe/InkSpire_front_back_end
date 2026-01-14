@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { extractTokensFromURL, setSessionFromTokens, waitForSession } from '@/lib/utils/authUtils'
@@ -11,7 +11,7 @@ import {
   CONFIRMATION_PAGE_CLEANUP_DELAY
 } from '@/lib/constants/auth'
 
-function ConfirmEmailClientPage() {
+export default function ConfirmEmailClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
@@ -20,10 +20,8 @@ function ConfirmEmailClientPage() {
   useEffect(() => {
     const confirmEmail = async () => {
       try {
-        // Extract tokens from URL using utility (handles both query and hash params)
         const tokens = extractTokensFromURL(searchParams)
 
-        // Check for errors first
         if (tokens.error) {
           console.error('Confirmation error from URL:', tokens.error, tokens.errorDescription)
           setStatus('error')
@@ -31,7 +29,6 @@ function ConfirmEmailClientPage() {
           return
         }
 
-        // Scenario A: Tokens in URL - set session explicitly
         if (tokens.accessToken && tokens.refreshToken) {
           const { error: sessionError } = await setSessionFromTokens(
             tokens.accessToken,
@@ -45,14 +42,11 @@ function ConfirmEmailClientPage() {
             return
           }
 
-          // Wait for session to be fully established
           await waitForSession(500)
         } else {
-          // Scenario B: No tokens - Supabase may have auto-set session via cookie
           await waitForSession(1000)
         }
 
-        // Check if user session exists and email is confirmed
         const { data: { user }, error: userError } = await supabase.auth.getUser()
 
         if (userError) {
@@ -74,12 +68,9 @@ function ConfirmEmailClientPage() {
           return
         }
 
-        // Success! Email is confirmed
         setStatus('success')
 
-        // Broadcast to other tabs using BroadcastChannel (with fallback)
         if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-          // Modern approach: BroadcastChannel
           const channel = new BroadcastChannel(EMAIL_CONFIRMATION_CHANNEL)
           channel.postMessage({
             type: 'email-confirmed',
@@ -89,15 +80,16 @@ function ConfirmEmailClientPage() {
           })
           channel.close()
         } else {
-          // Fallback: localStorage signal for older browsers
-          localStorage.setItem(LEGACY_CONFIRMATION_SIGNAL_KEY, JSON.stringify({
-            timestamp: Date.now(),
-            userId: user.id,
-            email: user.email || ''
-          }))
+          localStorage.setItem(
+            LEGACY_CONFIRMATION_SIGNAL_KEY,
+            JSON.stringify({
+              timestamp: Date.now(),
+              userId: user.id,
+              email: user.email || ''
+            })
+          )
         }
 
-        // Brief delay to ensure signal completes
         await waitForSession(CONFIRMATION_PAGE_CLEANUP_DELAY)
       } catch (err) {
         console.error('Confirmation error:', err)
@@ -187,13 +179,5 @@ function ConfirmEmailClientPage() {
         )}
       </div>
     </div>
-  )
-}
-
-export default function ConfirmEmailPage() {
-  return (
-    <Suspense fallback={null}>
-      <ConfirmEmailClientPage />
-    </Suspense>
   )
 }
