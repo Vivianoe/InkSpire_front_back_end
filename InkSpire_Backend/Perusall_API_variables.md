@@ -1,6 +1,6 @@
 
 ## perusall API
-https://app.perusall.com/api/v1
+https://app.perusall.com/legacy-api
 Documentation: https://apidocs.perusall.com/#introduction
 
 ## Perusall Environment Variables

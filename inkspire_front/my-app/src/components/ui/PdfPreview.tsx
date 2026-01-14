@@ -51,6 +51,7 @@ const loadRangy = async () => {
 interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
+  readingId?: string | null;  // Reading ID for fallback when URL fails and for RESTful API calls
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -70,9 +71,8 @@ interface PdfPreviewProps {
   scaffoldIndex?: number;
   // Session ID for mapping fragments to annotation_version_id
   sessionId?: string | null;
-  // Course ID, Session ID, and Reading ID for RESTful API calls
+  // Course ID for RESTful API calls
   courseId?: string | null;
-  readingId?: string | null;
 }
 
 export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
@@ -213,7 +213,8 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   }, []);
 
   useEffect(() => {
-    if (!file && !url) {
+    // If no file and no url, but readingId is provided, use readingId to fetch PDF
+    if (!file && !url && !readingId) {
       setPdfDoc(null);
       setRenderedPages(new Set());
       setPageElements(new Map());
@@ -230,7 +231,43 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         if (!pdfjs || cancelled) return;
 
         let pdf;
-        if (url) {
+        // If no url but readingId is provided, fetch from API directly
+        if (!url && readingId) {
+          console.log('[PdfPreview] No URL provided, fetching PDF from API using readingId:', readingId);
+          try {
+            const response = await fetch(`/api/readings/${readingId}/content`);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch reading content: ${response.status}`);
+            }
+            const data = await response.json();
+            if (data?.content_base64) {
+              // Convert base64 to File object
+              const base64 = data.content_base64 as string;
+              const byteCharacters = atob(base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i += 1) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const mimeType = data?.mime_type || 'application/pdf';
+              const fileName = `reading_${readingId}.pdf`;
+              const blob = new Blob([byteArray], { type: mimeType });
+              const fallbackFile = new File([blob], fileName, { type: mimeType });
+              
+              // Load PDF from File object
+              const arrayBuffer = await fallbackFile.arrayBuffer();
+              pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+              console.log('[PdfPreview] PDF document loaded from API successfully');
+            } else {
+              throw new Error('No content_base64 in API response');
+            }
+          } catch (apiError: any) {
+            console.error('[PdfPreview] Error fetching PDF from API:', apiError);
+            setError(apiError?.message || 'Failed to load PDF');
+            setLoading(false);
+            return;
+          }
+        } else if (url) {
           // Load PDF from URL
           console.log('[PdfPreview] Loading PDF from URL:', url);
           try {
@@ -245,7 +282,44 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           } catch (urlError: any) {
             console.error('[PdfPreview] Error loading PDF from URL:', urlError);
             console.error('[PdfPreview] URL was:', url);
+            
+            // Fallback: if URL fails and readingId is provided, fetch from API
+            if (readingId) {
+              console.log('[PdfPreview] Attempting fallback: fetching PDF from API using readingId:', readingId);
+              try {
+                const response = await fetch(`/api/readings/${readingId}/content`);
+                if (!response.ok) {
+                  throw new Error(`Failed to fetch reading content: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data?.content_base64) {
+                  // Convert base64 to File object
+                  const base64 = data.content_base64 as string;
+                  const byteCharacters = atob(base64);
+                  const byteNumbers = new Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i += 1) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  const byteArray = new Uint8Array(byteNumbers);
+                  const mimeType = data?.mime_type || 'application/pdf';
+                  const fileName = `reading_${readingId}.pdf`;
+                  const blob = new Blob([byteArray], { type: mimeType });
+                  const fallbackFile = new File([blob], fileName, { type: mimeType });
+                  
+                  // Load PDF from File object
+                  const arrayBuffer = await fallbackFile.arrayBuffer();
+                  pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+                  console.log('[PdfPreview] PDF document loaded from API fallback successfully');
+                } else {
+                  throw new Error('No content_base64 in API response');
+                }
+              } catch (fallbackError: any) {
+                console.error('[PdfPreview] Fallback also failed:', fallbackError);
+                throw urlError; // Throw original error
+              }
+            } else {
             throw urlError;
+            }
           }
         } else if (file) {
           // Load PDF from File object
@@ -286,7 +360,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     loadPdf();
 
     return () => { cancelled = true; };
-  }, [file, url]);
+  }, [file, url, readingId]);
 
   /**
    * Calculates the optimal scale factor for PDF pages based on container width
@@ -506,6 +580,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     };
   }, [pdfDoc]);
 
+  
   // Highlight/search helpers
   const highlightRecordsRef = useRef<any[]>([]);
   const pendingScrollRef = useRef<string | null>(null);
@@ -552,16 +627,85 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function indexToDomRange(idxStart: number, idxEnd: number, map: any[]) {
-    function locate(idx: number) {
-      for (const e of map) { if (idx >= e.start && idx <= e.end) { return { node: e.node, offset: idx - e.start }; } }
+    const totalLen = map?.length ? (map[map.length - 1]?.end ?? 0) : 0;
+
+    function locateStart(idx: number) {
+      // Start positions should be half-open: [start, end)
+      for (const e of map) {
+        if (idx >= e.start && idx < e.end) {
+          const offset = idx - e.start;
+          const nodeLength = e.node.textContent?.length || e.node.nodeValue?.length || 0;
+          const safeOffset = Math.min(Math.max(offset, 0), nodeLength);
+          return { node: e.node, offset: safeOffset };
+        }
+      }
+      // Special-case: allow start at very end of text => last node end
+      if (idx === totalLen && map?.length) {
+        const last = map[map.length - 1];
+        const nodeLength = last.node.textContent?.length || last.node.nodeValue?.length || 0;
+        return { node: last.node, offset: nodeLength };
+      }
       return null;
     }
-    const a = locate(idxStart);
-    const b = locate(idxEnd);
+
+    function locateEnd(idx: number) {
+      // End positions are allowed to be exactly node end.
+      for (const e of map) { 
+        if (idx >= e.start && idx <= e.end) { 
+          const offset = idx - e.start;
+          const nodeLength = e.node.textContent?.length || e.node.nodeValue?.length || 0;
+          const safeOffset = Math.min(Math.max(offset, 0), nodeLength);
+          return { node: e.node, offset: safeOffset }; 
+        }
+      }
+      // Special-case: allow end at very end of text => last node end
+      if (idx === totalLen && map?.length) {
+        const last = map[map.length - 1];
+        const nodeLength = last.node.textContent?.length || last.node.nodeValue?.length || 0;
+        return { node: last.node, offset: nodeLength };
+      }
+      return null;
+    }
+
+    const a = locateStart(idxStart);
+    const b = locateEnd(idxEnd);
     if (!a || !b) return null;
+    
+    // Additional safety check: ensure offsets are within node lengths
+    const aNodeLength = a.node.textContent?.length || a.node.nodeValue?.length || 0;
+    const bNodeLength = b.node.textContent?.length || b.node.nodeValue?.length || 0;
+    
+    if (a.offset > aNodeLength || b.offset > bNodeLength) {
+      console.warn('[PdfPreview] Offset exceeds node length:', {
+        aOffset: a.offset,
+        aNodeLength,
+        bOffset: b.offset,
+        bNodeLength,
+        idxStart,
+        idxEnd
+      });
+      // Clamp offsets to valid range
+      a.offset = Math.min(a.offset, aNodeLength);
+      b.offset = Math.min(b.offset, bNodeLength);
+    }
+    
     const r = rangyLib ? rangyLib.createRange() : document.createRange();
+    try {
     r.setStart(a.node, a.offset);
     r.setEnd(b.node, b.offset);
+    } catch (error) {
+      console.error('[PdfPreview] Error creating range:', error, {
+        aNode: a.node,
+        aOffset: a.offset,
+        aNodeLength,
+        bNode: b.node,
+        bOffset: b.offset,
+        bNodeLength,
+        idxStart,
+        idxEnd
+      });
+      return null;
+    }
     return r;
   }
 
@@ -573,8 +717,446 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   function escapeRegExp(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
   /**
+   * Normalizes PDF text for robust matching:
+   * - lowercases
+   * - collapses whitespace
+   * - removes/normalizes many punctuation characters (including parentheses)
+   * - joins hyphenated line breaks (e.g., "inter-\nactive" -> "interactive")
+   * - removes zero-width chars
+   */
+  function normalizeForMatch(s: string): string {
+    if (!s) return '';
+    const ligMap: Record<string, string> = {
+      '\uFB00': 'ff',
+      '\uFB01': 'fi',
+      '\uFB02': 'fl',
+      '\uFB03': 'ffi',
+      '\uFB04': 'ffl',
+      '\uFB05': 'ft',
+      '\uFB06': 'st',
+    };
+    const greekMap: Record<string, string> = {
+      'α': 'alpha',
+      'β': 'beta',
+      'γ': 'gamma',
+      'δ': 'delta',
+      'ε': 'epsilon',
+      'θ': 'theta',
+      'λ': 'lambda',
+      'μ': 'mu',
+      'π': 'pi',
+      'ρ': 'rho',
+      'ϱ': 'rho',
+      'σ': 'sigma',
+      'τ': 'tau',
+      'ω': 'omega',
+      'Δ': 'delta',
+      'Λ': 'lambda',
+      'Π': 'pi',
+      'Ρ': 'rho',
+      'Σ': 'sigma',
+      'Ω': 'omega',
+    };
+    return s
+      .toLowerCase()
+      // normalize common ligatures (PDF text often uses these)
+      .replace(/[\uFB00-\uFB06]/g, (m) => ligMap[m] ?? m)
+      // normalize some Greek letters to ASCII words (helps with formulas)
+      .replace(/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/g, (m) => (greekMap[m] ?? m).toLowerCase())
+      // normalize subscripts/superscripts commonly used in formulas (e.g. σₑ, r³)
+      .replace(/[\u2080-\u2089]/g, (m) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(m)))
+      .replace(/[ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]/g, (m) => ({
+        'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm',
+        'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x',
+      } as Record<string, string>)[m] ?? m)
+      // normalize whitespace including NBSP
+      .replace(/[\s\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, ' ')
+      // join hyphenated line breaks: "foo- bar" -> "foobar"
+      .replace(/([a-z0-9])\s*[-\u2010\u2011\u2012\u2013\u2014\u2212]\s*([a-z0-9])/g, '$1$2')
+      // remove zero-width chars
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      // normalize quotes/dashes
+      .replace(/[“”«»„]/g, '"')
+      .replace(/[‘’‚]/g, "'")
+      .replace(/[–—]/g, '-')
+      // remove most punctuation (keep basic math operators so "x+y" still roughly searchable)
+      .replace(/[()\[\]{}<>《》【】（）]/g, ' ')
+      .replace(/[.,;:!?]/g, ' ')
+      // math/operator symbols are highly inconsistent in PDF text extraction; treat them as separators
+      .replace(/[+\-*/=^<>]/g, ' ')
+      // keep digits/letters; turn others into spaces
+      .replace(/[^a-z0-9\s]/g, ' ')
+      // collapse spaces again
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Builds a normalized string PLUS a mapping from normalized indices -> original indices.
+   * This enables robust substring search on normalized text while still creating DOM ranges on original text.
+   */
+  function buildNormalizedIndexWithMap(original: string) {
+    const normChars: string[] = [];
+    const map: number[] = []; // normIdx -> origIdx
+
+    const pushNorm = (ch: string, origIdx: number) => {
+      normChars.push(ch);
+      map.push(origIdx);
+    };
+
+    const pushSpace = (origIdx: number) => {
+      if (normChars.length && normChars[normChars.length - 1] !== ' ') {
+        pushNorm(' ', origIdx);
+      }
+    };
+
+    const ligMap: Record<string, string> = {
+      '\uFB00': 'ff',
+      '\uFB01': 'fi',
+      '\uFB02': 'fl',
+      '\uFB03': 'ffi',
+      '\uFB04': 'ffl',
+      '\uFB05': 'ft',
+      '\uFB06': 'st',
+    };
+    const greekMap: Record<string, string> = {
+      'α': 'alpha',
+      'β': 'beta',
+      'γ': 'gamma',
+      'δ': 'delta',
+      'ε': 'epsilon',
+      'θ': 'theta',
+      'λ': 'lambda',
+      'μ': 'mu',
+      'π': 'pi',
+      'ρ': 'rho',
+      'ϱ': 'rho',
+      'σ': 'sigma',
+      'τ': 'tau',
+      'ω': 'omega',
+      'Δ': 'delta',
+      'Λ': 'lambda',
+      'Π': 'pi',
+      'Ρ': 'rho',
+      'Σ': 'sigma',
+      'Ω': 'omega',
+    };
+
+    const subDigitMap: Record<string, string> = {
+      '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+    };
+    const subLetterMap: Record<string, string> = {
+      'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm',
+      'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x',
+    };
+
+    let i = 0;
+    while (i < original.length) {
+      const ch = original[i];
+
+      // Zero-width / soft hyphen
+      if (/^[\u00AD\u200B-\u200D\uFEFF]$/.test(ch)) {
+        i += 1;
+        continue;
+      }
+
+      // Ligatures (fi/fl/etc)
+      if (/^[\uFB00-\uFB06]$/.test(ch)) {
+        const rep = ligMap[ch] ?? '';
+        for (const outCh of rep) pushNorm(outCh, i);
+        i += 1;
+        continue;
+      }
+
+      // Greek letters (keep as ASCII words so we can match formulas)
+      if (/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/.test(ch)) {
+        const rep = (greekMap[ch] ?? '').toLowerCase();
+        for (const outCh of rep) pushNorm(outCh, i);
+        i += 1;
+        continue;
+      }
+
+      // Subscript digits/letters (e.g., σₑ)
+      if (subDigitMap[ch]) {
+        pushNorm(subDigitMap[ch], i);
+        i += 1;
+        continue;
+      }
+      if (subLetterMap[ch]) {
+        pushNorm(subLetterMap[ch], i);
+        i += 1;
+        continue;
+      }
+
+      // Hyphenated line breaks: letter/digit + hyphen + whitespace + letter/digit => join (skip hyphen+spaces)
+      const nextSlice = original.slice(i);
+      const hyphenMatch = nextSlice.match(/^([A-Za-z0-9])\s*[-\u2010\u2011\u2012\u2013\u2014\u2212]\s*([A-Za-z0-9])/);
+      if (hyphenMatch) {
+        // emit first char and second char as consecutive (map them to their respective orig indices)
+        const firstOrigIdx = i;
+        const secondOrigIdx = i + (hyphenMatch[0].lastIndexOf(hyphenMatch[2]));
+        pushNorm(hyphenMatch[1].toLowerCase(), firstOrigIdx);
+        pushNorm(hyphenMatch[2].toLowerCase(), secondOrigIdx);
+        i = secondOrigIdx + 1;
+        continue;
+      }
+
+      // Whitespace (collapse to single space)
+      if (/[\s\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Parentheses/brackets -> space
+      if (/[()\[\]{}<>《》【】（）]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Common punctuation -> space
+      if (/[.,;:!?]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Quotes/dashes normalization
+      if (/[“”«»„]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[‘’‚]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[–—]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Alnum
+      if (/[A-Za-z0-9]/.test(ch)) {
+        pushNorm(ch.toLowerCase(), i);
+        i += 1;
+        continue;
+      }
+      // Operators are highly inconsistent in PDF text extraction; treat as separators
+      if (/[+\-*/=^<>]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Superscript digits: ⁰¹²³⁴⁵⁶⁷⁸⁹ and ² ³
+      if (/[\u2070\u00B9\u00B2\u00B3\u2074-\u2079]/.test(ch)) {
+        const superscriptMap: Record<string, string> = {
+          '\u2070': '0',
+          '\u00B9': '1',
+          '\u00B2': '2',
+          '\u00B3': '3',
+          '\u2074': '4',
+          '\u2075': '5',
+          '\u2076': '6',
+          '\u2077': '7',
+          '\u2078': '8',
+          '\u2079': '9',
+        };
+        pushNorm((superscriptMap[ch] ?? ' ').toLowerCase(), i);
+        i += 1;
+        continue;
+      }
+
+      // Common math operators/symbols
+      if (/[×∙·∗]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[÷]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[≤]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+      if (/[≥]/.test(ch)) {
+        pushSpace(i);
+        i += 1;
+        continue;
+      }
+
+      // Other symbols -> space
+      pushSpace(i);
+      i += 1;
+    }
+
+    // Collapse spaces and trim while keeping a 1:1 mapping (crucial for accurate DOM range creation).
+    const outChars: string[] = [];
+    const outMap: number[] = [];
+    for (let k = 0; k < normChars.length; k += 1) {
+      const ch = normChars[k];
+      const origIdx = map[k] ?? 0;
+      if (ch === ' ') {
+        // collapse multiple spaces and avoid leading spaces
+        if (outChars.length === 0) continue;
+        if (outChars[outChars.length - 1] === ' ') continue;
+        outChars.push(' ');
+        outMap.push(origIdx);
+      } else {
+        outChars.push(ch);
+        outMap.push(origIdx);
+      }
+    }
+    // trim trailing space
+    if (outChars.length && outChars[outChars.length - 1] === ' ') {
+      outChars.pop();
+      outMap.pop();
+    }
+
+    return { normalized: outChars.join(''), normToOrig: outMap };
+  }
+
+  function mapNormRangeToOrig(normStart: number, normEnd: number, normToOrig: number[], fallbackTextLength: number) {
+    const s = (normStart >= 0 && normStart < normToOrig.length) ? normToOrig[normStart] : -1;
+    const e = (normEnd - 1 >= 0 && normEnd - 1 < normToOrig.length) ? normToOrig[normEnd - 1] : -1;
+    if (s === -1 || e === -1) return null;
+    // end is inclusive in mapping; convert to exclusive index
+    return { start: s, end: Math.min(e + 1, fallbackTextLength) };
+  }
+
+  function buildCompactNormalizedIndexWithMap(original: string) {
+    const { normalized, normToOrig } = buildNormalizedIndexWithMap(original);
+    const compactChars: string[] = [];
+    const compactMap: number[] = [];
+    for (let i = 0; i < normalized.length; i += 1) {
+      const ch = normalized[i];
+      if (ch === ' ') continue;
+      compactChars.push(ch);
+      compactMap.push(normToOrig[i] ?? 0);
+    }
+    return { normalized: compactChars.join(''), normToOrig: compactMap };
+  }
+
+  function buildAlnumIndexWithMap(original: string) {
+    const { normalized, normToOrig } = buildNormalizedIndexWithMap(original);
+    const alnumChars: string[] = [];
+    const alnumMap: number[] = [];
+    for (let i = 0; i < normalized.length; i += 1) {
+      const ch = normalized[i];
+      if (!/[a-z0-9]/.test(ch)) continue;
+      alnumChars.push(ch);
+      alnumMap.push(normToOrig[i] ?? 0);
+    }
+    return { normalized: alnumChars.join(''), normToOrig: alnumMap };
+  }
+
+  function findBestNormSpan(haystack: string, query: string) {
+    if (!haystack || !query) return null;
+
+    const fullIdx = haystack.indexOf(query);
+    if (fullIdx !== -1) return { start: fullIdx, end: fullIdx + query.length, method: 'full' as const };
+
+    const words = query.split(' ').filter(Boolean);
+    if (words.length < 3) {
+      // No-spaces query (e.g., alnum compact). Try anchors by fixed-length chunks.
+      if (query.length < 20) return null;
+      const k = Math.min(25, Math.max(10, Math.floor(query.length / 3)));
+      const startCand = query.slice(0, k);
+      const endCand = query.slice(-k);
+      const sIdx = haystack.indexOf(startCand);
+      if (sIdx === -1) return null;
+      const eIdx = haystack.indexOf(endCand, sIdx + startCand.length);
+      if (eIdx === -1) return null;
+      const spanEnd = eIdx + endCand.length;
+      if (spanEnd <= sIdx) return null;
+      return { start: sIdx, end: spanEnd, method: 'anchors' as const };
+    }
+
+    const startNs = [40, 30, 20, 15, 12, 10, 8, 6, 5, 3].filter(n => n <= words.length);
+    const endNs = [40, 30, 20, 15, 12, 10, 8, 6, 5, 3].filter(n => n <= words.length);
+    const startCands = startNs.map(n => words.slice(0, n).join(' '));
+    const endCands = endNs.map(n => words.slice(words.length - n).join(' '));
+
+    let best: { start: number; end: number; method: 'anchors' } | null = null;
+    for (const sCand of startCands) {
+      const sIdx = haystack.indexOf(sCand);
+      if (sIdx === -1) continue;
+      const searchFrom = sIdx + Math.max(1, sCand.length);
+
+      for (const eCand of endCands) {
+        const eIdx = haystack.indexOf(eCand, searchFrom);
+        if (eIdx === -1) continue;
+        const spanEnd = eIdx + eCand.length;
+        if (spanEnd <= sIdx) continue;
+        // Avoid pathological spans (e.g., common tokens matching far away)
+        if (spanEnd - sIdx > 20000) continue;
+
+        // Choose the tightest span to avoid accidentally highlighting too much.
+        if (!best || (spanEnd - sIdx) < (best.end - best.start)) {
+          best = { start: sIdx, end: spanEnd, method: 'anchors' };
+        }
+      }
+    }
+
+    return best;
+  }
+
+  /**
+   * Calculates text similarity between two strings using normalized comparison
+   * Returns a value between 0 (completely different) and 1 (identical)
+   * @param str1 - First string to compare
+   * @param str2 - Second string to compare
+   * @returns Similarity score between 0 and 1
+   */
+  function calculateTextSimilarity(str1: string, str2: string): number {
+    // Normalize strings: lowercase, remove extra whitespace, remove punctuation
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[^\w\s]/g, '');
+    const norm1 = normalize(str1);
+    const norm2 = normalize(str2);
+    
+    if (norm1 === norm2) return 1.0;
+    if (norm1.length === 0 || norm2.length === 0) return 0.0;
+    
+    // Calculate character-level similarity (Jaccard-like)
+    const longer = norm1.length > norm2.length ? norm1 : norm2;
+    const shorter = norm1.length > norm2.length ? norm2 : norm1;
+    
+    // Check if shorter is contained in longer (substring match)
+    if (longer.includes(shorter)) {
+      return shorter.length / longer.length;
+    }
+    
+    // Calculate word-level similarity
+    const words1 = norm1.split(/\s+/).filter(w => w.length > 0);
+    const words2 = norm2.split(/\s+/).filter(w => w.length > 0);
+    
+    if (words1.length === 0 || words2.length === 0) return 0.0;
+    
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    const wordSimilarity = intersection.size / union.size;
+    
+    // Combine character and word similarity
+    const charSimilarity = 1 - (longer.length - shorter.length) / Math.max(longer.length, 1);
+    
+    return (wordSimilarity * 0.7 + charSimilarity * 0.3);
+  }
+
+  /**
    * Generates a flexible regex pattern from a query string to handle PDF text quirks
    * Handles missing spaces, hyphens, merged words (e.g., "A version" -> "aversion"), and citations
+   * Improved to be more precise while still handling PDF text variations
    * @param q - Query string to convert to regex pattern
    * @returns Regex pattern string that can match text with spacing variations
    */
@@ -584,9 +1166,9 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
 
     const HYPHENS = '\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212';
     const HYPHEN_CLASS = `[${HYPHENS}]`;
-    // GAP now allows: nothing (words directly connected), spaces, or hyphens
-    // This handles PDF text layers where words may be concatenated without spaces
-    const GAP = `(?:|[\\s\\u00A0]*|\\s*${HYPHEN_CLASS}\\s*)`;
+    // Allow light punctuation between tokens (e.g., parentheses, commas) and varying spaces/hyphens
+    const PUNCT = `[\\(\\)\\[\\]\\{\\}\\<\\>\\,\\.\\;\\:\\!\\?\"'\\uFF08\\uFF09\\u3010\\u3011\\uFF3B\\uFF3D]*`;
+    const GAP = `(?:${PUNCT}\\s+|\\s*${HYPHEN_CLASS}\\s*|${PUNCT}[\\s\\u00A0]{0,3}${PUNCT})`;
 
     const SUP_DIGITS = '0-9\\u2070\\u00B2\\u00B3\\u2074-\\u2079';
     const DIGIT_CLASS = `[${SUP_DIGITS}]+`;
@@ -605,17 +1187,12 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         // Single letter word: allow it to be merged with next word or have space
         // e.g., "A version" -> match "A version", "aversion", "Aversion"
         const nextTok = rawParts[i + 1];
-        const escapedLetter = escapeRegExp(tok);
         const escapedNext = escapeRegExp(nextTok);
-        // Create pattern that matches:
-        // 1. "A version" (with space) - (?:A[\s\u00A0]+)version
-        // 2. "aversion" (merged, lowercase) - aversion
-        // 3. "Aversion" (merged, uppercase) - Aversion
-        // Use case-insensitive matching, so pattern: (?:[Aa](?:[\s\u00A0]+|))?version
         const letterLower = tok.toLowerCase();
         const letterUpper = tok.toUpperCase();
-        // Match: [Aa]version OR (?:[Aa][\s\u00A0]+)version
-        parts.push(`(?:[${letterLower}${letterUpper}]${escapedNext}|(?:[${letterLower}${letterUpper}]${GAP})${escapedNext})`);
+        // More restrictive: prefer space, but allow merge
+        // Match: (?:[Aa]\s+)?version OR [Aa]version (case-insensitive)
+        parts.push(`(?:[${letterLower}${letterUpper}]\\s+)?${escapedNext}`);
         i++; // Skip next token since we've already included it
       } else {
         parts.push(escapeRegExp(tok));
@@ -772,55 +1349,121 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     
     let rec: any = null;
     
-    // Strategy 1: Direct index matching (most accurate)
-    // Each scaffold corresponds to a query, and we want the first match of that query
-    if (typeof scaffoldIdx === 'number' && scaffoldIdx >= 0) {
-      // Get unique queries in order (as they appear in mockQueries)
-      const seenQueries = new Set<string>();
-      const orderedQueries: string[] = [];
-      for (const r of list) {
-        if (r.fragment && !seenQueries.has(r.fragment)) {
-          seenQueries.add(r.fragment);
-          orderedQueries.push(r.fragment);
+    // Strategy 1: Use annotation_id if available (most accurate)
+    // Find the annotation_id from fragmentToAnnotationIdRef using the fragment from searchQueries
+    let targetAnnotationId: string | undefined;
+    if (typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
+      const queries = Array.isArray(searchQueries) ? searchQueries : [searchQueries];
+      if (scaffoldIdx < queries.length) {
+        const targetQuery = queries[scaffoldIdx];
+        if (targetQuery && typeof targetQuery === 'string') {
+          const normalizedQuery = targetQuery.toLowerCase().trim();
+          targetAnnotationId = fragmentToAnnotationIdRef.current.get(normalizedQuery) || 
+                               fragmentToAnnotationIdRef.current.get(targetQuery) || 
+                               undefined;
+          if (targetAnnotationId) {
+            console.log('[PdfPreview] Looking for annotation_id:', targetAnnotationId, 'for scaffold index:', scaffoldIdx);
+          }
         }
-      }
-      
-      if (scaffoldIdx < orderedQueries.length) {
-        const targetQuery = orderedQueries[scaffoldIdx];
-        rec = list.find((r: any) => r.fragment === targetQuery);
-      } else if (scaffoldIdx < list.length) {
-        rec = list[scaffoldIdx];
       }
     }
     
-    // Strategy 2: Text matching (fallback)
+    // Also try using the fragment parameter directly
+    if (!targetAnnotationId && fragment) {
+      const normalizedFragment = fragment.toLowerCase().trim();
+      targetAnnotationId = fragmentToAnnotationIdRef.current.get(normalizedFragment) || 
+                           fragmentToAnnotationIdRef.current.get(fragment) || 
+                           undefined;
+    }
+    
+    if (targetAnnotationId) {
+      rec = list.find((r: any) => r.annotation_id === targetAnnotationId);
+      if (rec) {
+        console.log('[PdfPreview] ✅ Found highlight by annotation_id:', targetAnnotationId, 'scaffoldIdx:', scaffoldIdx);
+      } else {
+        console.warn('[PdfPreview] ⚠️ annotation_id found but no matching highlight record:', targetAnnotationId);
+        console.log('[PdfPreview] Available annotation_ids in records:', list.map((r: any) => r.annotation_id).filter(Boolean));
+      }
+    }
+    
+    // Strategy 2: Direct index matching using searchQueries order (fallback)
+    // scaffoldIdx corresponds to the index in searchQueries array
+    if (!rec && typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
+      const queries = Array.isArray(searchQueries) ? searchQueries : [searchQueries];
+      
+      console.log('[PdfPreview] Strategy 2: Using scaffold index', scaffoldIdx, 'out of', queries.length, 'queries');
+      console.log('[PdfPreview] Target query:', queries[scaffoldIdx]?.substring(0, 100));
+      console.log('[PdfPreview] Available queryFragments in records:', list.map((r: any) => r.queryFragment?.substring(0, 50)).filter(Boolean));
+      
+      if (scaffoldIdx < queries.length) {
+        const targetQuery = queries[scaffoldIdx];
+        if (targetQuery && typeof targetQuery === 'string') {
+          // Find the first highlight record that matches this query
+          const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+          const targetNormalized = norm(targetQuery);
+          
+          // Try exact match first
+          rec = list.find((r: any) => {
+            if (!r.queryFragment) return false;
+            return norm(r.queryFragment) === targetNormalized;
+          });
+          
+          // If not found, try partial match (first 50 chars)
+          if (!rec) {
+            const targetFirst50 = targetNormalized.substring(0, 50);
+            rec = list.find((r: any) => {
+              if (!r.queryFragment) return false;
+              const fragNormalized = norm(r.queryFragment);
+              return fragNormalized.substring(0, 50) === targetFirst50;
+            });
+          }
+          
+          if (rec) {
+            console.log('[PdfPreview] ✅ Found highlight by scaffold index:', scaffoldIdx, 'query:', targetQuery.substring(0, 50));
+          } else {
+            console.warn('[PdfPreview] ⚠️ No highlight found for scaffold index:', scaffoldIdx, 'query:', targetQuery.substring(0, 50));
+          }
+        }
+      }
+    }
+    
+    // Strategy 3: Text matching (last resort)
     if (!rec && fragment) {
       const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
       const target = norm(fragment);
-      const targetCleaned = target.replace(/…/g, '').trim();
+      const targetFirst50 = target.substring(0, 50);
       
-      rec = list.find((r: any) => {
-        if (!r.fragment) return false;
-        const pdfFrag = norm(r.fragment);
-        const pdfFragCleaned = pdfFrag.replace(/…/g, '').trim();
-        const pdfFirst50 = pdfFragCleaned.substring(0, 50);
-        const targetFirst50 = targetCleaned.substring(0, 50);
-        const pdfFirst100 = pdfFragCleaned.substring(0, 100);
-        const targetFirst100 = targetCleaned.substring(0, 100);
+      // Find the best match by comparing first 50 chars
+      let bestMatch: any = null;
+      let bestScore = 0;
+      
+      for (const r of list) {
+        if (!r.queryFragment) continue;
+        const pdfFrag = norm(r.queryFragment);
+        const pdfFirst50 = pdfFrag.substring(0, 50);
         
-        // Direct match
-        if (pdfFrag.includes(target) || target.includes(pdfFrag)) return true;
-        // Cleaned match
-        if (pdfFragCleaned.includes(targetCleaned) || targetCleaned.includes(pdfFragCleaned)) return true;
-        // First 50 chars match
-        if (pdfFirst50 && targetFirst50 && pdfFirst50.length >= 30 && 
-            (pdfFirst50.includes(targetFirst50) || targetFirst50.includes(pdfFirst50))) return true;
-        // First 100 chars match
-        if (pdfFirst100 && targetFirst100 && pdfFirst100.length >= 50 &&
-            (pdfFirst100.includes(targetFirst100) || targetFirst100.includes(pdfFirst100))) return true;
+        // Calculate similarity score
+        let score = 0;
+        if (pdfFirst50 === targetFirst50) {
+          score = 100; // Exact match
+        } else if (pdfFirst50.includes(targetFirst50) || targetFirst50.includes(pdfFirst50)) {
+          score = 80; // Contains match
+        } else {
+          // Calculate character overlap
+          const overlap = pdfFirst50.split('').filter((c, i) => targetFirst50[i] === c).length;
+          score = (overlap / Math.max(pdfFirst50.length, targetFirst50.length)) * 50;
+        }
         
-        return false;
-      });
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = r;
+        }
+      }
+      
+      if (bestMatch && bestScore >= 50) {
+        rec = bestMatch;
+        console.log('[PdfPreview] Found highlight by text matching, score:', bestScore.toFixed(1));
+      }
     }
     
     if (!rec) {
@@ -833,6 +1476,11 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     
     // Scroll to center highlight in viewport
+    if (!containerRef.current) {
+      console.warn('[PdfPreview] Container ref is not available, cannot scroll to highlight');
+      return;
+    }
+    
     const containerRect = containerRef.current.getBoundingClientRect();
     const containerHeight = containerRect.height;
     const pageHeight = pageEl.clientHeight;
@@ -942,7 +1590,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
    * @param debug - If true, logs detailed debugging information
    * @returns Number of matches found and highlighted
    */
-  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false, annotationId?: string) {
+  function highlightInLayer(layer: Element, query: string, applier: any, debug: boolean = false, annotationId?: string, originalQueryFragment?: string) {
     const nodes = getTextNodesIn(layer);
     if (!nodes.length) {
       if (debug) console.log('[PdfPreview] No text nodes in layer');
@@ -950,108 +1598,84 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
     const { text, map } = buildIndex(nodes);
 
-    if (debug) {
-      console.log('[PdfPreview] Layer text length:', text.length);
-      console.log('[PdfPreview] Layer text sample:', text.substring(0, 400));
-    }
-
-    const flags = 'gius';
-    const pattern = patternFromQueryLiteralFlexible(query);
-    if (!pattern) {
-      console.warn('[PdfPreview] No pattern generated for query:', query.substring(0, 80));
-      return 0;
-    }
-
-    if (debug) {
-      console.log('[PdfPreview] Query:', query.substring(0, 100));
-      console.log('[PdfPreview] Pattern:', pattern);
-    }
-
-    let re: RegExp;
-    try { 
-      re = new RegExp(pattern, flags);
-    } catch (e) {
-      console.warn('[PdfPreview] Failed to create regex for pattern:', pattern, 'error:', e);
-      return 0;
-    }
-    
-    // Test if pattern matches
-    if (debug) {
-      const testMatch = re.test(text);
-      console.log('[PdfPreview] Pattern test match:', testMatch);
-      // Reset regex after test
-      re.lastIndex = 0;
-      
-      // Also test a simpler pattern: just the key words
-      const keyWords = query.split(/\s+/).filter(w => w.length > 1 && !/^[aA]$/.test(w));
-      if (keyWords.length > 0) {
-        const simplePattern = keyWords.slice(0, 3).map(w => escapeRegExp(w.toLowerCase())).join('.*?');
-        const simpleRe = new RegExp(simplePattern, 'gi');
-        const simpleMatch = simpleRe.test(text);
-        console.log('[PdfPreview] Simple key words test (first 3 words):', simpleMatch, 'words:', keyWords.slice(0, 3));
-        console.log('[PdfPreview] Looking for in text:', text.toLowerCase().includes(keyWords[0].toLowerCase()) ? 'FOUND' : 'NOT FOUND', keyWords[0]);
-      }
-    }
-
+    // Get page element and page number early
     const pageEl = layer.closest('.page') as HTMLElement | null;
     const pageNum = pageEl ? parseInt(pageEl.dataset.page || '1', 10) : 1;
 
-    let count = 0; let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      const start = m.index;
-      const end = start + m[0].length;
+    // Check if simple match mode is enabled (via localStorage or window variable)
+    const useSimpleMatch = typeof window !== 'undefined' && (
+      (window as any).USE_SIMPLE_MATCH === true ||
+      localStorage.getItem('USE_SIMPLE_MATCH') === 'true'
+    );
+    
+    // SIMPLE MATCH MODE: Use basic text search
+    if (useSimpleMatch) {
+    if (debug) {
+        console.log('[PdfPreview] Simple match mode - searching for:', query.substring(0, 100));
+        console.log('[PdfPreview] Text length:', text.length);
+        console.log('[PdfPreview] Text sample (first 300 chars):', text.substring(0, 300));
+      }
+      const queryNorm = normalizeForMatch(query);
+      const { normalized: textNorm, normToOrig } = buildNormalizedIndexWithMap(text);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rng: any = indexToDomRange(start, end, map);
-      if (!rng) { if (m[0].length === 0) re.lastIndex++; continue; }
+      const span = findBestNormSpan(textNorm, queryNorm);
 
-      try { applier.applyToRange(rng); } catch {}
+      // Compact mode: remove spaces (and any remaining non-alnum) to handle "radiusr", "are2", "MrI", etc.
+      const queryCompact = queryNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+      const compactIndex = (!span && queryCompact.length >= 8) ? buildCompactNormalizedIndexWithMap(text) : null;
+      const spanCompact = (!span && compactIndex) ? findBestNormSpan(compactIndex.normalized, queryCompact) : null;
 
-      if (pageEl) {
-        const coords = coordsPageEncodedY(rng, pageEl, pageNum);
-        highlightRecordsRef.current.push({
-          rangeType: 'text',
-          rangePage: pageNum,
-          rangeStart: start,
-          rangeEnd: end,
-          fragment: m[0],
-          ...coords,
-          ...(annotationId ? { annotation_id: annotationId } : {}),
+      const selected = span
+        ? { normStart: span.start, normEnd: span.end, normToOrig: normToOrig, mode: 'norm' as const }
+        : (spanCompact && compactIndex)
+          ? { normStart: spanCompact.start, normEnd: spanCompact.end, normToOrig: compactIndex.normToOrig, mode: 'compact' as const }
+          : null;
+
+      if (debug) {
+        console.log('[PdfPreview] Simple match selected span:', {
+          mode: selected?.mode,
+          span: span ? { ...span, qLen: queryNorm.length } : null,
+          spanCompact: spanCompact ? { ...spanCompact, qLen: queryCompact.length } : null,
         });
       }
 
-      try { rng.detach?.(); } catch {}
-      count++;
-      if (m[0].length === 0) re.lastIndex++;
+      if (selected) {
+        const origRange = mapNormRangeToOrig(selected.normStart, selected.normEnd, selected.normToOrig, text.length);
+        if (!origRange) return 0;
+        const start = origRange.start;
+        const end = origRange.end;
+        const rng: any = indexToDomRange(start, end, map);
+        if (rng) {
+          try { 
+            if (!applier) {
+              console.error('[PdfPreview] ❌ Applier is null or undefined!');
+              return 0;
+            }
+            applier.applyToRange(rng);
+            if (debug) {
+              console.log('[PdfPreview] ✅ Applied highlight to range (exact match)');
+              console.log('[PdfPreview] Range details:', { 
+                start, 
+                end, 
+                fragment: text.substring(start, end),
+                queryLength: query.length,
+                textLength: text.length
+              });
+            }
+            // Verify highlight was applied (check after a short delay)
+            setTimeout(() => {
+              const highlights = layer.querySelectorAll('mark.pdf-highlight, mark.pdf-highlight-alt');
+              if (debug || highlights.length === 0) {
+                console.log(`[PdfPreview] Highlights found after applying: ${highlights.length}`);
+                if (highlights.length === 0) {
+                  console.warn('[PdfPreview] ⚠️ No highlights found in DOM - highlight may not have been applied!');
+                }
+              }
+            }, 50);
+    } catch (e) {
+            console.error('[PdfPreview] ❌ Error applying highlight:', e);
+      return 0;
     }
-    
-    // Fallback: If no matches found, try keyword-based matching
-    // This handles cases where PDF text has words concatenated
-    if (count === 0) {
-      const keyWords = query.split(/\s+/)
-        .filter(w => w.length > 1)
-        .map(w => w.replace(/[^\w]/g, '').toLowerCase())
-        .filter(w => w.length > 2); // Only words longer than 2 chars
-      
-      if (keyWords.length >= 2) {
-        // Try to find a sequence of keywords (allowing any characters between them)
-        // This matches cases like "aversion" (a+version) or "Afterreading" (After+reading)
-        const keyPattern = keyWords.slice(0, Math.min(5, keyWords.length))
-          .map(w => escapeRegExp(w))
-          .join('.*?');
-        const keyRe = new RegExp(keyPattern, 'gi');
-        keyRe.lastIndex = 0;
-        
-        while ((m = keyRe.exec(text)) !== null) {
-          const start = m.index;
-          const end = start + m[0].length;
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const rng: any = indexToDomRange(start, end, map);
-          if (!rng) { if (m[0].length === 0) keyRe.lastIndex++; continue; }
-
-          try { applier.applyToRange(rng); } catch {}
-
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
             highlightRecordsRef.current.push({
@@ -1059,29 +1683,204 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
-              fragment: m[0],
+              fragment: text.substring(start, end),
+              queryFragment: originalQueryFragment || query,
+              ...coords,
+              ...(annotationId ? { annotation_id: annotationId } : {}),
+            });
+            if (debug) console.log('[PdfPreview] Added highlight record to array');
+          }
+          try { rng.detach?.(); } catch {}
+          return 1;
+        } else {
+          if (debug) {
+            console.warn('[PdfPreview] ❌ Failed to create DOM range from index', { 
+              start, 
+              end, 
+              textLength: text.length,
+              mapSize: map ? map.length : 'unknown'
+            });
+          }
+        }
+      } else {
+        if (debug) {
+          console.warn('[PdfPreview] No match found for query:', query.substring(0, 100));
+          console.warn('[PdfPreview] Text sample:', text.substring(0, 200));
+        }
+      }
+      return 0; // No match found with simple search
+    }
+
+    // COMPLEX MATCH MODE: Use regex (may freeze, but more accurate)
+    if (debug) {
+      console.log('[PdfPreview] Layer text length:', text.length);
+      console.log('[PdfPreview] Query:', query.substring(0, 100));
+    }
+
+    // Strategy 1: Try exact match first (fast and precise)
+    const exactPattern = escapeRegExp(query.trim());
+    const exactRe = new RegExp(exactPattern, 'gi');
+    let exactMatch: RegExpExecArray | null = exactRe.exec(text);
+    
+    if (exactMatch) {
+      // Found exact match - use it
+      const start = exactMatch.index;
+      const end = start + exactMatch[0].length;
+      const rng: any = indexToDomRange(start, end, map);
+
+      if (rng) {
+      try { applier.applyToRange(rng); } catch {}
+
+      if (pageEl) {
+        const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+          const matchedFragment = exactMatch[0];
+          if (debug) {
+            console.log('[PdfPreview] Exact match found:', {
+              queryFragment: (originalQueryFragment || query).substring(0, 100),
+              matchedFragment: matchedFragment.substring(0, 100),
+              similarity: 1.0,
+              annotationId: annotationId || 'none'
+            });
+          }
+        highlightRecordsRef.current.push({
+          rangeType: 'text',
+          rangePage: pageNum,
+          rangeStart: start,
+          rangeEnd: end,
+            fragment: matchedFragment,
+            queryFragment: originalQueryFragment || query,
+          ...coords,
+          ...(annotationId ? { annotation_id: annotationId } : {}),
+        });
+      }
+      try { rng.detach?.(); } catch {}
+        return 1; // Return immediately after exact match
+      }
+    }
+    
+    // Strategy 2: Try simple keyword search (fallback, no complex regex)
+      const keyWords = query.split(/\s+/)
+      .filter(w => w.length > 2)
+      .slice(0, 5); // Only use first 5 words
+      
+      if (keyWords.length >= 2) {
+      const keyPattern = keyWords.map(w => escapeRegExp(w)).join('.*?');
+        const keyRe = new RegExp(keyPattern, 'gi');
+        keyRe.lastIndex = 0;
+        
+      let keyMatch: RegExpExecArray | null;
+      let matchCount = 0;
+      const MAX_KEYWORD_MATCHES = 3; // Limit matches
+      
+      while ((keyMatch = keyRe.exec(text)) !== null && matchCount < MAX_KEYWORD_MATCHES) {
+        matchCount++;
+        const start = keyMatch.index;
+        const end = start + keyMatch[0].length;
+          const rng: any = indexToDomRange(start, end, map);
+        if (rng) {
+          try { applier.applyToRange(rng); } catch {}
+          if (pageEl) {
+            const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+            highlightRecordsRef.current.push({
+              rangeType: 'text',
+              rangePage: pageNum,
+              rangeStart: start,
+              rangeEnd: end,
+              fragment: keyMatch[0],
+              queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
           }
-
           try { rng.detach?.(); } catch {}
-          count++;
-          if (m[0].length === 0) keyRe.lastIndex++;
+          return 1; // Return first match found
         }
-        
-        if (count > 0 && debug) {
-          console.log('[PdfPreview] Fallback keyword matching found', count, 'match(es)');
+        if (keyMatch[0].length === 0) {
+          keyRe.lastIndex++;
+          if (keyRe.lastIndex >= text.length) break;
         }
       }
     }
     
-    return count;
+    return 0; // No match found
+  }
+
+  /**
+   * Attempts to highlight a fragment that is split across page boundaries.
+   * Strategy: highlight a prefix on page i and a suffix on page i+1.
+   * Best-effort: only returns success if both sides are found.
+   */
+  function highlightAcrossTwoLayers(layers: Element[], fullFragment: string, idx: number, annotationId?: string) {
+    if (idx < 0 || idx >= layers.length - 1) return 0;
+    if (!fullFragment || !fullFragment.trim()) return 0;
+
+    const layerA = layers[idx];
+    const layerB = layers[idx + 1];
+    const nodesA = getTextNodesIn(layerA);
+    const nodesB = getTextNodesIn(layerB);
+    if (!nodesA.length || !nodesB.length) return 0;
+
+    const { text: textA } = buildIndex(nodesA);
+    const { text: textB } = buildIndex(nodesB);
+    const boundary = textA.length;
+
+    // Build a combined searchable text (best effort). We keep it contiguous to allow matches spanning boundary.
+    const combinedNodes = [...nodesA, ...nodesB];
+    const { text: combinedText } = buildIndex(combinedNodes);
+    const { normalized: combinedNorm, normToOrig } = buildNormalizedIndexWithMap(combinedText);
+    const qNorm = normalizeForMatch(fullFragment);
+
+    let span = findBestNormSpan(combinedNorm, qNorm);
+    let selectedMap = normToOrig;
+    if (!span) {
+      const qCompact = qNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+      if (qCompact.length >= 8) {
+        const compact = buildCompactNormalizedIndexWithMap(combinedText);
+        const spanC = findBestNormSpan(compact.normalized, qCompact);
+        if (spanC) {
+          span = { start: spanC.start, end: spanC.end, method: spanC.method };
+          selectedMap = compact.normToOrig;
+        }
+      }
+    }
+    if (!span) return 0;
+
+    const origSpan = mapNormRangeToOrig(span.start, span.end, selectedMap, combinedText.length);
+    if (!origSpan) return 0;
+
+    const origStart = origSpan.start;
+    const origEnd = origSpan.end;
+
+    // If match doesn't actually cross boundary, let normal per-layer logic handle it.
+    if (origEnd <= boundary) return 0;
+    if (origStart >= boundary) return 0;
+
+    const partA = combinedText.slice(origStart, boundary).trim();
+    const partB = combinedText.slice(boundary, origEnd).trim();
+    if (!partA || !partB) return 0;
+
+    const applierA = appliersRef.current.A || appliersRef.current.B;
+    const applierB = appliersRef.current.B || appliersRef.current.A;
+    if (!applierA || !applierB) return 0;
+
+    const m1 = highlightInLayer(layerA, partA, applierA, false, annotationId, fullFragment);
+    const m2 = highlightInLayer(layerB, partB, applierB, false, annotationId, fullFragment);
+    return (m1 > 0 && m2 > 0) ? (m1 + m2) : 0;
   }
 
   // Track if coords have been reported to avoid duplicate uploads
   const coordsReportedRef = useRef<boolean>(false);
   const lastSearchQueriesRef = useRef<string>('');
+  // Track code version for development hot reload - forces re-highlight when code changes
+  const codeVersionRef = useRef<number>(0);
+  
+  // In development, increment version on hot reload to force re-highlight
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      codeVersionRef.current += 1;
+      console.log('[PdfPreview] Code version updated (hot reload detected):', codeVersionRef.current);
+    }
+  }, []); // Empty deps - only runs on mount/hot reload
 
   // When all pages are rendered, fetch queries, highlight, and report coords
   useEffect(() => {
@@ -1094,10 +1893,20 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       ? searchQueries.join('|') 
       : (searchQueries || '');
     
+    // In development, always re-highlight if code version changed (hot reload)
+    const codeVersionChanged = process.env.NODE_ENV === 'development' && 
+                                codeVersionRef.current > (lastSearchQueriesRef.current ? 1 : 0);
+    
     // Only run if searchQueries actually changed (not just scaffolds status)
-    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current) {
+    // OR if code version changed in development (hot reload)
+    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current && !codeVersionChanged) {
       console.log('[PdfPreview] Skipping duplicate highlight/search - searchQueries unchanged and coords already reported');
       return;
+    }
+    
+    if (codeVersionChanged) {
+      console.log('[PdfPreview] Code changed (hot reload) - forcing re-highlight');
+      coordsReportedRef.current = false; // Reset to allow re-highlight
     }
 
     // Reset coords reported flag if searchQueries changed
@@ -1131,17 +1940,25 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
         }
 
-        // Fallback: If no searchQueries provided, try fetching from API； needs to be changed to fetch from backend
-        if (list.length === 0) {
+        // Fallback: If no searchQueries provided, try fetching from API using sessionId and readingId
+        if (list.length === 0 && sessionId && readingId) {
           try {
-            console.log('[PdfPreview] Fetching queries from API');
-            const qRes = await fetch('/api/queries');
+            console.log('[PdfPreview] Fetching queries from API (fallback)', { sessionId, readingId });
+            const params = new URLSearchParams();
+            if (sessionId) params.set('sessionId', sessionId);
+            if (readingId) params.set('readingId', readingId);
+            const qRes = await fetch(`/api/queries?${params.toString()}`);
             if (qRes.ok) {
               const { queries } = await qRes.json();
               list = Array.isArray(queries) ? queries : [];
+              console.log('[PdfPreview] Fetched', list.length, 'queries from API');
+            } else if (qRes.status === 404) {
+              // Endpoint doesn't exist, which is fine - just skip this fallback
+              console.log('[PdfPreview] /api/queries endpoint not found, skipping fallback');
             }
           } catch (e) {
-            console.warn('[PdfPreview] Failed to fetch queries from API:', e);
+            // Silently ignore errors - this is just a fallback
+            console.log('[PdfPreview] Could not fetch queries from API:', e);
           }
         }
 
@@ -1150,16 +1967,29 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           return;
         }
 
+        // Check if containerRef is available before accessing it
+        if (!containerRef.current) {
+          console.warn('[PdfPreview] Container ref is not available, skipping highlight processing');
+          return;
+        }
+
         clearHighlights();
-        const layers = Array.from(containerRef.current!.querySelectorAll('.textLayer')) as Element[];
+        const layers = Array.from(containerRef.current.querySelectorAll('.textLayer')) as Element[];
         console.log('[PdfPreview] Found', layers.length, 'text layers');
         if (layers.length > 0) {
           const firstLayerText = layers[0].textContent || '';
           console.log('[PdfPreview] First layer text sample (first 200 chars):', firstLayerText.substring(0, 200));
         }
         
+        // Process fragments asynchronously to prevent UI blocking
         let total = 0;
-        list.forEach((q, i) => {
+        let processedCount = 0;
+        
+        const processFragment = async (q: string, i: number) => {
+          return new Promise<void>((resolve) => {
+            // Use setTimeout to yield to UI thread
+            setTimeout(async () => {
+              try {
           console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
           
           // Find annotation_id for this fragment
@@ -1175,20 +2005,83 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           }
           
           let fragmentTotal = 0;
-          layers.forEach((layer, layerIdx) => {
+                let foundInLayer = false;
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
-            if (applier && q && q.trim()) {
-              const matches = highlightInLayer(layer, q, applier, i === 0 && layerIdx === 0, annotationId);
-              if (matches > 0) {
-                console.log(`[PdfPreview] Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
-              }
+
+                  if (!applier) {
+            console.warn(`[PdfPreview] Applier not available for fragment ${i + 1}`);
+          } else if (q && q.trim()) {
+            // Scan ALL pages, but yield between batches to avoid blocking.
+            const BATCH_SIZE = 10;
+            for (let start = 0; start < layers.length; start += BATCH_SIZE) {
+              const end = Math.min(start + BATCH_SIZE, layers.length);
+              for (let layerIdx = start; layerIdx < end; layerIdx += 1) {
+                const layer = layers[layerIdx];
+                    const isDebug = (i === 0 && layerIdx === 0) || (q.length > 200 && layerIdx === 0);
+                const matches = highlightInLayer(layer, q, applier, isDebug, annotationId, q);
+                    if (matches > 0) {
+                      console.log(`[PdfPreview] ✅ Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               fragmentTotal += matches;
-            }
-          });
+                      foundInLayer = true;
+                      break;
+                }
+
+                // Try cross-page match opportunistically for long fragments (likely to cross boundary)
+                if (!foundInLayer && q.length > 120 && layerIdx < layers.length - 1) {
+                  const splitMatches = highlightAcrossTwoLayers(layers, q, layerIdx, annotationId);
+                  if (splitMatches > 0) {
+                    fragmentTotal += splitMatches;
+                    foundInLayer = true;
+                    console.log(`[PdfPreview] ✅ Cross-page split match for fragment ${i + 1} across layers ${layerIdx + 1} & ${layerIdx + 2}`);
+                    break;
+                  }
+                }
+              }
+              if (foundInLayer) break;
+              // yield to UI thread between batches
+              await new Promise<void>((r) => setTimeout(r, 0));
+                  }
+                }
+                
+                if (fragmentTotal === 0) {
+                  console.warn(`[PdfPreview] ⚠️ Fragment ${i + 1} not found in any layer:`, q.substring(0, 100));
+                  console.warn(`[PdfPreview] Fragment text:`, q);
+                  // Log first 500 chars of first 10 layers for debugging
+                  layers.slice(0, Math.min(10, layers.length)).forEach((layer, idx) => {
+                    const layerText = layer.textContent || '';
+                    const firstWords = q.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
+                    const foundInLayer2 = layerText.toLowerCase().replace(/\s+/g, ' ').includes(firstWords);
+                    console.warn(`[PdfPreview] Layer ${idx + 1}:`, {
+                      textLength: layerText.length,
+                      textSample: layerText.substring(0, 500),
+                      firstWordsMatch: foundInLayer2,
+                      firstWords: firstWords
+                    });
+                  });
+                }
           console.log(`[PdfPreview] Fragment ${i + 1} total matches: ${fragmentTotal}`);
           total += fragmentTotal;
-        });
-
+                processedCount++;
+                resolve();
+              } catch (error) {
+                console.error(`[PdfPreview] Error processing fragment ${i + 1}:`, error);
+                processedCount++;
+                resolve(); // Continue even if one fragment fails
+              }
+            }, i * 10); // Stagger processing to prevent blocking
+          });
+        };
+        
+        // Process all fragments asynchronously
+        const processAllFragments = async () => {
+          const promises = list.map((q, i) => processFragment(q, i));
+          await Promise.all(promises);
+          console.log(`[PdfPreview] Completed processing ${processedCount}/${list.length} fragments, total matches: ${total}`);
+        };
+        
+        processAllFragments().then(() => {
+          // Wait a bit more for all highlights to be applied, then report coords
+          setTimeout(async () => {
         const report = highlightRecordsRef.current || [];
         if (report.length && !coordsReportedRef.current) {
           try {
@@ -1233,6 +2126,10 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           console.log('[PdfPreview] Skipping coords upload - already reported');
         }
         console.log(`Local search highlighted ${total} match(es) across ${layers.length} page(s) using ${list.length} fragment(s) from scaffolds.`);
+          }, 500); // Wait 500ms after all fragments processed
+        }).catch(error => {
+          console.error('[PdfPreview] Error in async fragment processing:', error);
+        });
       } catch (e) {
         console.error('[PdfPreview] Error in highlight strategy A:', e);
         // Strategy B: Server returns coordinates directly

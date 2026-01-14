@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
 
@@ -15,7 +15,20 @@ export default function SignInPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmSuccess, setConfirmSuccess] = useState(false);
   const router = useRouter();
+
+  // Check for email confirmation redirect success message
+  useEffect(() => {
+    const confirmedRedirect = localStorage.getItem('inkspire-email-confirmed-redirect')
+    if (confirmedRedirect) {
+      setConfirmSuccess(true)
+      setError(null)
+      localStorage.removeItem('inkspire-email-confirmed-redirect')
+      // Clear success message after 5 seconds
+      setTimeout(() => setConfirmSuccess(false), 5000)
+    }
+  }, [])
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -64,13 +77,12 @@ export default function SignInPage() {
     setLoading(true);
 
     try {
-      const endpoint = isSignUp ? '/api/auth/signup' : '/api/auth/signin';
+      const endpoint = isSignUp ? '/api/users/register' : '/api/users/login';
       const requestBody = {
         email: formData.email,
         password: formData.password,
         ...(isSignUp && {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
+          name: `${formData.firstName} ${formData.lastName}`,
         }),
       };
       
@@ -94,8 +106,8 @@ export default function SignInPage() {
       }
 
       // Store token if provided
-      if (data.token) {
-        localStorage.setItem('auth_token', data.token);
+      if (data.access_token) {
+        localStorage.setItem('auth_token', data.access_token);
       }
 
       // Store user info
@@ -205,6 +217,12 @@ export default function SignInPage() {
                 placeholder="••••••••"
                 required
               />
+            </div>
+          )}
+
+          {confirmSuccess && (
+            <div className={styles.successMessage}>
+              ✓ Email confirmed! Please sign in to continue.
             </div>
           )}
 

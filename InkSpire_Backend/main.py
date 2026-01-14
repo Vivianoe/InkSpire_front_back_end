@@ -5,6 +5,7 @@ import json
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -15,11 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React 前端地址
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React 前端地址
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security
+security = HTTPBearer()
 
 # Database
 from database import get_db
@@ -76,7 +80,7 @@ from user_service import (
     get_user_by_supabase_id,
     user_to_dict,
 )
-from auth.supabase import supabase_signup, supabase_login, AuthenticationError
+from auth.supabase import supabase_signup, supabase_login, supabase_logout, AuthenticationError
 from auth.dependencies import get_current_user
 
 # Course management
@@ -303,8 +307,13 @@ class UserResponse(BaseModel):
 class LoginResponse(BaseModel):
     user: UserResponse
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     message: str = "Login successful"
+
+
+class LogoutResponse(BaseModel):
+    message: str = "Logout successful"
 
 
 class PublicUserResponse(BaseModel):
@@ -319,7 +328,7 @@ class PublicUserResponse(BaseModel):
 # User authentication API
 # ======================================================
 
-@app.post("/api/users/register", response_model=UserResponse)
+@app.post("/api/users/register", response_model=LoginResponse)
 def register_user(
     payload: UserRegisterRequest,
     db: Session = Depends(get_db)
@@ -345,6 +354,10 @@ def register_user(
         supabase_user = supabase_response["user"]
         supabase_user_id = uuid.UUID(supabase_user.id)
 
+        # Step 2.5: Extract tokens from response
+        access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
+
         # Step 3: Create record in custom users table
         user = create_user_from_supabase(
             db=db,
@@ -354,8 +367,14 @@ def register_user(
             role=payload.role,
         )
 
-        # Step 4: Return user data
-        return UserResponse(**user_to_dict(user))
+        # Step 4: Return tokens + user data (for frontend supabase.auth.setSession)
+        return LoginResponse(
+            user=UserResponse(**user_to_dict(user)),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            message="Registration successful",
+        )
 
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -387,19 +406,51 @@ def login_user(
 
         # Step 2: Extract JWT token from response
         access_token = supabase_response["access_token"]
+        refresh_token = supabase_response["refresh_token"]
 
-        # Step 3: Get user from custom users table
-        user = get_user_by_email(db, payload.email)
+        supabase_user = supabase_response.get("user")
+        supabase_user_id = None
+        if supabase_user is not None and getattr(supabase_user, "id", None):
+            try:
+                supabase_user_id = uuid.UUID(supabase_user.id)
+            except Exception:
+                supabase_user_id = None
+
+        # Step 3: Get (or sync) user from custom users table
+        user = None
+        if supabase_user_id is not None:
+            user = get_user_by_supabase_id(db, supabase_user_id)
+
+        if not user:
+            user = get_user_by_email(db, payload.email)
+
+            if user and supabase_user_id is not None:
+                user.supabase_user_id = supabase_user_id
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            elif not user and supabase_user_id is not None:
+                meta = getattr(supabase_user, "user_metadata", None) or {}
+                resolved_name = meta.get("name") or payload.email.split("@")[0]
+                user = create_user_from_supabase(
+                    db=db,
+                    supabase_user_id=supabase_user_id,
+                    email=payload.email,
+                    name=resolved_name,
+                    role="instructor",
+                )
+
         if not user:
             raise HTTPException(
                 status_code=404,
-                detail="User profile not found. Please contact support."
+                detail="User not found in database"
             )
 
         # Step 4: Return JWT token + user data
         return LoginResponse(
             user=UserResponse(**user_to_dict(user)),
             access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             message="Login successful"
         )
@@ -410,6 +461,39 @@ def login_user(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@app.post("/api/users/logout", response_model=LogoutResponse)
+def logout_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user = Depends(get_current_user)
+):
+    """
+    Logout user by invalidating their session
+
+    Flow:
+    1. Validate JWT token (via get_current_user dependency)
+    2. Call Supabase logout to invalidate session
+    3. Return success message
+
+    Requires valid JWT token in Authorization header.
+    Usage: Authorization: Bearer <token>
+    """
+    try:
+        # Extract JWT token from Authorization header
+        access_token = credentials.credentials
+
+        # Invalidate session in Supabase
+        supabase_logout(access_token)
+
+        return LogoutResponse(message="Logout successful")
+
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
 
 
 @app.get("/api/users/me", response_model=UserResponse)
@@ -671,20 +755,14 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     discipline_info = payload.class_input.get("discipline_info")
     course_info = payload.class_input.get("course_info")
     class_info = payload.class_input.get("class_info")
-    
-    # Create course in database
-    course = create_course(
-        db=db,
-        instructor_id=instructor_uuid,
-        title=payload.title,
-        course_code=payload.course_code,
-        description=payload.description,
-    )
+
+    # Get course id from payload
+    course_id = payload.course_id
     
     # Create course basic info in database
     basic_info = create_course_basic_info(
         db=db,
-        course_id=course.id,
+        course_id=course_id,
         discipline_info_json=discipline_info,
         course_info_json=course_info,
         class_info_json=class_info,
@@ -726,7 +804,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     class_profile = create_class_profile_db(
         db=db,
         instructor_id=instructor_uuid,
-        course_id=course.id,
+        course_id=course_id,
         title=payload.title,
         description=profile_text,  # Store the full JSON string as description
         metadata_json=metadata_json,
@@ -743,7 +821,7 @@ def create_class_profile(payload: RunClassProfileRequest, db: Session = Depends(
     
     # Keep backward compatibility with memory store
     CLASS_PROFILE_REVIEWS[str(class_profile.id)] = review
-    COURSE_PROFILE_MAP[str(course.id)] = str(class_profile.id)
+    COURSE_PROFILE_MAP[str(course_id)] = str(class_profile.id)
 
     return RunClassProfileResponse(
         review=profile_to_model(class_profile, db),
@@ -2481,7 +2559,7 @@ from typing import List, Optional
 
 
 # ---- Perusall environment variables ----
-PERUSALL_BASE_URL = "https://app.perusall.com/api/v1"
+PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 
 X_INSTITUTION = os.getenv("PERUSALL_INSTITUTION")
 X_API_TOKEN = os.getenv("PERUSALL_API_TOKEN")

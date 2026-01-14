@@ -94,7 +94,8 @@ class Course(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     instructor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     title = Column(Text, nullable=False)
-    course_code = Column(Text, nullable=True)  # Course code
+    course_code = Column(Text, nullable=True)
+    perusall_course_id = Column(Text, nullable=True)  # Perusall course ID for integration
     description = Column(Text, nullable=True)  # 课程简介
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
@@ -230,7 +231,9 @@ class Reading(Base):
     title = Column(Text, nullable=False)
     file_path = Column(Text, nullable=False)  # Supabase Storage path
     source_type = Column(String(50), nullable=False)  # uploaded / reused
+    perusall_reading_id = Column(Text, nullable=True)  # Perusall document/reading ID for integration
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # Relationships
     instructor = relationship("User", foreign_keys=[instructor_id])
@@ -278,6 +281,7 @@ class Session(Base):
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
     week_number = Column(Integer, nullable=False)  # Week number (1, 2, 3...)
     title = Column(Text, nullable=True)  # Session title (optional)
+    perusall_assignment_id = Column(UUID(as_uuid=True), ForeignKey("perusall_assignments.id"), nullable=True, unique=True, index=True)  # Foreign key to perusall_assignments
     current_version_id = Column(UUID(as_uuid=True), ForeignKey("session_versions.id"), nullable=True, index=True)  # Current active version
     status = Column(String(50), nullable=False, default="draft")  # draft, active, archived, etc.
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
@@ -285,6 +289,7 @@ class Session(Base):
 
     # Relationships
     course = relationship("Course", foreign_keys=[course_id])
+    perusall_assignment = relationship("PerusallAssignment", back_populates="session", foreign_keys=[perusall_assignment_id])
     current_version = relationship("SessionVersion", foreign_keys=[current_version_id], post_update=True)
     versions = relationship(
         "SessionVersion",
@@ -297,7 +302,7 @@ class Session(Base):
         "SessionReading",
         back_populates="session",
         cascade="all, delete-orphan",
-        order_by="SessionReading.order_index"
+        order_by="SessionReading.position"
     )
 
     def __repr__(self):
@@ -315,12 +320,17 @@ class SessionReading(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False, index=True)
     reading_id = Column(UUID(as_uuid=True), ForeignKey("readings.id"), nullable=False, index=True)
+    perusall_assignment_id = Column(UUID(as_uuid=True), ForeignKey("perusall_assignments.id"), nullable=False, index=True)
+    perusall_document_id = Column(Text, nullable=True)
+    assigned_pages = Column(JSONB, nullable=True)
     added_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
-    order_index = Column(Integer, nullable=True)  # For frontend sorting (optional)
+    position = Column(Integer, nullable=False)  # Ordering within the session
+    is_active = Column(Boolean, nullable=False, default=True)
 
     # Relationships
     session = relationship("Session", back_populates="session_readings")
     reading = relationship("Reading", foreign_keys=[reading_id])
+    perusall_assignment = relationship("PerusallAssignment", foreign_keys=[perusall_assignment_id])
 
     def __repr__(self):
         return f"<SessionReading(id={self.id}, session_id={self.session_id}, reading_id={self.reading_id})>"
@@ -339,7 +349,7 @@ class SessionVersion(Base):
     session_info_json = Column(JSONB, nullable=True)  # This week's teaching information (user filled)
     assignment_info_json = Column(JSONB, nullable=True)  # This week's assignment info
     assignment_goals_json = Column(JSONB, nullable=True)  # Assignment/task goals
-    reading_ids = Column(JSONB, nullable=True)  # Array of reading IDs for this version
+    reading_ids = Column(JSONB, nullable=True)  # Deprecated: do not use; session_readings is structural source of truth
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     # Relationships
@@ -378,6 +388,30 @@ class AnnotationHighlightCoords(Base):
         return f"<AnnotationHighlightCoords(id={self.id}, annotation_version_id={self.annotation_version_id}, valid={self.valid})>"
 
 
+class PerusallAssignment(Base):
+    """
+    perusall_assignments table
+    Stores Perusall assignment data with minimal fields
+    Enforces 1:1 relationship with sessions via foreign key
+    """
+    __tablename__ = "perusall_assignments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    perusall_course_id = Column(Text, nullable=False, index=True)
+    perusall_assignment_id = Column(Text, nullable=False, index=True)
+    name = Column(Text, nullable=False)
+    document_ids = Column(JSONB, nullable=True)  # Array of Perusall reading IDs
+    parts = Column(JSONB, nullable=True)  # JSONB with documentId + page ranges
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    session = relationship("Session", back_populates="perusall_assignment", uselist=False)
+
+    def __repr__(self):
+        return f"<PerusallAssignment(id={self.id}, perusall_course_id={self.perusall_course_id}, perusall_assignment_id={self.perusall_assignment_id}, name={self.name})>"
+
+
 class PerusallMapping(Base):
     """
     perusall_mappings table
@@ -400,4 +434,26 @@ class PerusallMapping(Base):
 
     def __repr__(self):
         return f"<PerusallMapping(id={self.id}, course_id={self.course_id}, reading_id={self.reading_id}, perusall_course_id={self.perusall_course_id})>"
+
+
+class UserPerusallCredentials(Base):
+    """
+    user_perusall_credentials table
+    Stores per-user Perusall API credentials for integration
+    """
+    __tablename__ = "user_perusall_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    institution_id = Column(Text, nullable=False)
+    api_token = Column(Text, nullable=False)  # TODO: need to encrypt
+    is_validated = Column(Boolean, nullable=False, default=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<UserPerusallCredentials(id={self.id}, user_id={self.user_id}, is_validated={self.is_validated})>"
 

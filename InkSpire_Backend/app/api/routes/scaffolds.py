@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.database import get_db, get_supabase_client
 from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
@@ -27,8 +28,10 @@ from app.services.reading_service import get_reading_by_id
 from app.services.reading_chunk_service import get_reading_chunks_by_reading_id
 from app.services.class_profile_service import get_class_profile_by_course_id
 from app.services.session_service import (
-    create_session,
     get_session_by_id,
+)
+from app.services.session_service import (
+    create_session,
     get_session_readings,
     add_reading_to_session,
     get_latest_session_version,
@@ -36,6 +39,10 @@ from app.services.session_service import (
     create_session_version,
     get_next_version_number,
     set_current_version,
+)
+from app.services.session_reading_service import (
+    get_active_session_readings,
+    rederive_session_readings_for_session,
 )
 from app.workflows.scaffold_workflow import (
     build_workflow as build_scaffold_workflow,
@@ -294,38 +301,34 @@ def generate_scaffolds_with_session(
         )
     
     # Handle session_id from path parameter
-    # If session_id is "new", create a new session; otherwise use existing session
+    # If session_id is "new", return with an error demanding creatation of a new session first
+    # no need to handle the dirtystate existing session (as handled in sessions.py)
+    
     if session_id.lower() == "new":
-        # Create a new session (default week_number = 1, title = "Reading Session")
-        session = create_session(
-            db=db,
-            course_id=course_uuid,
-            week_number=1,
-            title="Reading Session",
+        raise HTTPException(
+            status_code=400,
+            detail="session_id must be an existing session UUID. Please create the session first, then call generate.",
         )
-        session_uuid = session.id
-        print(f"[generate_scaffolds_with_session] Created new session: {session_uuid}")
-    else:
-        # Use existing session
-        try:
-            session_uuid = uuid.UUID(session_id)
-            session = get_session_by_id(db, session_uuid)
-            if not session:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Session {session_id} not found",
-                )
-            # Verify session belongs to the course
-            if session.course_id != course_uuid:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Session {session_id} does not belong to course {course_id}",
-                )
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid session_id format: {session_id}. Use UUID or 'new' to create a new session",
-            )
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid session_id format: {session_id}. Must be a UUID.",
+        )
+
+    session = get_session_by_id(db, session_uuid)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found",
+        )
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session {session_id} does not belong to course {course_id}",
+        )
     
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)
@@ -341,50 +344,32 @@ def generate_scaffolds_with_session(
     # Load class_profile from database (by course_id)
     class_profile_db = get_class_profile_by_course_id(db, course_uuid)
     if not class_profile_db:
+        print(f"[generate_scaffolds_with_session] ERROR: Class profile not found for course {course_id}")
         raise HTTPException(
             status_code=404,
-            detail=f"Class profile not found for course {course_id}",
+            detail=f"Class profile not found for course {course_id}. Please create a class profile first.",
         )
     
     # Parse class_profile JSON from description field
     try:
         class_profile_json = json_module.loads(class_profile_db.description)
-    except json_module.JSONDecodeError:
+        print(f"[generate_scaffolds_with_session] Successfully parsed class profile JSON")
+    except json_module.JSONDecodeError as json_error:
+        print(f"[generate_scaffolds_with_session] ERROR: Failed to parse class profile JSON: {json_error}")
+        print(f"[generate_scaffolds_with_session] Class profile description length: {len(class_profile_db.description) if class_profile_db.description else 0}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail="Failed to parse class profile JSON from database",
+            detail=f"Failed to parse class profile JSON from database: {str(json_error)}",
         )
     
-    # Load or get current session version
-    # Get current version from session, or create one if it doesn't exist
-    session = get_session_by_id(db, session_uuid)
-    if not session:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_uuid} not found",
-        )
-    
+
+    # Get current version from session
     current_version = None
     if session.current_version_id:
         current_version = get_session_version_by_id(db, session.current_version_id)
-    
-    # If no current version exists, create version 1
-    if not current_version:
-        # Get reading IDs for this session
-        session_readings = get_session_readings(db, session_uuid)
-        reading_ids = [str(sr.reading_id) for sr in session_readings]
-        
-        current_version = create_session_version(
-            db=db,
-            session_id=session_uuid,
-            version_number=1,
-            session_info_json=None,
-            assignment_info_json=None,
-            assignment_goals_json=None,
-            reading_ids=reading_ids,
-        )
-        session = set_current_version(db, session_uuid, current_version.id)
-        print(f"[generate_scaffolds_with_session] Created new session version 1 for session {session_uuid}")
+
     
     # Load reading_chunks from database
     chunks = get_reading_chunks_by_reading_id(db, reading_uuid)
@@ -393,6 +378,61 @@ def generate_scaffolds_with_session(
             status_code=404,
             detail=f"No chunks found for reading {reading_uuid}. Please upload and process the reading first.",
         )
+
+    # Filter chunks based on assignment-derived session_readings (Perusall pages are 1-based; chunk_index is 0-based)
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+
+    def coerce_int(v: Any) -> Optional[int]:
+        try:
+            if v is None:
+                return None
+            return int(v)
+        except Exception:
+            return None
+
+    session_readings = get_active_session_readings(db, session_uuid)
+    sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
+    if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
+        start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
+        end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
+
+    # Backfill: older sessions may have session_readings rows without assignment-derived metadata.
+    if sr_for_reading and (start_page is None and end_page is None):
+        try:
+            rederive_session_readings_for_session(db, session_uuid)
+        except Exception:
+            pass
+        session_readings = get_active_session_readings(db, session_uuid)
+        sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
+        if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
+            start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
+            end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
+
+    if start_page is None and end_page is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Assignment-derived session_readings page range not available for this session/reading. "
+                "Please sync the Perusall assignment (and re-derive session_readings) first."
+            ),
+        )
+
+    filtered_chunks = chunks
+    start_idx = max(0, (start_page - 1) if start_page else 0)
+    end_idx = (end_page - 1) if end_page else None
+    if end_idx is not None and end_idx < start_idx:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid assignment page range: start_page={start_page}, end_page={end_page}",
+        )
+    if end_idx is None:
+        filtered_chunks = [c for c in chunks if c.chunk_index >= start_idx]
+    else:
+        filtered_chunks = [c for c in chunks if start_idx <= c.chunk_index <= end_idx]
+    print(
+        f"[generate_scaffolds_with_session] Using page range start_page={start_page}, end_page={end_page} -> chunk_index {start_idx}..{end_idx}; selected {len(filtered_chunks)}/{len(chunks)} chunks"
+    )
     
     # Convert to workflow format: {"chunks": [...]}
     reading_chunks_data = {
@@ -404,7 +444,7 @@ def generate_scaffolds_with_session(
                 "content": chunk.content,
                 "token_count": chunk.chunk_metadata.get("token_count") if chunk.chunk_metadata else None,
             }
-            for chunk in chunks
+            for chunk in filtered_chunks
         ]
     }
     
@@ -446,10 +486,21 @@ def generate_scaffolds_with_session(
         # This ensures we return complete information including status and history
         # Filter by both session_id and reading_id to ensure we only return annotations for this reading
         print(f"[generate_scaffolds_with_session] Re-fetching annotations with full status and history...")
+        print(f"[generate_scaffolds_with_session] Session UUID: {session_uuid}, Reading UUID: {reading_uuid}")
         all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
+        print(f"[generate_scaffolds_with_session] Found {len(all_annotations)} total annotations for session {session_uuid}")
         # Filter by reading_id to only return annotations for this specific reading
         annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
         print(f"[generate_scaffolds_with_session] Found {len(annotations)} annotations in database for reading {reading_uuid}")
+        
+        # If no annotations found, check if run_material_focus_scaffold returned any
+        if len(annotations) == 0:
+            print(f"[generate_scaffolds_with_session] WARNING: No annotations found in database after generation!")
+            print(f"[generate_scaffolds_with_session] Response from run_material_focus_scaffold had {len(response.annotation_scaffolds_review) if hasattr(response, 'annotation_scaffolds_review') else 0} scaffolds")
+            # Check if response has scaffolds that weren't saved
+            if hasattr(response, 'annotation_scaffolds_review') and len(response.annotation_scaffolds_review) > 0:
+                print(f"[generate_scaffolds_with_session] ERROR: Response has scaffolds but database query returned empty!")
+                print(f"[generate_scaffolds_with_session] This may indicate a database transaction issue or ID mismatch")
         
         # Convert to full API format with status and history
         full_scaffolds = []
@@ -469,6 +520,7 @@ def generate_scaffolds_with_session(
                 )
         
         # Get PDF URL from Supabase Storage
+        # For frontend to display PDF
         pdf_url = None
         if reading.file_path:
             try:
@@ -502,8 +554,9 @@ def generate_scaffolds_with_session(
             encoded = jsonable_encoder(response_dict)
             
             print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
-            print(f"[generate_scaffolds] Encoded content: {encoded}")
+            print(f"[generate_scaffolds] Response contains {len(full_scaffolds)} scaffolds")
             return JSONResponse(content=encoded)
+        
         except Exception as response_error:
             print(f"[generate_scaffolds_with_session] ERROR building response: {response_error}")
             import traceback
@@ -555,9 +608,14 @@ def run_material_focus_scaffold(
     session_id_str = payload.session_id or reading_info.get("session_id")
     reading_id_str = payload.reading_id or reading_info.get("reading_id")
     
+    print(f"[run_material_focus_scaffold] Received session_id_str: {session_id_str}, reading_id_str: {reading_id_str}")
+    print(f"[run_material_focus_scaffold] payload.session_id: {payload.session_id}, payload.reading_id: {payload.reading_id}")
+    print(f"[run_material_focus_scaffold] reading_info.get('session_id'): {reading_info.get('session_id')}, reading_info.get('reading_id'): {reading_info.get('reading_id')}")
+    
     # Validate and parse UUIDs
     try:
         session_id = uuid.UUID(session_id_str) if session_id_str else uuid.uuid4()
+        print(f"[run_material_focus_scaffold] Parsed session_id: {session_id}")
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
@@ -566,6 +624,7 @@ def run_material_focus_scaffold(
     
     try:
         reading_id = uuid.UUID(reading_id_str) if reading_id_str else uuid.uuid4()
+        print(f"[run_material_focus_scaffold] Parsed reading_id: {reading_id}")
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=400,
@@ -642,7 +701,7 @@ def run_material_focus_scaffold(
             start_offset = scaf.get("start_offset")
             end_offset = scaf.get("end_offset")
             page_number = scaf.get("page_number")
-            
+
             try:
                 annotation = create_scaffold_annotation(
                     db=db,
@@ -669,58 +728,6 @@ def run_material_focus_scaffold(
         import traceback
         traceback.print_exc()
         raise
-
-    # Convert to API response format
-    print(f"[run_material_focus_scaffold] Converting to API response format...")
-    api_review_objs = []
-    for idx, annotation in enumerate(saved_annotations):
-        try:
-            annotation_dict = scaffold_to_dict(annotation)
-            api_obj = scaffold_to_model(annotation_dict)
-            api_review_objs.append(api_obj)
-            print(f"[run_material_focus_scaffold] Converted annotation {idx + 1}")
-        except Exception as e:
-            print(f"[run_material_focus_scaffold] ERROR converting annotation {idx + 1}: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-
-    print(f"[run_material_focus_scaffold] Building response...")
-    try:
-        response = ReadingScaffoldsResponse(
-            annotation_scaffolds_review=api_review_objs,
-            session_id=str(session_id),
-            reading_id=str(reading_id),
-        )
-        print(f"[run_material_focus_scaffold] Response built successfully")
-        print(f"[run_material_focus_scaffold] Response annotation_scaffolds_review count: {len(response.annotation_scaffolds_review)}")
-        
-        # Try to serialize the response
-        try:
-            response_dict = response.model_dump()
-            print(f"[run_material_focus_scaffold] Response serialized successfully")
-        except Exception as serialize_error:
-            print(f"[run_material_focus_scaffold] ERROR: Response serialization failed: {serialize_error}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Response serialization failed: {str(serialize_error)}",
-            )
-        
-        print(f"[run_material_focus_scaffold] About to return response to FastAPI...")
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[run_material_focus_scaffold] ERROR in save/convert process: {e}")
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"[run_material_focus_scaffold] Full traceback:\n{error_trace}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save or convert scaffolds: {str(e)}",
-        )
 
 
 # ======================================================
@@ -770,6 +777,200 @@ def get_scaffolds_by_session(
     
     return {
         "scaffolds": scaffolds
+    }
+
+# ======================================================
+# Load Scaffolds from Session (used for testing)
+# ======================================================
+
+@router.post("/load-scaffolds-from-session")
+def load_scaffolds_from_session(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Load existing scaffolds from database by session_id and reading_id.
+    Returns data in the same format as /api/generate-scaffolds.
+    Useful for testing without API calls.
+    """
+    session_id = payload.get("session_id")
+    reading_id = payload.get("reading_id")
+    
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+    
+    reading_uuid = None
+    if reading_id:
+        try:
+            reading_uuid = uuid.UUID(reading_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+    
+    # Get annotations from database
+    all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    
+    # Filter by reading_id if provided
+    if reading_uuid:
+        annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
+    else:
+        annotations = all_annotations
+    
+    if not annotations:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scaffolds found for session_id={session_id}" + 
+                   (f" and reading_id={reading_id}" if reading_id else "")
+        )
+    
+    print(f"[load_scaffolds_from_session] Found {len(annotations)} annotations")
+    
+    # Convert to full API format with status and history (same as generate-scaffolds)
+    full_scaffolds = []
+    for idx, annotation in enumerate(annotations):
+        try:
+            print(f"[load_scaffolds_from_session] Converting annotation {idx + 1}/{len(annotations)}: {annotation.id}")
+            annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+            
+            # Ensure fragment and text fields exist
+            if not annotation_dict.get('fragment') and annotation.highlight_text:
+                annotation_dict['fragment'] = annotation.highlight_text
+            if not annotation_dict.get('text') and annotation.current_content:
+                annotation_dict['text'] = annotation.current_content
+                
+            print(f"[load_scaffolds_from_session] Annotation {idx + 1} - fragment length: {len(annotation_dict.get('fragment', ''))}, text length: {len(annotation_dict.get('text', ''))}")
+            
+            scaffold_model = ReviewedScaffoldModelWithStatusAndHistory(**annotation_dict)
+            full_scaffolds.append(scaffold_model)
+            print(f"[load_scaffolds_from_session] Successfully converted annotation {idx + 1}")
+        except Exception as convert_error:
+            print(f"[load_scaffolds_from_session] ERROR converting annotation {idx + 1} ({annotation.id}): {convert_error}")
+            import traceback
+            traceback.print_exc()
+            continue  # Skip this annotation but continue with others
+    
+    # Get PDF URL from the first annotation's reading
+    pdf_url = None
+    if annotations:
+        first_annotation = annotations[0]
+        # Get reading from database
+        from app.models.models import Reading
+        reading = db.query(Reading).filter(Reading.id == first_annotation.reading_id).first()
+        if reading and reading.file_path:
+            try:
+                supabase = get_supabase_client()
+                bucket = supabase.storage.from_("readings")
+                signed_url = bucket.create_signed_url(reading.file_path, 60 * 60 * 24 * 7)  # 7 days
+                pdf_url = signed_url.get("signedURL") if signed_url else None
+            except Exception as url_error:
+                print(f"[load_scaffolds_from_session] Warning: Failed to get PDF URL: {url_error}")
+    
+    # Build response in same format as generate-scaffolds
+    try:
+        full_response = GenerateScaffoldsResponse(
+            annotation_scaffolds_review=full_scaffolds,
+            session_id=str(session_uuid),
+            reading_id=str(annotations[0].reading_id) if annotations else reading_id or "",
+            pdf_url=pdf_url,
+        )
+        
+        response_dict = full_response.model_dump(mode='json')
+        encoded = jsonable_encoder(response_dict)
+        
+        print(f"[load_scaffolds_from_session] Returning {len(full_scaffolds)} scaffolds")
+        return JSONResponse(content=encoded)
+    except Exception as response_error:
+        print(f"[load_scaffolds_from_session] ERROR building response: {response_error}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to build response: {str(response_error)}",
+        )
+
+
+@router.get("/courses/{course_id}/sessions/{session_id}/readings/{reading_id}/scaffolds")
+def get_scaffolds_by_session_and_reading(
+    course_id: str,
+    session_id: str,
+    reading_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all scaffold annotations for a specific session and reading with full details (status and history)
+    """
+    # Validate course_id
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid course_id format: {course_id}")
+    
+    # Validate session_id
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+    
+    # Validate reading_id
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading ID format: {reading_id}")
+    
+    # Verify session belongs to the course
+    from app.models.models import Session
+    session = db.query(Session).filter(Session.id == session_uuid).first()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session.course_id != course_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} does not belong to course {course_id}"
+        )
+    
+    # Verify reading belongs to the course
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+    if reading.course_id != course_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reading {reading_id} does not belong to course {course_id}"
+        )
+    
+    # Get all annotations for the session
+    annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    
+    # Filter by reading_id and convert to API format with status and history
+    scaffolds = []
+    for annotation in annotations:
+        if annotation.reading_id == reading_uuid:
+            annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+            scaffolds.append(annotation_dict)
+    
+    # Get PDF URL for the reading
+    pdf_url = None
+    if reading.file_path:
+        try:
+            supabase_client = get_supabase_client()
+            bucket_name = "readings"
+            
+            # Try to get signed URL (expires in 7 days)
+            signed_url_response = supabase_client.storage.from_(bucket_name).create_signed_url(
+                reading.file_path,
+                expires_in=604800  # 7 days
+            )
+            pdf_url = signed_url_response.get('signedURL') if isinstance(signed_url_response, dict) else signed_url_response
+        except Exception as url_error:
+            print(f"[get_scaffolds_by_session_and_reading] Warning: Failed to get PDF URL: {url_error}")
+    
+    return {
+        "scaffolds": scaffolds,
+        "pdfUrl": pdf_url
     }
 
 
@@ -1146,17 +1347,6 @@ def export_approved_scaffolds_endpoint(
     
     return ExportedScaffoldsResponse(annotation_scaffolds=items)
 
-
-# ======================================================
-# Thread-based Review API (compatibility endpoints)
-# ======================================================
-
-@router.post("/threads/{thread_id}/review")
-def thread_review_endpoint(
-    thread_id: str,
-    payload: ThreadReviewRequest,
-    db: Session = Depends(get_db)
-):
     """
     Compatibility endpoint for thread-based review API.
     Maps to individual scaffold endpoints based on actions.
@@ -1529,4 +1719,61 @@ def save_highlight_coords(
         created_count=created_count,
         errors=errors
     )
+
+
+# ======================================================
+# Queries Endpoint (for PDF highlighting fallback)
+# ======================================================
+
+@router.get("/queries")
+def get_queries(
+    sessionId: Optional[str] = None,
+    readingId: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get scaffold fragments (queries) for PDF highlighting.
+    Used as a fallback when searchQueries prop is not provided to PdfPreview component.
+    
+    Query parameters:
+    - sessionId: Session ID to get scaffolds from
+    - readingId: Optional reading ID to filter scaffolds
+    
+    Returns:
+    - queries: Array of fragment strings from scaffolds
+    """
+    print(f"[get_queries] Called with sessionId={sessionId}, readingId={readingId}")
+    
+    if not sessionId:
+        print(f"[get_queries] No sessionId provided, returning empty queries")
+        return {"queries": []}
+    
+    try:
+        session_uuid = uuid.UUID(sessionId)
+        print(f"[get_queries] Parsed session_uuid: {session_uuid}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid sessionId format: {sessionId}")
+    
+    reading_uuid = None
+    if readingId:
+        try:
+            reading_uuid = uuid.UUID(readingId)
+            print(f"[get_queries] Parsed reading_uuid: {reading_uuid}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid readingId format: {readingId}")
+    
+    # Get scaffold annotations for the session
+    annotations = get_scaffold_annotations_by_session(db, session_uuid)
+    print(f"[get_queries] Found {len(annotations)} total annotations for session {session_uuid}")
+    
+    # Filter by reading_id if provided
+    if reading_uuid:
+        annotations = [a for a in annotations if a.reading_id == reading_uuid]
+        print(f"[get_queries] After filtering by reading_id {reading_uuid}: {len(annotations)} annotations")
+    
+    # Extract fragments (highlight_text) from annotations
+    queries = [ann.highlight_text for ann in annotations if ann.highlight_text and ann.highlight_text.strip()]
+    print(f"[get_queries] Extracted {len(queries)} queries from {len(annotations)} annotations")
+    
+    return {"queries": queries}
 

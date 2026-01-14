@@ -79,6 +79,16 @@
   color: var(--gray-400);
 }
 
+.successMessage {
+  padding: 0.75rem;
+  background-color: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 0.5rem;
+  color: #065f46;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
 .errorMessage {
   padding: 0.75rem;
   background-color: #fef2f2;

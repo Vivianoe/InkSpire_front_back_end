@@ -2,7 +2,7 @@
 Pydantic models for API request/response validation
 """
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 # ======================================================
 # Shared Models
@@ -65,7 +65,8 @@ class UserResponse(BaseModel):
 
 class LoginResponse(BaseModel):
     user: UserResponse
-    access_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     message: str = "Login successful"
 
@@ -84,10 +85,21 @@ class PublicUserResponse(BaseModel):
 
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
+    course_id: str
+    title: str
+    course_code: Optional[str] = None
+    perusall_course_id: Optional[str] = None
+    description: str
+    class_input: Dict[str, Any]
+
+
+class UpdateClassProfileRequest(BaseModel):
+    instructor_id: str
     title: str
     course_code: str
     description: str
     class_input: Dict[str, Any]
+    generated_profile: Optional[str] = None  # Optional, for updating the profile content
 
 
 class RunClassProfileResponse(BaseModel):
@@ -123,7 +135,7 @@ class ClassProfileListResponse(BaseModel):
 class CourseSummaryModel(BaseModel):
     id: str
     title: str
-    course_code: str
+    perusall_course_id: Optional[str] = None
     description: str
     class_profile_id: Optional[str] = None
 
@@ -150,6 +162,7 @@ class EditDesignConsiderationsRequest(BaseModel):
 
 class ReadingUploadItem(BaseModel):
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: Optional[str] = None  # Optional for uploaded readings (will be generated)
     source_type: str = "uploaded"
     content_base64: Optional[str] = None  # Base64 encoded PDF content for uploaded readings
@@ -162,9 +175,18 @@ class BatchUploadReadingsRequest(BaseModel):
     readings: List[ReadingUploadItem]
 
 
+class CreateReadingFromStorageRequest(BaseModel):
+    instructor_id: str
+    title: str
+    file_path: str
+    perusall_reading_id: Optional[str] = None
+    source_type: str = "uploaded"
+
+
 class ReadingResponse(BaseModel):
     id: str
     title: str
+    perusall_reading_id: Optional[str] = None
     file_path: str
     source_type: str
     course_id: Optional[str] = None
@@ -178,6 +200,30 @@ class BatchUploadReadingsResponse(BaseModel):
     created_count: int
     readings: List[ReadingResponse]
     errors: List[Dict[str, Any]]
+
+
+class CreateReadingFromStorageResponse(BaseModel):
+    success: bool
+    reading: ReadingResponse
+
+
+class CreateReadingSignedUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str = "application/pdf"
+
+
+class CreateReadingSignedUploadUrlResponse(BaseModel):
+    success: bool
+    file_path: str
+    signed_url: str
+    token: str
+
+
+class ReadingContentResponse(BaseModel):
+    id: str
+    mime_type: str = "application/pdf"
+    size_label: Optional[str] = None
+    content_base64: str
 
 
 class ReadingListResponse(BaseModel):
@@ -268,6 +314,7 @@ class PerusallAnnotationItem(BaseModel):
 
 
 class PerusallAnnotationRequest(BaseModel):
+    session_id: Optional[str] = None
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
 
@@ -323,4 +370,117 @@ class HighlightReportResponse(BaseModel):
     success: bool
     created_count: int
     errors: List[Dict[str, Any]]
+
+
+# ========================================
+# Perusall Integration Models
+# ========================================
+
+# Perusall Authentication
+class PerusallAuthRequest(BaseModel):
+    institution_id: str
+    api_token: str
+
+class PerusallAuthResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+
+
+# Perusall Courses
+class PerusallCourseItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+
+    id: str = Field(alias="_id")  # Perusall course ID - serializes as "_id"
+    name: str  # Course name
+
+class PerusallCoursesResponse(BaseModel):
+    success: bool
+    courses: List[PerusallCourseItem]
+
+
+# Perusall Course Import
+class PerusallImportRequest(BaseModel):
+    course_ids: List[str]
+
+class ImportedCourse(BaseModel):
+    perusall_course_id: str
+    inkspire_course_id: str
+    title: str
+
+class PerusallImportResponse(BaseModel):
+    success: bool
+    imported_courses: List[ImportedCourse]
+    message: Optional[str] = None
+
+
+# Perusall Course Library (Readings)
+class PerusallReadingItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+    
+    id: str = Field(alias="_id")  # Perusall reading/document ID
+    name: str  # Reading name/title
+
+
+class PerusallLibraryReadingStatus(BaseModel):
+    """Status of a Perusall reading in the local database"""
+    perusall_reading_id: str
+    perusall_reading_name: str
+    is_uploaded: bool
+    local_reading_id: Optional[str] = None  # Local reading UUID if uploaded
+    local_reading_title: Optional[str] = None
+
+
+class PerusallLibraryResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    readings: List[PerusallLibraryReadingStatus]
+    message: Optional[str] = None
+
+
+# Perusall Assignments
+class PerusallAssignmentPart(BaseModel):
+    documentId: str
+    startPage: Optional[int] = None
+    endPage: Optional[int] = None
+
+
+class PerusallAssignmentItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
+    
+    id: str = Field(alias="_id")  # Perusall assignment ID
+    name: str  # Assignment name/title
+    documentIds: Optional[List[str]] = None  # List of document IDs
+    parts: Optional[List[PerusallAssignmentPart]] = None  # List of parts with documentId, startPage, endPage
+    deadline: Optional[str] = None
+    assignTo: Optional[str] = None
+    documents: Optional[List[Dict[str, str]]] = None  # Legacy field for backward compatibility
+    has_session: Optional[bool] = False  # Whether this assignment already has a session
+
+
+class PerusallAssignmentsResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    assignments: List[PerusallAssignmentItem]
+    message: Optional[str] = None
+
+
+# Assignment Reading Status
+class AssignmentReadingStatus(BaseModel):
+    """Status of a reading in an assignment"""
+    perusall_document_id: str
+    perusall_document_name: Optional[str] = None
+    is_uploaded: bool
+    local_reading_id: Optional[str] = None  # Local reading UUID if uploaded
+    local_reading_title: Optional[str] = None
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+
+
+class AssignmentReadingsResponse(BaseModel):
+    success: bool
+    assignment_id: str
+    assignment_name: str
+    readings: List[AssignmentReadingStatus]
+    message: Optional[str] = None
 
