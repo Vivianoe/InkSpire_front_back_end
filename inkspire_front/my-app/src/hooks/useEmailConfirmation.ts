@@ -161,8 +161,12 @@ export function useEmailConfirmation({
   useEffect(() => {
     if (!enabled) return
 
+    if (typeof window === 'undefined') return
+
+    const win = globalThis as unknown as Window
+
     // Check if BroadcastChannel is supported
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    if ('BroadcastChannel' in win) {
       // Modern approach: BroadcastChannel API
       broadcastChannel.current = new BroadcastChannel(EMAIL_CONFIRMATION_CHANNEL)
 
@@ -199,8 +203,8 @@ export function useEmailConfirmation({
         }
       }
 
-      window.addEventListener('storage', handleStorageEvent)
-      return () => window.removeEventListener('storage', handleStorageEvent)
+      win.addEventListener('storage', handleStorageEvent)
+      return () => win.removeEventListener('storage', handleStorageEvent)
     }
   }, [enabled, isConfirmed, checkConfirmation])
 

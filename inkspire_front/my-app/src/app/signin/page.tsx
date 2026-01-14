@@ -97,10 +97,16 @@ export default function SignInPage() {
         body: JSON.stringify(requestBody),
       });
 
-      const data = await response.json();
+      const rawText = await response.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = { message: rawText };
+      }
 
       if (!response.ok) {
-        setError(data.message || 'An error occurred');
+        setError(data?.detail || data?.message || rawText || 'An error occurred');
         setLoading(false);
         return;
       }
