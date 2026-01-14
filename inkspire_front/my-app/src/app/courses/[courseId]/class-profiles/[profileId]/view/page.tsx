@@ -365,6 +365,7 @@ export default function ViewClassProfilePage() {
   const [isBasicInfoEditing, setIsBasicInfoEditing] = useState(false);
   const [basicInfoSnapshot, setBasicInfoSnapshot] = useState<ClassProfile | null>(null);
   const [initialDesignConsiderations, setInitialDesignConsiderations] = useState<DesignConsiderations | null>(null);
+  const [currentVersion, setCurrentVersion] = useState<any>(null);
   const [loadingVersions, setLoadingVersions] = useState(false);
 
   const isDirty = useMemo(() => {
@@ -397,6 +398,7 @@ export default function ViewClassProfilePage() {
     }
     loadProfile();
     loadInitialVersion();
+    loadCurrentVersion();
   }, [profileId]);
 
   useEffect(() => {
@@ -620,6 +622,38 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setInitialDesignConsiderations(null);
     } finally {
       setLoadingVersions(false);
+    }
+  };
+
+  const loadCurrentVersion = async () => {
+    if (!profileId || profileId === 'new') {
+      setCurrentVersion(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/class-profiles/${profileId}/versions`);
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        console.error('Failed to load versions:', data?.message);
+        return;
+      }
+
+      // Find the current version (highest version_number)
+      const versions = data.versions || [];
+      if (versions.length === 0) {
+        console.warn('No versions found');
+        setCurrentVersion(null);
+        return;
+      }
+
+      // Sort by version_number descending and take the first one
+      const current = versions.sort((a: any, b: any) => b.version_number - a.version_number)[0];
+      setCurrentVersion(current);
+    } catch (err) {
+      console.error('Failed to load current version:', err);
+      setCurrentVersion(null);
     }
   };
 
@@ -915,6 +949,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       if (isExistingProfile) {
         await loadProfile();
         await loadInitialVersion();
+        await loadCurrentVersion();
       }
 
       const nextId =
@@ -1163,6 +1198,12 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setInitialData(cloneProfile(normalized));
       setSuccess(true);
       
+      // Reload current version to get updated created_by field
+      if (hasExistingId) {
+        await loadCurrentVersion();
+        await loadInitialVersion();
+      }
+      
       const savedId =
         normalized.id && normalized.id !== 'new'
           ? normalized.id
@@ -1345,7 +1386,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                 <button
                   onClick={handleStartSession}
                   className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
-                  disabled={saving || generating || !formData || hasDesignConsiderationsChanged}
+                  disabled={saving || generating || !formData || (hasDesignConsiderationsChanged && currentVersion?.created_by !== 'llm_regenerate')}
                 >
                   {startSessionLabel}
                 </button>
