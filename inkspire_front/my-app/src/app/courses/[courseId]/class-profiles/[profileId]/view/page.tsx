@@ -384,6 +384,24 @@ export default function ViewClassProfilePage() {
     return !areDesignConsiderationsEqual(current, initialDesignConsiderations);
   }, [formData?.designConsiderations, initialDesignConsiderations]);
 
+  // Simplified logic for upload readings button disabled state
+  const isUploadReadingsDisabled = useMemo(() => {
+    // Basic loading/saving states and form validation
+    if (saving || generating || isDirty === true) {
+      return true;
+    }
+
+    // Allow upload if design considerations haven't changed
+    if (!hasDesignConsiderationsChanged) {
+      return false;
+    }
+
+    // If design changed, only allow upload if profile was generated after the change
+    // Both initial generation ("pipeline") and full regeneration ("llm_regenerate") count as valid
+    const validCreatedByValues = ['llm_regenerate', 'pipeline'];
+    return !validCreatedByValues.includes(currentVersion?.created_by);
+  }, [saving, generating, isDirty, hasDesignConsiderationsChanged, currentVersion?.created_by]);
+
   useEffect(() => {
     if (!profileId || profileId === 'new') {
       const defaults = createDefaultProfile(profileId || 'new');
@@ -589,24 +607,55 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     return createDefaultDesignConsiderations();
   };
 
-  const loadInitialVersion = async () => {
+  // Consolidated helper to merge design considerations with override data
+  const mergeDesignConsiderations = (
+    base: DesignConsiderations,
+    override?: Record<string, unknown>
+  ): DesignConsiderations => {
+    if (!override || Object.keys(override).length === 0) {
+      return normalizeDesignConsiderations(base);
+    }
+    return normalizeDesignConsiderations({
+      ...base,
+      ...(override as Record<string, string>),
+    });
+  };
+
+  // Shared helper to fetch versions array from API
+  const loadVersions = async (): Promise<any[] | null> => {
     if (!profileId || profileId === 'new') {
-      setInitialDesignConsiderations(null);
-      return;
+      return null;
     }
 
-    setLoadingVersions(true);
     try {
       const response = await fetch(`/api/class-profiles/${profileId}/versions`);
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         console.error('Failed to load versions:', data?.message);
+        return null;
+      }
+
+      return data.versions || [];
+    } catch (err) {
+      console.error('Failed to load versions:', err);
+      return null;
+    }
+  };
+
+  const loadInitialVersion = async () => {
+    setLoadingVersions(true);
+    try {
+      const versions = await loadVersions();
+
+      if (!versions || versions.length === 0) {
+        console.warn('No versions found');
+        setInitialDesignConsiderations(null);
         return;
       }
 
       // Find version_number = 1 (the very first generated version)
-      const initialVersion = data.versions?.find((v: any) => v.version_number === 1);
+      const initialVersion = versions.find((v: any) => v.version_number === 1);
 
       if (!initialVersion) {
         console.warn('No initial version (version_number = 1) found');
@@ -617,44 +666,32 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       // Extract design considerations from initial version
       const extracted = extractDesignConsiderationsFromVersion(initialVersion);
       setInitialDesignConsiderations(extracted);
-    } catch (err) {
-      console.error('Failed to load initial version:', err);
-      setInitialDesignConsiderations(null);
     } finally {
       setLoadingVersions(false);
     }
   };
 
   const loadCurrentVersion = async () => {
-    if (!profileId || profileId === 'new') {
+    const versions = await loadVersions();
+
+    if (!versions || versions.length === 0) {
+      console.warn('No versions found');
       setCurrentVersion(null);
       return;
     }
 
-    try {
-      const response = await fetch(`/api/class-profiles/${profileId}/versions`);
-      const data = await response.json().catch(() => ({}));
+    // Sort by version_number descending and take the first one
+    const current = [...versions].sort((a: any, b: any) => b.version_number - a.version_number)[0];
+    setCurrentVersion(current);
+  };
 
-      if (!response.ok) {
-        console.error('Failed to load versions:', data?.message);
-        return;
-      }
-
-      // Find the current version (highest version_number)
-      const versions = data.versions || [];
-      if (versions.length === 0) {
-        console.warn('No versions found');
-        setCurrentVersion(null);
-        return;
-      }
-
-      // Sort by version_number descending and take the first one
-      const current = versions.sort((a: any, b: any) => b.version_number - a.version_number)[0];
-      setCurrentVersion(current);
-    } catch (err) {
-      console.error('Failed to load current version:', err);
-      setCurrentVersion(null);
+  // Consolidated helper to reload all profile data after mutations
+  const reloadProfileData = async (options = { includeProfile: true }) => {
+    if (options.includeProfile) {
+      await loadProfile();
     }
+    await loadCurrentVersion();
+    await loadInitialVersion();
   };
 
   const handleFieldChange = (
@@ -709,18 +746,17 @@ const createDefaultProfile = (id: string): ClassProfile => ({
   };
 
   const updateProfileSections = (updater: (prev: ProfileSections) => ProfileSections) => {
-    setProfileSections(prevSections => {
-      const nextSections = updater(prevSections);
-      setFormData(prev =>
-        prev
-          ? {
-              ...prev,
-              generatedProfile: composeProfileNarrative(nextSections),
-            }
-          : prev
-      );
-      return nextSections;
-    });
+    // Calculate next sections outside of setState to avoid nested setState anti-pattern
+    const nextSections = updater(profileSections);
+    setProfileSections(nextSections);
+    setFormData(prev =>
+      prev
+        ? {
+            ...prev,
+            generatedProfile: composeProfileNarrative(nextSections),
+          }
+        : prev
+    );
     setSuccess(false);
   };
 
@@ -878,14 +914,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       const textToUse =
         profileText || formData.generatedProfile || DEFAULT_CLASS_PROFILE_TEXT;
       const parsedSections = parseProfileSections(textToUse);
-      const parsedDesign = normalizeDesignConsiderations(
-        design && Object.keys(design).length > 0
-          ? {
-              ...formData.designConsiderations,
-              ...(design as Record<string, string>),
-            }
-          : formData.designConsiderations
-      );
+      const parsedDesign = mergeDesignConsiderations(formData.designConsiderations, design);
 
       // Prepare merged design fields for design target
       const parsedDesignFields = parsedDesign;
@@ -947,9 +976,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
       // Reload profile data from backend to ensure we have the latest state
       if (isExistingProfile) {
-        await loadProfile();
-        await loadInitialVersion();
-        await loadCurrentVersion();
+        await reloadProfileData();
       }
 
       const nextId =
@@ -1197,11 +1224,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setFormData(cloneProfile(normalized));
       setInitialData(cloneProfile(normalized));
       setSuccess(true);
-      
+
       // Reload current version to get updated created_by field
       if (hasExistingId) {
-        await loadCurrentVersion();
-        await loadInitialVersion();
+        await reloadProfileData({ includeProfile: false });
       }
       
       const savedId =
@@ -1386,7 +1412,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                 <button
                   onClick={handleStartSession}
                   className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
-                  disabled={saving || generating || !formData || (hasDesignConsiderationsChanged && currentVersion?.created_by !== 'llm_regenerate')}
+                  disabled={isUploadReadingsDisabled}
                 >
                   {startSessionLabel}
                 </button>

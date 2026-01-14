@@ -757,6 +757,165 @@ def get_class_profile_versions_list(
     )
 
 
+def _parse_and_format_profile_json(content: str, error_context: str) -> tuple:
+    """
+    Parse, validate, and reformat profile JSON.
+    Returns (formatted_content, parsed_json).
+    """
+    try:
+        parsed = json.loads(content)
+        formatted = json.dumps(parsed, ensure_ascii=False, indent=2)
+        return formatted, parsed
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON from {error_context}: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON ({error_context})")
+
+
+def _build_metadata_json(profile_json: Dict[str, Any], class_input: Dict[str, Any], design_considerations: Dict[str, Any]) -> Dict[str, Any]:
+    """Build metadata JSON structure for class profile."""
+    return {
+        "profile": profile_json.get("profile"),
+        "design_consideration": design_considerations,
+        "class_input": class_input,
+    }
+
+
+def _handle_full_regeneration(
+    payload: LLMRefineProfileRequest,
+    profile,
+    course_uuid: uuid.UUID,
+    db: Session
+) -> tuple:
+    """
+    Handle full regeneration path with new class_input.
+    Returns (refined_content, metadata_json).
+    """
+    # Update course basic info with new data
+    discipline_info = payload.class_input.get("discipline_info")
+    course_info = payload.class_input.get("course_info")
+    class_info = payload.class_input.get("class_info")
+
+    existing_basic_info = get_course_basic_info_by_course_id(db, course_uuid)
+    if existing_basic_info:
+        update_course_basic_info(
+            db=db,
+            basic_info_id=existing_basic_info.id,
+            discipline_info_json=discipline_info,
+            course_info_json=course_info,
+            class_info_json=class_info,
+            change_type="manual_edit",
+            created_by="User",
+        )
+    else:
+        create_course_basic_info(
+            db=db,
+            course_id=course_uuid,
+            discipline_info_json=discipline_info,
+            course_info_json=course_info,
+            class_info_json=class_info,
+        )
+
+    # Run profile generation workflow
+    initial_state: ProfileWorkflowState = {
+        "class_input": payload.class_input,
+        "model": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "max_output_tokens": 4096,
+    }
+
+    graph = build_profile_workflow()
+    final_state = graph.invoke(initial_state)
+
+    review_list: List[Dict[str, Any]] = final_state["class_profile_review"]
+    if not review_list:
+        raise HTTPException(
+            status_code=500,
+            detail="class_profile_review is empty from workflow",
+        )
+
+    review = review_list[0]
+    regenerated_content = review["text"]
+
+    # Parse and validate JSON
+    refined_content, profile_json = _parse_and_format_profile_json(regenerated_content, "LLM regeneration")
+
+    # Get user-entered design considerations from class_input
+    user_design_considerations = payload.class_input.get("design_considerations", {})
+
+    # Build metadata
+    metadata_json = _build_metadata_json(profile_json, payload.class_input, user_design_considerations)
+
+    return refined_content, metadata_json
+
+
+def _handle_llm_refinement(
+    payload: LLMRefineProfileRequest,
+    profile,
+    db: Session
+) -> tuple:
+    """
+    Handle LLM refinement path with teacher prompt.
+    Returns (refined_content, metadata_json).
+    """
+    if not payload.prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Either prompt or class_input must be provided"
+        )
+
+    # Get current content
+    current_content = profile.description
+    if profile.current_version_id:
+        version = get_class_profile_version_by_id(db, profile.current_version_id)
+        if version:
+            current_content = version.content
+
+    # Create a temporary review object for LLM refinement
+    temp_review = {
+        "id": str(profile.id),
+        "text": current_content,
+        "status": "pending",
+        "history": [],
+    }
+
+    state: ProfileWorkflowState = {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "max_output_tokens": 4096,
+    }
+    llm = make_profile_llm(state)
+
+    # Refine using LLM
+    llm_refine_profile(temp_review, payload.prompt, llm)
+    raw_content = temp_review["text"]
+
+    # Parse and validate JSON
+    refined_content, refined_json = _parse_and_format_profile_json(raw_content, "LLM refinement")
+
+    # Preserve class_input from current version (LLM doesn't modify this)
+    current_class_input = None
+    if profile.metadata_json and isinstance(profile.metadata_json.get("class_input"), dict):
+        current_class_input = profile.metadata_json["class_input"]
+    elif profile.course_id:
+        # Fallback: query course_basic_info
+        basic_info = get_course_basic_info_by_course_id(db, profile.course_id)
+        if basic_info:
+            current_class_input = {
+                "discipline_info": basic_info.discipline_info_json or {},
+                "course_info": basic_info.course_info_json or {},
+                "class_info": basic_info.class_info_json or {},
+            }
+
+    metadata_json = {
+        "class_id": refined_json.get("class_id"),
+        "profile": refined_json.get("profile"),
+        "design_consideration": refined_json.get("design_consideration"),
+        "class_input": current_class_input,
+    }
+
+    return refined_content, metadata_json
+
+
 @router.post("/courses/{course_id}/class-profiles/{profile_id}/llm-refine", response_model=RunClassProfileResponse)
 def llm_refine_class_profile(
     course_id: str,
@@ -770,6 +929,13 @@ def llm_refine_class_profile(
     - If only prompt is provided: Refines existing profile with teacher guidance
     Creates a new version with the refined/regenerated content.
     """
+    # Validate inputs upfront
+    if not payload.class_input and not payload.prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Either prompt or class_input must be provided"
+        )
+
     # Verify course_id matches profile
     try:
         course_uuid = uuid.UUID(course_id)
@@ -785,147 +951,11 @@ def llm_refine_class_profile(
             detail=f"Class profile {profile_id} does not belong to course {course_id}"
         )
 
-    # Check if this is a full regeneration (class_input provided) or refinement (prompt only)
+    # Route to appropriate handler based on input
     if payload.class_input:
-        # FULL REGENERATION PATH: Run the complete LLM workflow with new class_input
-
-        # Update course basic info with new data
-        discipline_info = payload.class_input.get("discipline_info")
-        course_info = payload.class_input.get("course_info")
-        class_info = payload.class_input.get("class_info")
-
-        existing_basic_info = get_course_basic_info_by_course_id(db, course_uuid)
-        if existing_basic_info:
-            update_course_basic_info(
-                db=db,
-                basic_info_id=existing_basic_info.id,
-                discipline_info_json=discipline_info,
-                course_info_json=course_info,
-                class_info_json=class_info,
-                change_type="manual_edit",
-                created_by="User",
-            )
-        else:
-            create_course_basic_info(
-                db=db,
-                course_id=course_uuid,
-                discipline_info_json=discipline_info,
-                course_info_json=course_info,
-                class_info_json=class_info,
-            )
-
-        # Run profile generation workflow
-        initial_state: ProfileWorkflowState = {
-            "class_input": payload.class_input,
-            "model": "gemini-2.5-flash",
-            "temperature": 0.3,
-            "max_output_tokens": 4096,
-        }
-
-        graph = build_profile_workflow()
-        final_state = graph.invoke(initial_state)
-
-        review_list: List[Dict[str, Any]] = final_state["class_profile_review"]
-        if not review_list:
-            raise HTTPException(
-                status_code=500,
-                detail="class_profile_review is empty from workflow",
-            )
-
-        review = review_list[0]
-        regenerated_content = review["text"]
-
-        # Parse the regenerated JSON to extract metadata
-        try:
-            profile_json = json.loads(regenerated_content)
-
-            # Get user-entered design considerations from class_input
-            user_design_considerations = payload.class_input.get("design_considerations", {})
-
-            metadata_json = {
-                "profile": profile_json.get("profile"),
-                "design_consideration": user_design_considerations,
-                "class_input": payload.class_input,
-            }
-        except json.JSONDecodeError:
-            metadata_json = None
-
-        refined_content = regenerated_content
-
-        # Validate and re-serialize JSON to ensure proper formatting
-        try:
-            regenerated_json_obj = json.loads(refined_content)
-            refined_content = json.dumps(regenerated_json_obj, ensure_ascii=False, indent=2)
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON from LLM regeneration: {e}")
-            raise HTTPException(status_code=500, detail="LLM returned invalid JSON")
-
+        refined_content, metadata_json = _handle_full_regeneration(payload, profile, course_uuid, db)
     else:
-        # REFINEMENT PATH: Use teacher prompt to refine existing profile
-        if not payload.prompt:
-            raise HTTPException(
-                status_code=400,
-                detail="Either prompt or class_input must be provided"
-            )
-
-        # Get current content
-        current_content = profile.description
-        if profile.current_version_id:
-            version = get_class_profile_version_by_id(db, profile.current_version_id)
-            if version:
-                current_content = version.content
-
-        # Create a temporary review object for LLM refinement
-        temp_review = {
-            "id": str(profile.id),
-            "text": current_content,
-            "status": "pending",
-            "history": [],
-        }
-
-        state: ProfileWorkflowState = {
-            "model": "gemini-2.5-flash",
-            "temperature": 0.3,
-            "max_output_tokens": 4096,
-        }
-        llm = make_profile_llm(state)
-
-        # Refine using LLM
-        llm_refine_profile(temp_review, payload.prompt, llm)
-        refined_content = temp_review["text"]
-
-    # Parse refined content to extract metadata (only for refinement path)
-    # For regeneration path, metadata_json is already set
-    if not payload.class_input:
-        try:
-            refined_json = json.loads(refined_content)
-
-            # Preserve class_input from current version (LLM doesn't modify this)
-            current_class_input = None
-            if profile.metadata_json and isinstance(profile.metadata_json.get("class_input"), dict):
-                current_class_input = profile.metadata_json["class_input"]
-            elif profile.course_id:
-                # Fallback: query course_basic_info
-                basic_info = get_course_basic_info_by_course_id(db, profile.course_id)
-                if basic_info:
-                    current_class_input = {
-                        "discipline_info": basic_info.discipline_info_json or {},
-                        "course_info": basic_info.course_info_json or {},
-                        "class_info": basic_info.class_info_json or {},
-                    }
-
-            metadata_json = {
-                "class_id": refined_json.get("class_id"),
-                "profile": refined_json.get("profile"),
-                "design_consideration": refined_json.get("design_consideration"),
-                "class_input": current_class_input,
-            }
-
-            # Re-serialize JSON to ensure proper formatting
-            refined_content = json.dumps(refined_json, ensure_ascii=False, indent=2)
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON from LLM refinement: {e}")
-            raise HTTPException(status_code=500, detail="LLM returned invalid JSON")
+        refined_content, metadata_json = _handle_llm_refinement(payload, profile, db)
 
     # Create a new version with refined/regenerated content
     created_by = "llm_regenerate" if payload.class_input else "llm_refine"
@@ -957,44 +987,3 @@ def llm_refine_class_profile(
     "course_id": str(profile.course_id) if profile.course_id else None,
     "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
     }
-
-
-@router.get("/class-profiles/{profile_id}/versions", response_model=ClassProfileVersionsListResponse)
-def get_class_profile_versions_list(
-    profile_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Get all versions for a class profile.
-    Returns versions ordered by version_number descending (newest first).
-    """
-    # Validate profile_id
-    try:
-        profile_uuid = uuid.UUID(profile_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid profile_id format: {profile_id}"
-        )
-
-    # Verify profile exists
-    profile = get_class_profile_by_id(db, profile_uuid)
-    if not profile:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Class profile {profile_id} not found"
-        )
-
-    # Get all versions using existing service function
-    versions = get_class_profile_versions(db, profile_uuid)
-
-    # Convert to response format
-    versions_data = []
-    for version in versions:
-        version_dict = class_profile_version_to_dict(version)
-        versions_data.append(ClassProfileVersionResponse(**version_dict))
-
-    return ClassProfileVersionsListResponse(
-        versions=versions_data,
-        total=len(versions_data)
-    )
