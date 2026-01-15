@@ -1456,6 +1456,7 @@ def get_assignment_readings_status(
     Get readings status for a specific Perusall assignment.
     Fetches assignment details from Perusall API, extracts documentIds from parts,
     and checks upload status for each reading.
+    TODO: can be updated; same as the reading upload page?
     """
     try:
         # Validate course_id
