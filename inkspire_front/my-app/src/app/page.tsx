@@ -271,7 +271,7 @@ export default function DashboardPage() {
             </>
           )}
 
-          <div className={styles.newClassButtonContainer}>
+          {/*<div className={styles.newClassButtonContainer}>
             <button
               className={styles.newClassButton}
               onClick={handleNewClass}
@@ -281,6 +281,7 @@ export default function DashboardPage() {
               Create New Class Profile
             </button>
           </div>
+          */}
         </div>
       </div>
     </AuthGuard>

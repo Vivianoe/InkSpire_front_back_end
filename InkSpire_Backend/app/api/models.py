@@ -104,6 +104,7 @@ class UpdateClassProfileRequest(BaseModel):
 
 class RunClassProfileResponse(BaseModel):
     review: ReviewedProfileModel
+    profile: Optional[Dict[str, Any]] = None
     course_id: Optional[str] = None  # Course ID associated with this profile
     instructor_id: Optional[str] = None  # Instructor ID associated with this profile
 
@@ -311,6 +312,7 @@ class PerusallAnnotationItem(BaseModel):
     rangeStart: int
     rangeEnd: int
     fragment: str
+    text: Optional[str] = None
 
 
 class PerusallAnnotationRequest(BaseModel):

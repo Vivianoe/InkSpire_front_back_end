@@ -380,27 +380,16 @@ def get_class_profile(
                 detail=f"Invalid course_id format: {course_id}"
             )
     
-    return RunClassProfileResponse(
-        review=profile_to_model(profile, db),
-        course_id=str(profile.course_id) if profile.course_id else None,
-        instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
-    )
-    
-    # Refresh profile to get updated data
-    db.refresh(profile)
-    
     # Build frontend profile format
     profile_text = _get_current_profile_text(profile, db)
     frontend_profile = _build_frontend_profile(profile_text, str(profile.id))
-    
-    return {
-        "profile_id": str(profile.id),
-        "status": getattr(profile, "status", None) or "OK",
-        "profile": frontend_profile,
-        "review": profile_to_model(profile, db).model_dump(),
-        "course_id": str(profile.course_id) if profile.course_id else None,
-        "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
-    }
+
+    return RunClassProfileResponse(
+        review=profile_to_model(profile, db),
+        profile=frontend_profile,
+        course_id=str(profile.course_id) if profile.course_id else None,
+        instructor_id=str(profile.instructor_id) if profile.instructor_id else None,
+    )
 
 
 @router.get("/class-profiles/instructor/{instructor_id}", response_model=ClassProfileListResponse)
