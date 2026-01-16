@@ -26,9 +26,9 @@ app.add_middleware(
 security = HTTPBearer()
 
 # Database
-from database import get_db
-from models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
-from reading_scaffold_service import (
+from app.core.database import get_db
+from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
+from app.services.reading_scaffold_service import (
     create_scaffold_annotation,
     get_scaffold_annotation,
     get_scaffold_annotations_by_session,
@@ -73,7 +73,7 @@ class ReviewedProfileModel(BaseModel):
 
 
 # User authentication
-from user_service import (
+from app.services.user_service import (
     create_user_from_supabase,
     get_user_by_id,
     get_user_by_email,
@@ -84,7 +84,7 @@ from auth.supabase import supabase_signup, supabase_login, supabase_logout, Auth
 from auth.dependencies import get_current_user
 
 # Course management
-from course_service import (
+from app.services.course_service import (
     create_course,
     create_course_basic_info,
     get_course_by_id,
@@ -96,7 +96,7 @@ from course_service import (
 )
 
 # Class profile management
-from class_profile_service import (
+from app.services.class_profile_service import (
     create_class_profile as create_class_profile_db,
     create_class_profile_version,
     get_class_profile_by_id,
@@ -111,7 +111,7 @@ from class_profile_service import (
 )
 
 # Reading management
-from reading_service import (
+from app.services.reading_service import (
     create_reading,
     get_reading_by_id,
     get_readings_by_course,
@@ -120,27 +120,24 @@ from reading_service import (
     update_reading,
     reading_to_dict,
 )
-from reading_chunk_service import (
+from app.services.reading_chunk_service import (
     create_reading_chunks_batch,
     get_reading_chunks_by_reading_id,
     reading_chunk_to_dict,
 )
 
 # Session management
-from session_service import (
+from app.services.session_service import (
     create_session,
     get_session_by_id,
     get_session_readings,
     add_reading_to_session,
-    save_session_item,
-    get_session_item_by_session_and_reading,
-    create_session_item,
     session_to_dict,
-    session_item_to_dict,
+    session_reading_to_dict,
 )
 
 # Reading scaffold workflow
-from workflow import (
+from app.workflows.scaffold_workflow import (
     build_workflow as build_scaffold_workflow,
     WorkflowState as ScaffoldWorkflowState,
     approve_scaffold,
@@ -152,7 +149,7 @@ from workflow import (
 )
 
 # Class profile workflow
-from profile import (
+from app.workflows.profile_workflow import (
     build_workflow as build_profile_workflow,
     WorkflowState as ProfileWorkflowState,
     approve_profile,
@@ -162,6 +159,10 @@ from profile import (
     make_llm as make_profile_llm,
 )
 
+# API Routes
+from app.api.routes.perusall import router as perusall_router
+from app.api.routes.readings import router as readings_router
+
 # ======================================================
 # FastAPI app
 # ======================================================
@@ -170,6 +171,10 @@ app = FastAPI(
     title="Reading & Class Profile Workflows API",
     version="0.1.0",
 )
+
+# Include API routers
+app.include_router(perusall_router, prefix="/api", tags=["perusall"])
+app.include_router(readings_router, prefix="/api", tags=["readings"])
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
