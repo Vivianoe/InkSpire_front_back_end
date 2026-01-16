@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
 from app.core.database import get_db
-from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, PerusallMapping, Reading, User
+from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, ScaffoldAnnotationVersion, PerusallMapping, Reading, User
 from app.services.course_service import get_course_by_id
 from app.services.reading_service import get_reading_by_id, get_readings_by_course
 from app.services.session_service import (
@@ -56,7 +56,8 @@ PERUSALL_BASE_URL = "https://app.perusall.com/legacy-api"
 
 X_INSTITUTION = os.getenv("PERUSALL_INSTITUTION")
 X_API_TOKEN = os.getenv("PERUSALL_API_TOKEN")
-USER_ID = os.getenv("PERUSALL_USER_ID")
+#USER_ID = os.getenv("PERUSALL_USER_ID")
+PERUSALL_POST_USER_ID = os.getenv("PERUSALL_POST_USER_ID")
 
 
 def normalize_name(name: str) -> str:
@@ -423,9 +424,25 @@ def post_annotations_to_perusall(
                 if not coords_list:
                     print(f"[post_annotations_to_perusall] No highlight_coords found for annotation {annotation_id_str}")
                     continue
-                
+
+                version_ids = list({coord.annotation_version_id for coord in coords_list if coord.annotation_version_id})
+                version_content_by_id: Dict[str, str] = {}
+                if version_ids:
+                    try:
+                        versions = (
+                            db.query(ScaffoldAnnotationVersion)
+                            .filter(ScaffoldAnnotationVersion.id.in_(version_ids))
+                            .all()
+                        )
+                        version_content_by_id = {
+                            str(v.id): (v.content or "") for v in versions
+                        }
+                    except Exception as e:
+                        print(f"[post_annotations_to_perusall] Failed to load scaffold content for annotation {annotation_id_str}: {e}")
+
                 # Convert each coord to PerusallAnnotationItem
                 for coord in coords_list:
+                    scaffold_text = version_content_by_id.get(str(coord.annotation_version_id), "")
                     annotations_to_post.append(PerusallAnnotationItem(
                         positionStartX=coord.position_start_x,
                         positionStartY=coord.position_start_y,
@@ -436,6 +453,7 @@ def post_annotations_to_perusall(
                         rangeStart=coord.range_start,
                         rangeEnd=coord.range_end,
                         fragment=coord.fragment,
+                        text=scaffold_text,
                     ))
                 
                 print(f"[post_annotations_to_perusall] Found {len(coords_list)} highlight_coords for annotation {annotation_id_str}")
@@ -538,7 +556,6 @@ def post_annotations_to_perusall(
 
     created_ids = []
     errors = []
-    # remove user_id from payload as it's not needed
     try:
         with requests.Session() as session:
             headers = {
@@ -547,9 +564,15 @@ def post_annotations_to_perusall(
             }
 
             for idx, item in enumerate(annotations_to_post):
+                post_user_id = (PERUSALL_POST_USER_ID)
+                if not post_user_id:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+                    )
                 payload = {
                     "documentId": perusall_document_id,
-                    "userId": USER_ID,
+                    "userId": post_user_id,
                     "positionStartX": item.positionStartX,
                     "positionStartY": item.positionStartY,
                     "positionEndX": item.positionEndX,
@@ -559,7 +582,7 @@ def post_annotations_to_perusall(
                     "rangeStart": item.rangeStart,
                     "rangeEnd": item.rangeEnd,
                     "fragment": item.fragment,
-                    "text": f"<p>{item.fragment}</p>"
+                    "text": f"<p>{(item.text or item.fragment)}</p>"
                 }
 
                 try:
@@ -1433,6 +1456,7 @@ def get_assignment_readings_status(
     Get readings status for a specific Perusall assignment.
     Fetches assignment details from Perusall API, extracts documentIds from parts,
     and checks upload status for each reading.
+    TODO: can be updated; same as the reading upload page?
     """
     try:
         # Validate course_id

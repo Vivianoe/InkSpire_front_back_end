@@ -37,7 +37,6 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [instructorId, setInstructorId] = useState<string | null>(null);
-  console.log('DASHBOARD PAGE LOADED - Create New Course button should exist');
 
   const getUserFirstName = () => {
     if (!user) return 'Instructor'
@@ -271,7 +270,7 @@ export default function DashboardPage() {
             </>
           )}
 
-          <div className={styles.newClassButtonContainer}>
+          {/*<div className={styles.newClassButtonContainer}>
             <button
               className={styles.newClassButton}
               onClick={handleNewClass}
@@ -281,6 +280,7 @@ export default function DashboardPage() {
               Create New Class Profile
             </button>
           </div>
+          */}
         </div>
       </div>
     </AuthGuard>

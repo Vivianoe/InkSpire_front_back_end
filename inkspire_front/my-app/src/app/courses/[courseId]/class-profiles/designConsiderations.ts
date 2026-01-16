@@ -150,3 +150,26 @@ export const formatDesignConsiderations = (data: DesignConsiderations): string =
     .filter(Boolean)
     .join('\n\n');
 
+/**
+ * Compare two design considerations objects for exact equality across all 5 fields.
+ * Normalizes values before comparison (trims whitespace, treats empty string/null/undefined as equivalent).
+ */
+export const areDesignConsiderationsEqual = (
+  a: DesignConsiderations | null | undefined,
+  b: DesignConsiderations | null | undefined
+): boolean => {
+  // Handle null/undefined cases
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  // Normalize both objects
+  const normalizedA = normalizeDesignConsiderations(a);
+  const normalizedB = normalizeDesignConsiderations(b);
+
+  // Compare all 5 fields
+  return DESIGN_CONSIDERATION_FIELDS.every(field => {
+    const valueA = (normalizedA[field.key] || '').trim();
+    const valueB = (normalizedB[field.key] || '').trim();
+    return valueA === valueB;
+  });
+};

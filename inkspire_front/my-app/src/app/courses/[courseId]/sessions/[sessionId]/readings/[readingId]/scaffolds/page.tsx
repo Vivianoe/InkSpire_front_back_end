@@ -86,6 +86,8 @@ export default function ScaffoldPage() {
   const sessionId = params.sessionId as string;
   const readingId = params.readingId as string;
   const enableNavigation = searchParams.get('navigation') === 'true';
+  const initialPageParam = searchParams.get('page') || searchParams.get('startPage');
+  const initialPage = initialPageParam ? Number(initialPageParam) : undefined;
 
   // Load navigation data from sessionStorage
   useEffect(() => {
@@ -1042,6 +1044,7 @@ ${scaffold.text || 'No scaffold text available'}
               readingId={readingId}
               scrollToFragment={activeFragment || undefined}
               scaffoldIndex={activeFragment ? processedScaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
+              initialPage={Number.isFinite(initialPage) && (initialPage as number) > 0 ? (initialPage as number) : undefined}
             />
           </div>
         </div>

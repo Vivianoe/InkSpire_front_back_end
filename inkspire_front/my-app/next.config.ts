@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     proxyTimeout: 600_000,
   },
   async rewrites() {
+    
     return [
       {
         source: "/health",
