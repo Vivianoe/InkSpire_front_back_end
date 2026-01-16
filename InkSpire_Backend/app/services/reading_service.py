@@ -64,6 +64,7 @@ def get_readings_by_course(db: Session, course_id: uuid.UUID) -> List[Reading]:
     except ProgrammingError as e:
         # Backward compatibility: DB may not yet have readings.deleted_at
         if "deleted_at" in str(e):
+            db.rollback()
             return db.query(Reading).filter(
                 Reading.course_id == course_id,
             ).order_by(desc(Reading.created_at)).all()
@@ -81,6 +82,7 @@ def get_readings_by_instructor(db: Session, instructor_id: uuid.UUID) -> List[Re
         ).order_by(desc(Reading.created_at)).all()
     except ProgrammingError as e:
         if "deleted_at" in str(e):
+            db.rollback()
             return db.query(Reading).filter(
                 Reading.instructor_id == instructor_id,
             ).order_by(desc(Reading.created_at)).all()
@@ -103,6 +105,7 @@ def get_readings_by_course_and_instructor(
         ).order_by(desc(Reading.created_at)).all()
     except ProgrammingError as e:
         if "deleted_at" in str(e):
+            db.rollback()
             return db.query(Reading).filter(
                 Reading.course_id == course_id,
                 Reading.instructor_id == instructor_id,

@@ -19,6 +19,7 @@ import {
   formatDesignConsiderations,
   normalizeDesignConsiderations,
   parseDesignConsiderations,
+  areDesignConsiderationsEqual,
 } from '@/app/courses/[courseId]/class-profiles/designConsiderations';
 import styles from './page.module.css';
 
@@ -60,6 +61,7 @@ type RegenerateTarget =
   | 'design';
 
 type ProfileSections = {
+  overall: string;
   discipline: string;
   course: string;
   class: string;
@@ -67,6 +69,7 @@ type ProfileSections = {
 };
 
 const EMPTY_PROFILE_SECTIONS: ProfileSections = {
+  overall: '',
   discipline: '',
   course: '',
   class: '',
@@ -192,6 +195,7 @@ const SECTION_REGEX = /(Discipline level:|Course level:|Class level:|Design Cons
 const parseProfileSections = (rawText?: string): ProfileSections => {
   const text = rawText?.trim() ? rawText : DEFAULT_CLASS_PROFILE_TEXT;
   const sections: ProfileSections = {
+    overall: '',
     discipline: '',
     course: '',
     class: '',
@@ -199,7 +203,10 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
   };
 
   const chunks = text.split(SECTION_REGEX);
-  let intro = chunks.shift()?.trim() ?? '';
+  const intro = chunks.shift()?.trim() ?? '';
+
+  // Store intro as overall_profile
+  sections.overall = intro;
 
   for (let i = 0; i < chunks.length; i += 2) {
     const heading = chunks[i];
@@ -207,8 +214,7 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
 
     switch (heading) {
       case 'Discipline level:':
-        sections.discipline = [intro, body].filter(Boolean).join('\n\n').trim();
-        intro = '';
+        sections.discipline = body;
         break;
       case 'Course level:':
         sections.course = body;
@@ -224,15 +230,16 @@ const parseProfileSections = (rawText?: string): ProfileSections => {
     }
   }
 
-  if (intro && !sections.discipline) {
-    sections.discipline = intro;
-  }
-
   return sections;
 };
 
 const composeProfileNarrative = (sections: ProfileSections, includeDesign = true) => {
   const blocks: string[] = [];
+
+  // Add overall_profile first (no header)
+  if (sections.overall?.trim()) {
+    blocks.push(sections.overall.trim());
+  }
 
   PROFILE_STACK_LEVELS.forEach(level => {
     const text = sections[level]?.trim();
@@ -357,17 +364,50 @@ export default function ViewClassProfilePage() {
   });
   const [isBasicInfoEditing, setIsBasicInfoEditing] = useState(false);
   const [basicInfoSnapshot, setBasicInfoSnapshot] = useState<ClassProfile | null>(null);
+  const [initialDesignConsiderations, setInitialDesignConsiderations] = useState<DesignConsiderations | null>(null);
+  const [currentVersion, setCurrentVersion] = useState<any>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   const isDirty = useMemo(() => {
     if (!formData || !initialData) return false;
     return JSON.stringify(formData) !== JSON.stringify(initialData);
   }, [formData, initialData]);
 
+  const hasDesignConsiderationsChanged = useMemo(() => {
+    // If no initial version found, allow button (edge case: profile created before versioning)
+    if (!initialDesignConsiderations) {
+      return false;
+    }
+
+    // Compare current design considerations with initial version
+    const current = formData?.designConsiderations;
+    return !areDesignConsiderationsEqual(current, initialDesignConsiderations);
+  }, [formData?.designConsiderations, initialDesignConsiderations]);
+
+  // Simplified logic for upload readings button disabled state
+  const isUploadReadingsDisabled = useMemo(() => {
+    // Basic loading/saving states and form validation
+    if (saving || generating || isDirty === true) {
+      return true;
+    }
+
+    // Allow upload if design considerations haven't changed
+    if (!hasDesignConsiderationsChanged) {
+      return false;
+    }
+
+    // If design changed, only allow upload if profile was generated after the change
+    // Both initial generation ("pipeline") and full regeneration ("llm_regenerate") count as valid
+    const validCreatedByValues = ['llm_regenerate', 'pipeline'];
+    return !validCreatedByValues.includes(currentVersion?.created_by);
+  }, [saving, generating, isDirty, hasDesignConsiderationsChanged, currentVersion?.created_by]);
+
   useEffect(() => {
     if (!profileId || profileId === 'new') {
       const defaults = createDefaultProfile(profileId || 'new');
       setFormData(cloneProfile(defaults));
       setInitialData(cloneProfile(defaults));
+      setInitialDesignConsiderations(null);
       setLoading(false);
       setError(null);
       setSuccess(false);
@@ -375,6 +415,8 @@ export default function ViewClassProfilePage() {
       return;
     }
     loadProfile();
+    loadInitialVersion();
+    loadCurrentVersion();
   }, [profileId]);
 
   useEffect(() => {
@@ -546,6 +588,112 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
   };
 
+  const extractDesignConsiderationsFromVersion = (version: any): DesignConsiderations => {
+    // Try metadata_json first (stored directly)
+    if (version.metadata_json?.design_consideration) {
+      return normalizeDesignConsiderations(version.metadata_json.design_consideration);
+    }
+
+    // Fallback: parse content JSON
+    try {
+      const contentJson = JSON.parse(version.content);
+      if (contentJson.design_consideration) {
+        return normalizeDesignConsiderations(contentJson.design_consideration);
+      }
+    } catch (e) {
+      console.error('Failed to parse version content:', e);
+    }
+
+    return createDefaultDesignConsiderations();
+  };
+
+  // Consolidated helper to merge design considerations with override data
+  const mergeDesignConsiderations = (
+    base: DesignConsiderations,
+    override?: Record<string, unknown>
+  ): DesignConsiderations => {
+    if (!override || Object.keys(override).length === 0) {
+      return normalizeDesignConsiderations(base);
+    }
+    return normalizeDesignConsiderations({
+      ...base,
+      ...(override as Record<string, string>),
+    });
+  };
+
+  // Shared helper to fetch versions array from API
+  const loadVersions = async (): Promise<any[] | null> => {
+    if (!profileId || profileId === 'new') {
+      return null;
+    }
+
+    try {
+      const response = await fetch(`/api/class-profiles/${profileId}/versions`);
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        console.error('Failed to load versions:', data?.message);
+        return null;
+      }
+
+      return data.versions || [];
+    } catch (err) {
+      console.error('Failed to load versions:', err);
+      return null;
+    }
+  };
+
+  const loadInitialVersion = async () => {
+    setLoadingVersions(true);
+    try {
+      const versions = await loadVersions();
+
+      if (!versions || versions.length === 0) {
+        console.warn('No versions found');
+        setInitialDesignConsiderations(null);
+        return;
+      }
+
+      // Find version_number = 1 (the very first generated version)
+      const initialVersion = versions.find((v: any) => v.version_number === 1);
+
+      if (!initialVersion) {
+        console.warn('No initial version (version_number = 1) found');
+        setInitialDesignConsiderations(null);
+        return;
+      }
+
+      // Extract design considerations from initial version
+      const extracted = extractDesignConsiderationsFromVersion(initialVersion);
+      setInitialDesignConsiderations(extracted);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const loadCurrentVersion = async () => {
+    const versions = await loadVersions();
+
+    if (!versions || versions.length === 0) {
+      console.warn('No versions found');
+      setCurrentVersion(null);
+      return;
+    }
+
+    // Sort by version_number descending and take the first one
+    const current = [...versions].sort((a: any, b: any) => b.version_number - a.version_number)[0];
+    setCurrentVersion(current);
+  };
+
+  // Consolidated helper to reload all profile data after mutations
+  const reloadProfileData = async (options = { includeProfile: true }) => {
+    if (options.includeProfile) {
+      await loadProfile();
+    }
+    await loadCurrentVersion();
+    await loadInitialVersion();
+  };
+
   const handleFieldChange = (
     section: 'disciplineInfo' | 'courseInfo' | 'classInfo',
     field: string,
@@ -598,24 +746,23 @@ const createDefaultProfile = (id: string): ClassProfile => ({
   };
 
   const updateProfileSections = (updater: (prev: ProfileSections) => ProfileSections) => {
-    setProfileSections(prevSections => {
-      const nextSections = updater(prevSections);
-      setFormData(prev =>
-        prev
-          ? {
-              ...prev,
-              generatedProfile: composeProfileNarrative(nextSections),
-            }
-          : prev
-      );
-      return nextSections;
-    });
+    // Calculate next sections outside of setState to avoid nested setState anti-pattern
+    const nextSections = updater(profileSections);
+    setProfileSections(nextSections);
+    setFormData(prev =>
+      prev
+        ? {
+            ...prev,
+            generatedProfile: composeProfileNarrative(nextSections),
+          }
+        : prev
+    );
     setSuccess(false);
   };
 
   const getEditableTextForLevel = (level: ProfileLevel) =>
     level === 'all'
-      ? composeProfileNarrative(profileSections, false)
+      ? profileSections.overall
       : profileSections[level];
 
   const handleStartProfileEdit = () => {
@@ -630,27 +777,41 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setProfileDraft('');
   };
 
-  const handleSaveProfileEdit = () => {
-    if (!editingProfileLevel) return;
+  const handleSaveProfileEdit = async () => {
+    if (!editingProfileLevel || !formData) return;
 
+    // Create the updated sections first
+    let updatedSections: ProfileSections;
     if (editingProfileLevel === 'all') {
-      const parsed = parseProfileSections(profileDraft);
-      updateProfileSections(prev => ({
-        ...prev,
-        discipline: parsed.discipline,
-        course: parsed.course,
-        class: parsed.class,
-      }));
+      updatedSections = {
+        ...profileSections,
+        overall: profileDraft.trim(),
+      };
     } else {
-      const normalized = profileDraft.trim();
-      updateProfileSections(prev => ({
-        ...prev,
-        [editingProfileLevel]: normalized,
-      }));
+      updatedSections = {
+        ...profileSections,
+        [editingProfileLevel]: profileDraft.trim(),
+      };
     }
 
-    setEditingProfileLevel(null);
-    setProfileDraft('');
+    // Create the new profile text
+    const newProfileText = composeProfileNarrative(updatedSections);
+
+    // Create updated form data with the new profile text
+    const updatedFormData = {
+      ...formData,
+      generatedProfile: newProfileText,
+    };
+
+    // Save first - handleSave will update state on success
+    const success = await handleSave(updatedFormData);
+
+    // Only clear editing state if save succeeded
+    if (success) {
+      setEditingProfileLevel(null);
+      setProfileDraft('');
+    }
+    // If save failed, user remains in edit mode with their draft intact
   };
 
   const handleStartDesignEdit = () => {
@@ -665,16 +826,37 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setDesignDraft({ ...designConsiderations });
   };
 
-  const handleSaveDesignEdit = () => {
+  const handleSaveDesignEdit = async () => {
+    if (!formData) return;
+
+    // Step 1: Normalize the design considerations
     const normalized = normalizeDesignConsiderations(designDraft);
-    setDesignConsiderations(normalized);
-    setFormData(prev => (prev ? { ...prev, designConsiderations: normalized } : prev));
-    updateProfileSections(prev => ({
-      ...prev,
+
+    // Step 2: Create updated profile sections with new design text
+    const updatedSections: ProfileSections = {
+      ...profileSections,
       design: formatDesignConsiderations(normalized),
-    }));
-    setEditingDesign(false);
-    setDesignDraft({ ...normalized });
+    };
+
+    // Step 3: Compose the new profile narrative (includes design section)
+    const newProfileText = composeProfileNarrative(updatedSections);
+
+    // Step 4: Create updated form data with both designConsiderations AND generatedProfile
+    const updatedFormData: ClassProfile = {
+      ...formData,
+      designConsiderations: normalized,
+      generatedProfile: newProfileText,
+    };
+
+    // Step 5: Save to database - handleSave will update state on success
+    const success = await handleSave(updatedFormData);
+
+    // Step 6: Only clear editing state if save succeeded
+    if (success) {
+      setEditingDesign(false);
+      setDesignDraft({ ...normalized });
+    }
+    // If save failed, user remains in edit mode with their draft intact
   };
 
   const handleRegenerate = async (target: RegenerateTarget) => {
@@ -688,18 +870,39 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setDesignDraft(createDefaultDesignConsiderations());
 
     try {
-      const payload = buildRunClassProfileRequest(formData);
-      
       // Get course_id from URL params, or use "new" to create a new course
       const courseIdForRequest = urlCourseId || 'new';
-      
-      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+
+      // Determine if this is an existing profile or a new one
+      const isExistingProfile = profileId && profileId !== 'new';
+
+      let response;
+
+      if (isExistingProfile) {
+        // For existing profiles, use llm-refine endpoint with class_input for full regeneration
+        response = await fetch(
+          `/api/courses/${courseIdForRequest}/class-profiles/${profileId}/llm-refine`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              class_input: buildClassInputPayload(formData),
+            }),
+          }
+        );
+      } else {
+        // For new profiles, use create endpoint
+        const payload = buildRunClassProfileRequest(formData);
+        response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      }
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -711,39 +914,27 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       const textToUse =
         profileText || formData.generatedProfile || DEFAULT_CLASS_PROFILE_TEXT;
       const parsedSections = parseProfileSections(textToUse);
-      const parsedDesign = normalizeDesignConsiderations(
-        design && Object.keys(design).length > 0
-          ? {
-              ...formData.designConsiderations,
-              ...(design as Record<string, string>),
-            }
-          : parseDesignConsiderations(textToUse)
-      );
+      const parsedDesign = mergeDesignConsiderations(formData.designConsiderations, design);
+
+      // Prepare merged design fields for design target
+      const parsedDesignFields = parsedDesign;
+      const mergedDesignFields: DesignConsiderations = {
+        ...parsedDesignFields,
+        userDefined:
+          (formData?.designConsiderations.userDefined?.trim() ?? '') ||
+          parsedDesignFields.userDefined ||
+          '',
+      };
 
       if (target === 'design') {
-        const parsedDesignFields = parsedDesign;
-        const mergedDesignFields: DesignConsiderations = {
-          ...parsedDesignFields,
-          userDefined:
-            (formData?.designConsiderations.userDefined?.trim() ?? '') ||
-            parsedDesignFields.userDefined ||
-            '',
-        };
         setDesignConsiderations(mergedDesignFields);
         if (!editingDesign) {
           setDesignDraft({ ...mergedDesignFields });
         }
-        setFormData(prev =>
-          prev
-            ? {
-                ...prev,
-                designConsiderations: mergedDesignFields,
-              }
-            : prev
-        );
       }
 
-      updateProfileSections(prev => {
+      // Update profile sections directly (no nested setState!)
+      setProfileSections(prev => {
         switch (target) {
           case 'profile-all':
             return {
@@ -764,6 +955,29 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             return prev;
         }
       });
+
+      // Update formData once for all targets (no nesting!)
+      setFormData(prev => {
+        if (!prev) return prev;
+
+        if (target === 'design') {
+          return {
+            ...prev,
+            designConsiderations: mergedDesignFields,
+          };
+        } else {
+          return {
+            ...prev,
+            generatedProfile: textToUse,
+            designConsiderations: parsedDesign,
+          };
+        }
+      });
+
+      // Reload profile data from backend to ensure we have the latest state
+      if (isExistingProfile) {
+        await reloadProfileData();
+      }
 
       const nextId =
         data.class_profile?.id ||
@@ -899,7 +1113,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     };
 
     const hasContent =
-      trimmedSections.discipline || trimmedSections.course || trimmedSections.class;
+      profileSections.overall.trim() ||
+      trimmedSections.discipline ||
+      trimmedSections.course ||
+      trimmedSections.class;
 
     if (!hasContent) {
       return (
@@ -910,19 +1127,18 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
 
     if (activeProfileLevel === 'all') {
+      const overallText = profileSections.overall.trim();
+      if (!overallText) {
+        return (
+          <div className={styles.profileEmptyState}>
+            Add details on the left or regenerate with AI to populate this view.
+          </div>
+        );
+      }
       return (
-        <div className={styles.profileStack}>
-          {PROFILE_STACK_LEVELS.map(level => {
-            const text = trimmedSections[level];
-            if (!text) return null;
-            return (
-              <section key={level} className={styles.profileSectionBlock}>
-                <p className={styles.profileSectionLabel}>{PROFILE_SECTION_LABELS[level]}</p>
-                <p className={styles.profileTextBlock}>{text}</p>
-              </section>
-            );
-          })}
-        </div>
+        <section className={styles.profileSectionBlock}>
+          <p className={styles.profileTextBlock}>{overallText}</p>
+        </section>
       );
     }
 
@@ -952,24 +1168,45 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     }
   };
 
-  const handleSave = async (options: SaveOptions = {}) => {
-    if (!formData) return false;
+  const handleSave = async (
+    dataToSave?: ClassProfile,
+    options: SaveOptions = {}
+  ): Promise<boolean> => {
+    const saveData = dataToSave || formData;
+    if (!saveData) return false;
+    
     setSaving(true);
     setError(null);
     try {
-      const hasExistingId = formData.id && formData.id !== 'new';
+      const hasExistingId = saveData.id && saveData.id !== 'new';
+
+      // Get course_id from URL params
+      const courseIdParam = urlCourseId;
+
+      if (hasExistingId && !courseIdParam) {
+        throw new Error('course_id is required for updating profile');
+      }
+
       const endpoint = hasExistingId
-        ? `/api/class-profiles/${formData.id}`
+        ? `/api/courses/${courseIdParam}/class-profiles/${saveData.id}/edit`
         : '/api/class-profiles';
-      const method = hasExistingId ? 'PUT' : 'POST';
-      const payload = {
-        instructor_id: MOCK_INSTRUCTOR_ID,
-        title: formData.courseInfo.courseName || 'Untitled Class',
-        course_code: formData.courseInfo.courseCode || 'TBD',
-        description: formData.courseInfo.description || 'Draft class profile',
-        class_input: buildClassInputPayload(formData),
-        generated_profile: formData.generatedProfile,
-      };
+      const method = 'POST'; // Backend uses POST for both create and edit
+
+      const payload = hasExistingId
+        ? {
+            // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
+            text: serializeProfileForExport(saveData)
+          }
+        : {
+            // For create endpoint - matches existing structure
+            // Get instructor_id from URL params instead of using mock
+            instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+            title: saveData.courseInfo.courseName || 'Untitled Class',
+            course_code: saveData.courseInfo.courseCode || 'TBD',
+            description: saveData.courseInfo.description || 'Draft class profile',
+            class_input: buildClassInputPayload(saveData),
+            generated_profile: saveData.generatedProfile,
+          };
 
       const response = await fetch(endpoint, {
         method,
@@ -982,18 +1219,24 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to save profile');
       }
-      const savedProfile = (data?.profile as ClassProfile | undefined) ?? formData;
+      const savedProfile = (data?.profile as ClassProfile | undefined) ?? saveData;
       const normalized = normalizeProfile(savedProfile);
       setFormData(cloneProfile(normalized));
       setInitialData(cloneProfile(normalized));
       setSuccess(true);
+
+      // Reload current version to get updated created_by field
+      if (hasExistingId) {
+        await reloadProfileData({ includeProfile: false });
+      }
+      
       const savedId =
         normalized.id && normalized.id !== 'new'
           ? normalized.id
           : typeof data?.profile?.id === 'string'
             ? data.profile.id
             : hasExistingId
-              ? formData.id
+              ? saveData.id
               : undefined;
 
       if (!hasExistingId && savedId && savedId !== 'new' && profileId === 'new') {
@@ -1023,7 +1266,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            updated_text: serializeProfileForExport(formData),
+            updated_text: serializeProfileForExport(saveData),
           }),
         });
         const approveData = await approveResponse.json().catch(() => ({}));
@@ -1055,7 +1298,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
   };
 
   const handleSaveClick = () => {
-    void handleSave({ approveAfter: true });
+    void handleSave(undefined, { approveAfter: true });
   };
 
   const handleStartSession = () => {
@@ -1165,13 +1408,27 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             </button>*/}
 
             {isCreateMode ? null : (
-              <button
-                onClick={handleStartSession}
-                className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
-                disabled={saving || generating || !formData}
-              >
-                {startSessionLabel}
-              </button>
+              <div className={styles.regenerateInfoWrapper}>
+                <button
+                  onClick={handleStartSession}
+                  className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
+                  disabled={isUploadReadingsDisabled}
+                >
+                  {startSessionLabel}
+                </button>
+                {hasDesignConsiderationsChanged && (
+                  <span
+                    tabIndex={0}
+                    className={styles.regenerateInfoTrigger}
+                    aria-label="You must regenerate the class profile after editing Design Considerations before uploading readings."
+                  >
+                    <InformationCircleIcon aria-hidden="true" className={styles.regenerateInfoIcon} />
+                    <span className={styles.regenerateTooltip}>
+                      You must regenerate the class profile after editing Design Considerations before uploading readings.
+                    </span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -1259,16 +1516,34 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                         >
                           {field.label}
                         </label>
-                        <textarea
-                          id={`design-${field.key}`}
-                          className={styles.designTextarea}
-                          rows={field.key === 'userDefined' ? 4 : 3}
-                          value={designDraft[field.key]}
-                          onChange={(event) =>
-                            handleDesignDraftChange(field.key, event.target.value)
-                          }
-                          placeholder={field.placeholder}
-                        />
+                        {field.key === 'theoryFocus' && field.options ? (
+                          <select
+                            id={`design-${field.key}`}
+                            className={`${styles.editInput} ${styles.editSelect}`}
+                            value={designDraft[field.key]}
+                            onChange={(event) =>
+                              handleDesignDraftChange(field.key, event.target.value)
+                            }
+                          >
+                            <option value="">Select theory focus</option>
+                            {field.options.map(option => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <textarea
+                            id={`design-${field.key}`}
+                            className={styles.designTextarea}
+                            rows={field.key === 'userDefined' ? 4 : 3}
+                            value={designDraft[field.key]}
+                            onChange={(event) =>
+                              handleDesignDraftChange(field.key, event.target.value)
+                            }
+                            placeholder={field.placeholder}
+                          />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1336,7 +1611,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     type="button"
                     className={styles.sectionButton}
                     onClick={handleStartBasicInfoEdit}
-                    disabled={!formData || saving || generating}
+                    disabled={!formData || saving || generating || busyRegenerating}
                   >
                     Edit
                   </button>

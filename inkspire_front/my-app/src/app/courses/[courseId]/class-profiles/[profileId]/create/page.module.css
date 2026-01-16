@@ -175,6 +175,15 @@
   color: var(--gray-400);
 }
 
+.input:disabled,
+.textarea:disabled,
+select:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+  background-color: var(--gray-100);
+  color: var(--gray-500);
+}
+
 .textarea {
   resize: vertical;
   min-height: 6rem;

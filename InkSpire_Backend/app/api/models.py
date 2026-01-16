@@ -85,7 +85,7 @@ class PublicUserResponse(BaseModel):
 
 class RunClassProfileRequest(BaseModel):
     instructor_id: str
-    course_id: str
+    # course_id: str
     title: str
     course_code: Optional[str] = None
     perusall_course_id: Optional[str] = None
@@ -103,10 +103,12 @@ class UpdateClassProfileRequest(BaseModel):
 
 
 class RunClassProfileResponse(BaseModel):
+    profile: Optional[Dict[str, Any]] = None  # Complete profile with all basic info (disciplineInfo, courseInfo, classInfo)
     review: ReviewedProfileModel
-    profile: Optional[Dict[str, Any]] = None
     course_id: Optional[str] = None  # Course ID associated with this profile
     instructor_id: Optional[str] = None  # Instructor ID associated with this profile
+    profile_id: Optional[str] = None  # Profile ID
+    status: Optional[str] = None  # Status (e.g., "CREATED", "OK")
 
 
 class ApproveProfileRequest(BaseModel):
@@ -118,7 +120,8 @@ class EditProfileRequest(BaseModel):
 
 
 class LLMRefineProfileRequest(BaseModel):
-    prompt: str
+    prompt: Optional[str] = None
+    class_input: Optional[Dict[str, Any]] = None
 
 
 class ExportedClassProfileResponse(BaseModel):
@@ -127,6 +130,21 @@ class ExportedClassProfileResponse(BaseModel):
 
 class ClassProfileListResponse(BaseModel):
     profiles: List[Dict[str, Any]]
+
+
+class ClassProfileVersionResponse(BaseModel):
+    id: str
+    class_profile_id: str
+    version_number: int
+    content: str
+    metadata_json: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ClassProfileVersionsListResponse(BaseModel):
+    versions: List[ClassProfileVersionResponse]
+    total: int
 
 
 # ======================================================

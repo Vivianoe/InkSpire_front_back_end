@@ -303,13 +303,6 @@ CREATE TRIGGER update_sessions_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Add foreign key constraint for current_version_id
-ALTER TABLE sessions 
-ADD CONSTRAINT fk_sessions_current_version 
-FOREIGN KEY (current_version_id) 
-REFERENCES session_versions(id) 
-ON DELETE SET NULL;
-
 -- Create annotation_highlight_coords table
 CREATE TABLE IF NOT EXISTS annotation_highlight_coords (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

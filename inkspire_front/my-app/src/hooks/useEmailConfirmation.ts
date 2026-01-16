@@ -160,13 +160,10 @@ export function useEmailConfirmation({
    */
   useEffect(() => {
     if (!enabled) return
-
     if (typeof window === 'undefined') return
 
-    const win = globalThis as unknown as Window
-
     // Check if BroadcastChannel is supported
-    if ('BroadcastChannel' in win) {
+    if ('BroadcastChannel' in window) {
       // Modern approach: BroadcastChannel API
       broadcastChannel.current = new BroadcastChannel(EMAIL_CONFIRMATION_CHANNEL)
 
@@ -184,6 +181,12 @@ export function useEmailConfirmation({
       }
     } else {
       // Fallback: localStorage events for older browsers
+      // Check if localStorage is available
+      if (!('localStorage' in window)) {
+        console.warn('localStorage not available, cross-tab sync disabled')
+        return
+      }
+
       const handleStorageEvent = (e: StorageEvent) => {
         if (e.key === LEGACY_CONFIRMATION_SIGNAL_KEY && e.newValue && !isConfirmed) {
           try {
@@ -203,8 +206,17 @@ export function useEmailConfirmation({
         }
       }
 
-      win.addEventListener('storage', handleStorageEvent)
-      return () => win.removeEventListener('storage', handleStorageEvent)
+      // Safe event listener attachment
+      try {
+        // Explicitly type window to avoid type inference issues
+        const windowWithEvents = window as Window
+        windowWithEvents.addEventListener('storage', handleStorageEvent)
+        return () => {
+          windowWithEvents.removeEventListener('storage', handleStorageEvent)
+        }
+      } catch (err) {
+        console.error('Failed to attach storage event listener:', err)
+      }
     }
   }, [enabled, isConfirmed, checkConfirmation])
 

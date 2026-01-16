@@ -424,6 +424,7 @@ export default function EditClassProfilePage() {
       }
 
       const review = data.review ?? null;
+      const completeProfile = data.profile; // Backend returns reconstructed profile with all basic info
 
       const { profileText, design } = extractProfileFromReview(review);
       const textToUse = profileText || formData.generatedProfile || '';
@@ -443,9 +444,8 @@ export default function EditClassProfilePage() {
       );
 
       const mergedDesign: DesignConsiderations = {
-        ...parsedDesign,
-        userDefined:
-          formData.designConsiderations.userDefined?.trim() || parsedDesign.userDefined || '',
+        ...parsedDesign,                           // LLM-generated values as base
+		    ...formData.designConsiderations,          // User-entered values override LLM
       };
 
       const nextId =
@@ -455,12 +455,18 @@ export default function EditClassProfilePage() {
         formData.id ||
         'new';
 
-      setFormData(prev => ({
-        ...prev,
-        id: typeof nextId === 'string' ? nextId : prev.id,
+      // Update formData with complete profile including all basic info from backend
+      const updatedFormData = {
+        ...formData,
+        id: typeof nextId === 'string' ? nextId : formData.id,
+        disciplineInfo: completeProfile?.disciplineInfo || formData.disciplineInfo,
+        courseInfo: completeProfile?.courseInfo || formData.courseInfo,
+        classInfo: completeProfile?.classInfo || formData.classInfo,
         generatedProfile: textToUse,
         designConsiderations: mergedDesign,
-      }));
+      };
+
+      setFormData(updatedFormData);
 
       if (typeof nextId === 'string' && nextId !== 'new') {
         // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
@@ -564,6 +570,7 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Computer Science (pre-filled), Educational Psychology, Mechanical Engineering"
                   required
+                  disabled={generating}
                 />
               </div>
 
@@ -579,6 +586,7 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Department of Computer and Information Science (pre-filled), School of Education"
                   required
+                  disabled={generating}
                 />
               </div>
 
@@ -593,6 +601,7 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Summarize the discipline’s focus areas, core questions, and primary methods."
                   rows={3}
+                  disabled={generating}
                 />
               </div>
             </div>
@@ -614,6 +623,7 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Introduction to Universal Design for Learning"
                   required
+                  disabled={generating}
                 />
               </div>
 
@@ -629,6 +639,7 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., EDU 101"
                   required
+                  disabled={generating}
                 />
               </div>
 
@@ -643,6 +654,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('courseInfo', 'credits', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 3"
+                  disabled={generating}
                 />
               </div>
 
@@ -657,6 +669,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('courseInfo', 'prerequisites', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., EDU 100 or instructor permission"
+                  disabled={generating}
                 />
               </div>
 
@@ -671,6 +684,7 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Outline the learning objectives or expected outcomes."
                   rows={3}
+                  disabled={generating}
                 />
               </div>
 
@@ -685,6 +699,7 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Describe the assessment methods (exams, projects, participation, etc.)."
                   rows={3}
+                  disabled={generating}
                 />
               </div>
 
@@ -697,6 +712,7 @@ export default function EditClassProfilePage() {
                   value={formData.courseInfo.deliveryMode}
                   onChange={(e) => handleInputChange('courseInfo', 'deliveryMode', e.target.value)}
                   className={styles.input}
+                  disabled={generating}
                 >
                   <option value="">Select delivery mode</option>
                   <option value="in-person">In-person</option>
@@ -716,6 +732,7 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Enter a detailed description of the course..."
                   rows={4}
+                  disabled={generating}
                 />
               </div>
             </div>
@@ -735,6 +752,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'semester', e.target.value)}
                   className={styles.input}
                   required
+                  disabled={generating}
                 >
                   <option value="">Select semester</option>
                   <option value="Fall">Fall</option>
@@ -756,6 +774,7 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., 2024"
                   required
+                  disabled={generating}
                 />
               </div>
 
@@ -770,6 +789,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'section', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., A, B, 01"
+                  disabled={generating}
                 />
               </div>
 
@@ -784,6 +804,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'enrollment', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 25"
+                  disabled={generating}
                 />
               </div>
 
@@ -798,6 +819,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'meetingDays', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., MWF, TTh"
+                  disabled={generating}
                 />
               </div>
 
@@ -812,6 +834,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'meetingTime', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 10:00 AM - 11:30 AM"
+                  disabled={generating}
                 />
               </div>
 
@@ -826,6 +849,7 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'location', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., Building A, Room 201"
+                  disabled={generating}
                 />
               </div>
 
@@ -840,6 +864,7 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Provide background information about this class and its learners."
                   rows={3}
+                  disabled={generating}
                 />
               </div>
 
@@ -852,6 +877,7 @@ export default function EditClassProfilePage() {
                   value={formData.classInfo.priorKnowledge}
                   onChange={(e) => handleInputChange('classInfo', 'priorKnowledge', e.target.value)}
                   className={styles.input}
+                  disabled={generating}
                 >
                   {PRIOR_KNOWLEDGE_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>
@@ -881,6 +907,7 @@ export default function EditClassProfilePage() {
                         className={styles.input}
                         value={formData.designConsiderations[field.key]}
                         onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
+                        disabled={generating}
                       >
                         <option value="">Select {field.label.toLowerCase()}</option>
                         {selectOptions.map(option => (
@@ -897,6 +924,7 @@ export default function EditClassProfilePage() {
                         value={formData.designConsiderations[field.key]}
                         onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
                         placeholder={field.placeholder}
+                        disabled={generating}
                       />
                     )}
                   </div>

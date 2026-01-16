@@ -102,7 +102,7 @@ def create_course_basic_info(
     class_info_json: Optional[Dict[str, Any]] = None,
 ) -> CourseBasicInfo:
     """
-    Create a new course basic info record
+    Create a new course basic info record and initial version
     """
     basic_info = CourseBasicInfo(
         id=uuid.uuid4(),
@@ -111,11 +111,28 @@ def create_course_basic_info(
         course_info_json=course_info_json,
         class_info_json=class_info_json,
     )
-    
+
     db.add(basic_info)
     db.commit()
     db.refresh(basic_info)
-    
+
+    # Create initial version (version 1)
+    initial_version = CourseBasicInfoVersion(
+        id=uuid.uuid4(),
+        basic_info_id=basic_info.id,
+        version_number=1,
+        discipline_json=discipline_info_json,
+        course_info_json=course_info_json,
+        class_info_json=class_info_json,
+        change_type="pipeline",
+        created_by="pipeline",
+    )
+
+    db.add(initial_version)
+    basic_info.current_version_id = initial_version.id
+    db.commit()
+    db.refresh(basic_info)
+
     return basic_info
 
 
@@ -153,10 +170,18 @@ def update_course_basic_info(
     max_version = db.query(CourseBasicInfoVersion).filter(
         CourseBasicInfoVersion.basic_info_id == basic_info_id
     ).order_by(desc(CourseBasicInfoVersion.version_number)).first()
-    
+
     next_version = (max_version.version_number + 1) if max_version else 1
-    
-    # Create version record with old values
+
+    # Update basic info with NEW values FIRST
+    if discipline_info_json is not None:
+        basic_info.discipline_info_json = discipline_info_json
+    if course_info_json is not None:
+        basic_info.course_info_json = course_info_json
+    if class_info_json is not None:
+        basic_info.class_info_json = class_info_json
+
+    # Then create version record with NEW values (consistent with class_profile_versions)
     version = CourseBasicInfoVersion(
         id=uuid.uuid4(),
         basic_info_id=basic_info_id,
@@ -167,17 +192,8 @@ def update_course_basic_info(
         change_type=change_type,
         created_by=created_by or "pipeline",
     )
-    
+
     db.add(version)
-    
-    # Update basic info
-    if discipline_info_json is not None:
-        basic_info.discipline_info_json = discipline_info_json
-    if course_info_json is not None:
-        basic_info.course_info_json = course_info_json
-    if class_info_json is not None:
-        basic_info.class_info_json = class_info_json
-    
     basic_info.current_version_id = version.id
     
     db.commit()
