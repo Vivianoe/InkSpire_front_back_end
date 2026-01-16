@@ -73,10 +73,13 @@ interface PdfPreviewProps {
   sessionId?: string | null;
   // Course ID for RESTful API calls
   courseId?: string | null;
+  // Optional initial page (1-based) to scroll to after rendering
+  initialPage?: number;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const initialPageScrolledRef = useRef<number | null>(null);
   
   // Debug logging
   useEffect(() => {
@@ -2156,6 +2159,32 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }, 100);
     return () => window.clearTimeout(id);
   }, [scrollToFragment, scaffoldIndex, renderedPages]);
+
+  // Scroll to initial page (1-based) once pages are attached
+  useEffect(() => {
+    if (!initialPage || initialPage <= 0) return;
+    if (!containerRef.current) return;
+    if (initialPageScrolledRef.current === initialPage) return;
+    if (!pageElements.has(initialPage)) return;
+
+    const id = window.setTimeout(() => {
+      try {
+        const el = containerRef.current?.querySelector(
+          `[data-page="${initialPage}"]`
+        ) as HTMLElement | null;
+
+        if (el && containerRef.current) {
+          containerRef.current.scrollTo({
+            top: Math.max(0, el.offsetTop - 16),
+            behavior: 'smooth',
+          });
+          initialPageScrolledRef.current = initialPage;
+        }
+      } catch {}
+    }, 100);
+
+    return () => window.clearTimeout(id);
+  }, [initialPage, pageElements]);
 
   // Handle pending scroll requests after highlighting completes
   useEffect(() => {

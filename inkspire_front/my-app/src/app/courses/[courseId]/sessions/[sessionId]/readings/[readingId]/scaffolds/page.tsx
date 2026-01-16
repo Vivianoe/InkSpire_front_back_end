@@ -86,6 +86,8 @@ export default function ScaffoldPage() {
   const sessionId = params.sessionId as string;
   const readingId = params.readingId as string;
   const enableNavigation = searchParams.get('navigation') === 'true';
+  const initialPageParam = searchParams.get('page') || searchParams.get('startPage');
+  const initialPage = initialPageParam ? Number(initialPageParam) : undefined;
 
   // Load navigation data from sessionStorage
   useEffect(() => {
@@ -519,10 +521,23 @@ export default function ScaffoldPage() {
       setGenerating(true);
       setError(null);
       
+      
+      
+      /* for demo only 
+      const payload = {
+        instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
+        session_id: '2b812623-3080-410b-87ec-7572833831f2',
+        reading_id: 'a7dce828-418f-49a6-9aab-c5c6f243787e',
+      };
+      
+      const generateUrl = `/api/load-scaffolds-from-session`;*/
+
+      /*real endpoint*/
       const payload = {
         instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
       };
-      
+
+
       const generateUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`;
       
       const response = await fetch(generateUrl, {
@@ -1029,6 +1044,7 @@ ${scaffold.text || 'No scaffold text available'}
               readingId={readingId}
               scrollToFragment={activeFragment || undefined}
               scaffoldIndex={activeFragment ? processedScaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
+              initialPage={Number.isFinite(initialPage) && (initialPage as number) > 0 ? (initialPage as number) : undefined}
             />
           </div>
         </div>

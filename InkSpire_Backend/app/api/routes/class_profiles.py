@@ -427,7 +427,7 @@ def get_class_profile(
     Optionally filter by course_id to verify the profile belongs to the course.
     """
     profile = get_profile_or_404(profile_id, db)
-    
+
     # If course_id is provided, verify it matches
     if course_id:
         try:
@@ -442,10 +442,10 @@ def get_class_profile(
                 status_code=400,
                 detail=f"Invalid course_id format: {course_id}"
             )
-    
+
     # Refresh profile to get updated data
     db.refresh(profile)
-    
+
     # Build frontend profile format
     profile_text = _get_current_profile_text(profile, db)
     frontend_profile = _build_frontend_profile(
@@ -453,7 +453,7 @@ def get_class_profile(
         str(profile.id),
         db=db,
         course_id=profile.course_id,
-        metadata_json=profile.metadata_json  # Pass metadata_json for design considerations
+        metadata_json=profile.metadata_json
     )
 
     return {

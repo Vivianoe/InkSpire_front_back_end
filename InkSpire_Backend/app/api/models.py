@@ -103,7 +103,7 @@ class UpdateClassProfileRequest(BaseModel):
 
 
 class RunClassProfileResponse(BaseModel):
-    profile: Dict[str, Any]  # Complete profile with all basic info (disciplineInfo, courseInfo, classInfo)
+    profile: Optional[Dict[str, Any]] = None  # Complete profile with all basic info (disciplineInfo, courseInfo, classInfo)
     review: ReviewedProfileModel
     course_id: Optional[str] = None  # Course ID associated with this profile
     instructor_id: Optional[str] = None  # Instructor ID associated with this profile
@@ -330,6 +330,7 @@ class PerusallAnnotationItem(BaseModel):
     rangeStart: int
     rangeEnd: int
     fragment: str
+    text: Optional[str] = None
 
 
 class PerusallAnnotationRequest(BaseModel):

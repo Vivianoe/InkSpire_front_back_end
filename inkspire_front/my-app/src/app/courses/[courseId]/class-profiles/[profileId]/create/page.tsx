@@ -100,7 +100,7 @@ const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
     disciplineName: 'Education',
     department: 'Graduate School of Education',
     fieldDescription:
-      'Explores computational theory, software engineering practices, and data-driven inquiry within education research contexts.',
+      'Explores educational theory, teaching and learning practices, and problem-driven inquiry within education research contexts.',
   },
   courseInfo: {
     courseName: 'Learning Sciences: Past, Present, and Future',
@@ -120,7 +120,7 @@ const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
     section: 'A',
     meetingDays: 'MW',
     meetingTime: '10:00 AM - 11:30 AM',
-    location: 'Engineering Building, Room 210',
+    location: 'STIT Building, Room 210',
     enrollment: '30',
     background: 'Cohort includes graduate students from education discipline.',
     priorKnowledge: 'mixed',

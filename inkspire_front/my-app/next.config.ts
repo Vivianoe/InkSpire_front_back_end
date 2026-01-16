@@ -1,33 +1,26 @@
 import type { NextConfig } from "next";
-import path from "path";
+
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
-  turbopack: {
-    /*root: path.resolve(__dirname),*/
-    rules: {
-      '*.worker.js': {
-        loaders: ['file-loader'],
-        as: '*.js',
-      },
-    },
-  },
   experimental: {
-    proxyTimeout: 600_000, // 600 seconds (10 minutes) for long-running scaffold generation
+    proxyTimeout: 600_000,
   },
-  // Proxy API requests to FastAPI backend
   async rewrites() {
+    
     return [
       {
-        source: '/health',
-        destination: 'http://localhost:8000/health',
+        source: "/health",
+        destination: `${BACKEND_URL}/health`,
       },
       {
-        source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        source: "/api/:path*",
+        destination: `${BACKEND_URL}/api/:path*`,
       },
       {
-        source: '/threads/:path*',
-        destination: 'http://localhost:8000/threads/:path*',
+        source: "/threads/:path*",
+        destination: `${BACKEND_URL}/threads/:path*`,
       },
     ];
   },

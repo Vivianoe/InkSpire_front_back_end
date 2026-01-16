@@ -451,6 +451,14 @@ export default function SessionCreationPage() {
 
       // Navigate to first reading's scaffold page with full reading list for navigation
       const firstReadingId = selectedReadingIds[0];
+      const firstReadingStartPage = selectedPerusallAssignmentId
+        ? assignmentReadings.find((ar) => String(ar.local_reading_id || '') === String(firstReadingId))?.start_page
+        : undefined;
+      const scaffoldNavParams = new URLSearchParams();
+      scaffoldNavParams.set('navigation', 'true');
+      if (firstReadingStartPage && Number(firstReadingStartPage) > 0) {
+        scaffoldNavParams.set('page', String(firstReadingStartPage));
+      }
       
       // Store reading navigation data in sessionStorage
       if (typeof window !== 'undefined') {
@@ -474,7 +482,7 @@ export default function SessionCreationPage() {
         const existingScaffolds = await existingScaffoldsResponse.json();
         if (existingScaffolds.scaffolds && existingScaffolds.scaffolds.length > 0) {
           // Scaffolds already exist, navigate to display them with navigation context
-          router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
+          router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?${scaffoldNavParams.toString()}`);
           return;
         }
       }
@@ -496,7 +504,7 @@ export default function SessionCreationPage() {
       }
       
       // Navigate to scaffold display page with navigation context
-      router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`);
+      router.push(`/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?${scaffoldNavParams.toString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
     } finally {
@@ -598,6 +606,14 @@ export default function SessionCreationPage() {
 
       // Navigate to first reading's scaffold page with full reading list for navigation
       const firstReadingId = selectedReadingIds[0];
+      const firstReadingStartPage = selectedPerusallAssignmentId
+        ? assignmentReadings.find((ar) => String(ar.local_reading_id || '') === String(firstReadingId))?.start_page
+        : undefined;
+      const scaffoldNavParams = new URLSearchParams();
+      scaffoldNavParams.set('navigation', 'true');
+      if (firstReadingStartPage && Number(firstReadingStartPage) > 0) {
+        scaffoldNavParams.set('page', String(firstReadingStartPage));
+      }
       
       // Store reading navigation data in sessionStorage
       if (typeof window !== 'undefined') {
@@ -619,7 +635,7 @@ export default function SessionCreationPage() {
 
       // Navigate to scaffolds page (user can generate scaffolds there)
       router.push(
-        `/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?navigation=true`
+        `/courses/${courseId}/sessions/${sessionId}/readings/${firstReadingId}/scaffolds?${scaffoldNavParams.toString()}`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start working on readings. Please try again.');
