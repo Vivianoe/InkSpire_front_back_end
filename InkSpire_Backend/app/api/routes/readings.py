@@ -46,6 +46,18 @@ router = APIRouter()
 MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
+def _size_label(num_bytes: int) -> str:
+    try:
+        b = int(num_bytes)
+    except Exception:
+        return "unknown"
+    if b >= 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f} MB"
+    if b >= 1024:
+        return f"{b / 1024:.1f} KB"
+    return f"{b} B"
+
+
 @router.post("/courses/{course_id}/readings/from-storage", response_model=CreateReadingFromStorageResponse)
 def create_reading_from_storage(
     course_id: str,
@@ -555,3 +567,49 @@ def get_readings(
         readings_list.append(ReadingResponse(**reading_dict))
     
     return ReadingListResponse(readings=readings_list, total=len(readings_list))
+
+
+@router.get("/readings/{reading_id}/content", response_model=ReadingContentResponse)
+def get_reading_content(
+    reading_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Return the PDF file content as base64 for a given reading.
+
+    Used by the frontend PdfPreview as a fallback when it cannot load a PDF URL directly.
+    """
+    try:
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid reading_id format: {reading_id}")
+
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+
+    file_path = getattr(reading, "file_path", None)
+    if not file_path or not str(file_path).strip():
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} has no file_path")
+
+    try:
+        supabase_client = get_supabase_client()
+        pdf_bytes = supabase_client.storage.from_("readings").download(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to download reading content: {str(e)}")
+
+    if not pdf_bytes:
+        raise HTTPException(status_code=404, detail=f"No content found at {file_path}")
+
+    try:
+        content_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to base64 encode content: {str(e)}")
+
+    mime_type = getattr(reading, "mime_type", None) or "application/pdf"
+    return ReadingContentResponse(
+        id=str(reading.id),
+        mime_type=mime_type,
+        size_label=_size_label(len(pdf_bytes)),
+        content_base64=content_b64,
+    )
