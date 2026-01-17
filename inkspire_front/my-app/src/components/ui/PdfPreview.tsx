@@ -51,10 +51,7 @@ const loadRangy = async () => {
 interface PdfPreviewProps {
   file?: File | null;
   url?: string | null;  // PDF URL from Supabase Storage
-<<<<<<< HEAD
   readingId?: string | null;  // Reading ID for fallback when URL fails and for RESTful API calls
-=======
->>>>>>> origin/ui
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
@@ -76,13 +73,10 @@ interface PdfPreviewProps {
   sessionId?: string | null;
   // Course ID for RESTful API calls
   courseId?: string | null;
-  // Optional initial page (1-based) to scroll to after rendering
-  initialPage?: number;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const initialPageScrolledRef = useRef<number | null>(null);
   
   // Debug logging
   useEffect(() => {
@@ -586,7 +580,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     };
   }, [pdfDoc]);
 
-  
   // Highlight/search helpers
   const highlightRecordsRef = useRef<any[]>([]);
   const pendingScrollRef = useRef<string | null>(null);
@@ -1231,15 +1224,10 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     const rect = native.getBoundingClientRect();
     const pageRect = pageEl.getBoundingClientRect();
 
-    // Guard against transient layout states (0-sized pages) which produce NaN/Infinity and break backend validation
-    if (!pageRect.width || !pageRect.height) return null;
-
     const fx = (rect.left - pageRect.left) / pageRect.width;
     const fx2 = (rect.right - pageRect.left) / pageRect.width;
     let fy = (rect.top - pageRect.top) / pageRect.height;
     let fy2 = (rect.bottom - pageRect.top) / pageRect.height;
-
-    if (![fx, fx2, fy, fy2].every((n) => Number.isFinite(n))) return null;
 
     // Keep fractional Y in [0, 0.999]
     fy = Math.min(Math.max(fy, 0), 0.999);
@@ -1648,7 +1636,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           span: span ? { ...span, qLen: queryNorm.length } : null,
           spanCompact: spanCompact ? { ...spanCompact, qLen: queryCompact.length } : null,
         });
-          }
+      }
 
       if (selected) {
         const origRange = mapNormRangeToOrig(selected.normStart, selected.normEnd, selected.normToOrig, text.length);
@@ -1689,20 +1677,16 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
-            if (coords) {
             highlightRecordsRef.current.push({
               rangeType: 'text',
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
               fragment: text.substring(start, end),
-                queryFragment: originalQueryFragment || query,
+              queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
-            } else if (debug) {
-              console.warn('[PdfPreview] Skipping highlight record: invalid coords (layout not ready)');
-            }
             if (debug) console.log('[PdfPreview] Added highlight record to array');
           }
           try { rng.detach?.(); } catch {}
@@ -1757,7 +1741,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               annotationId: annotationId || 'none'
             });
           }
-        if (coords) {
         highlightRecordsRef.current.push({
           rangeType: 'text',
           rangePage: pageNum,
@@ -1768,7 +1751,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           ...coords,
           ...(annotationId ? { annotation_id: annotationId } : {}),
         });
-      }
       }
       try { rng.detach?.(); } catch {}
         return 1; // Return immediately after exact match
@@ -1798,18 +1780,16 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           try { applier.applyToRange(rng); } catch {}
           if (pageEl) {
             const coords = coordsPageEncodedY(rng, pageEl, pageNum);
-            if (coords) {
             highlightRecordsRef.current.push({
               rangeType: 'text',
               rangePage: pageNum,
               rangeStart: start,
               rangeEnd: end,
               fragment: keyMatch[0],
-                queryFragment: originalQueryFragment || query,
+              queryFragment: originalQueryFragment || query,
               ...coords,
               ...(annotationId ? { annotation_id: annotationId } : {}),
             });
-          }
           }
           try { rng.detach?.(); } catch {}
           return 1; // Return first match found
@@ -2104,23 +2084,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         const report = highlightRecordsRef.current || [];
         if (report.length && !coordsReportedRef.current) {
           try {
-            const isFiniteNum = (v: any) => typeof v === 'number' && Number.isFinite(v);
-            const isValidCoord = (c: any) => {
-              return (
-                c &&
-                typeof c.rangeType === 'string' &&
-                Number.isInteger(c.rangePage) &&
-                Number.isInteger(c.rangeStart) &&
-                Number.isInteger(c.rangeEnd) &&
-                typeof c.fragment === 'string' &&
-                c.fragment.length > 0 &&
-                isFiniteNum(c.positionStartX) &&
-                isFiniteNum(c.positionStartY) &&
-                isFiniteNum(c.positionEndX) &&
-                isFiniteNum(c.positionEndY)
-              );
-            };
-
             // Format: backend expects { coords: [...] }
             // Add session_id and annotation_id to each coord item
             // Backend can use annotation_id to find current_version_id if annotation_version_id is not provided
@@ -2129,16 +2092,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
               session_id: sessionId || undefined,
               // annotation_id is already included in coord if found during highlighting
               // Backend will use annotation_id to find current_version_id if annotation_version_id is not provided
-            })).filter(isValidCoord);
-
-            const dropped = report.length - coordsWithMetadata.length;
-            if (dropped > 0) {
-              console.warn(`[PdfPreview] Dropped ${dropped} invalid coord(s) before upload (likely NaN/null due to layout timing)`);
-            }
-            if (coordsWithMetadata.length === 0) {
-              console.warn('[PdfPreview] No valid coords to upload (skipping highlight-report)');
-              return;
-            }
+            }));
             const formattedReport = { coords: coordsWithMetadata };
             
             // Build RESTful URL with course_id, session_id, and reading_id from props
@@ -2201,32 +2155,6 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }, 100);
     return () => window.clearTimeout(id);
   }, [scrollToFragment, scaffoldIndex, renderedPages]);
-
-  // Scroll to initial page (1-based) once pages are attached
-  useEffect(() => {
-    if (!initialPage || initialPage <= 0) return;
-    if (!containerRef.current) return;
-    if (initialPageScrolledRef.current === initialPage) return;
-    if (!pageElements.has(initialPage)) return;
-
-    const id = window.setTimeout(() => {
-      try {
-        const el = containerRef.current?.querySelector(
-          `[data-page="${initialPage}"]`
-        ) as HTMLElement | null;
-
-        if (el && containerRef.current) {
-          containerRef.current.scrollTo({
-            top: Math.max(0, el.offsetTop - 16),
-            behavior: 'smooth',
-          });
-          initialPageScrolledRef.current = initialPage;
-        }
-      } catch {}
-    }, 100);
-
-    return () => window.clearTimeout(id);
-  }, [initialPage, pageElements]);
 
   // Handle pending scroll requests after highlighting completes
   useEffect(() => {

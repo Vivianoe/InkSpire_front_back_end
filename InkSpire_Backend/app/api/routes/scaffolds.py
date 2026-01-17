@@ -28,10 +28,8 @@ from app.services.reading_service import get_reading_by_id
 from app.services.reading_chunk_service import get_reading_chunks_by_reading_id
 from app.services.class_profile_service import get_class_profile_by_course_id
 from app.services.session_service import (
-    get_session_by_id,
-)
-from app.services.session_service import (
     create_session,
+    get_session_by_id,
     get_session_readings,
     add_reading_to_session,
     get_latest_session_version,
@@ -39,10 +37,6 @@ from app.services.session_service import (
     create_session_version,
     get_next_version_number,
     set_current_version,
-)
-from app.services.session_reading_service import (
-    get_active_session_readings,
-    rederive_session_readings_for_session,
 )
 from app.workflows.scaffold_workflow import (
     build_workflow as build_scaffold_workflow,
@@ -245,6 +239,13 @@ def generate_scaffolds_with_session(
     Generate scaffolds - all data loaded from database.
     Requires: course_id (path), session_id (path, use "new" to create new session), reading_id (path), instructor_id (body)
     """
+    print(f"[generate_scaffolds_with_session] ===== ENTRY POINT ======")
+    print(f"[generate_scaffolds_with_session] Received request:")
+    print(f"  course_id: {course_id}")
+    print(f"  session_id: {session_id}")
+    print(f"  reading_id: {reading_id}")
+    print(f"  payload.instructor_id: {payload.instructor_id}")
+    
     # Validate and parse IDs from path
     try:
         course_uuid = uuid.UUID(course_id)
@@ -301,34 +302,39 @@ def generate_scaffolds_with_session(
         )
     
     # Handle session_id from path parameter
-    # If session_id is "new", return with an error demanding creatation of a new session first
-    # no need to handle the dirtystate existing session (as handled in sessions.py)
-    
+    # If session_id is "new", create a new session; otherwise use existing session
+    # need to handle the dirtystate existing session (as handled in sessions.py)
     if session_id.lower() == "new":
-        raise HTTPException(
-            status_code=400,
-            detail="session_id must be an existing session UUID. Please create the session first, then call generate.",
+        # Create a new session (default week_number = 1, title = "Reading Session")
+        session = create_session(
+            db=db,
+            course_id=course_uuid,
+            week_number=1,
+            title="Reading Session",
         )
-
-    try:
-        session_uuid = uuid.UUID(session_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid session_id format: {session_id}. Must be a UUID.",
-        )
-
-    session = get_session_by_id(db, session_uuid)
-    if not session:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_id} not found",
-        )
-    if session.course_id != course_uuid:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Session {session_id} does not belong to course {course_id}",
-        )
+        session_uuid = session.id
+        print(f"[generate_scaffolds_with_session] Created new session: {session_uuid}")
+    else:
+        # Use existing session
+        try:
+            session_uuid = uuid.UUID(session_id)
+            session = get_session_by_id(db, session_uuid)
+            if not session:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Session {session_id} not found",
+                )
+            # Verify session belongs to the course
+            if session.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Session {session_id} does not belong to course {course_id}",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid session_id format: {session_id}. Use UUID or 'new' to create a new session",
+            )
     
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)
@@ -364,12 +370,36 @@ def generate_scaffolds_with_session(
             detail=f"Failed to parse class profile JSON from database: {str(json_error)}",
         )
     
-
-    # Get current version from session
+    # Load or get current session version
+    # Get current version from session, or create one if it doesn't exist
+    session = get_session_by_id(db, session_uuid)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_uuid} not found",
+        )
+    
     current_version = None
     if session.current_version_id:
         current_version = get_session_version_by_id(db, session.current_version_id)
-
+    
+    # If no current version exists, create version 1
+    if not current_version:
+        # Get reading IDs for this session
+        session_readings = get_session_readings(db, session_uuid)
+        reading_ids = [str(sr.reading_id) for sr in session_readings]
+        
+        current_version = create_session_version(
+            db=db,
+            session_id=session_uuid,
+            version_number=1,
+            session_info_json=None,
+            assignment_info_json=None,
+            assignment_goals_json=None,
+            reading_ids=reading_ids,
+        )
+        session = set_current_version(db, session_uuid, current_version.id)
+        print(f"[generate_scaffolds_with_session] Created new session version 1 for session {session_uuid}")
     
     # Load reading_chunks from database
     chunks = get_reading_chunks_by_reading_id(db, reading_uuid)
@@ -378,61 +408,6 @@ def generate_scaffolds_with_session(
             status_code=404,
             detail=f"No chunks found for reading {reading_uuid}. Please upload and process the reading first.",
         )
-
-    # Filter chunks based on assignment-derived session_readings (Perusall pages are 1-based; chunk_index is 0-based)
-    start_page: Optional[int] = None
-    end_page: Optional[int] = None
-
-    def coerce_int(v: Any) -> Optional[int]:
-        try:
-            if v is None:
-                return None
-            return int(v)
-        except Exception:
-            return None
-
-    session_readings = get_active_session_readings(db, session_uuid)
-    sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
-    if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
-        start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
-        end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
-
-    # Backfill: older sessions may have session_readings rows without assignment-derived metadata.
-    if sr_for_reading and (start_page is None and end_page is None):
-        try:
-            rederive_session_readings_for_session(db, session_uuid)
-        except Exception:
-            pass
-        session_readings = get_active_session_readings(db, session_uuid)
-        sr_for_reading = next((sr for sr in session_readings if sr.reading_id == reading_uuid), None)
-        if sr_for_reading and sr_for_reading.assigned_pages and isinstance(sr_for_reading.assigned_pages, dict):
-            start_page = coerce_int(sr_for_reading.assigned_pages.get("start_page"))
-            end_page = coerce_int(sr_for_reading.assigned_pages.get("end_page"))
-
-    if start_page is None and end_page is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Assignment-derived session_readings page range not available for this session/reading. "
-                "Please sync the Perusall assignment (and re-derive session_readings) first."
-            ),
-        )
-
-    filtered_chunks = chunks
-    start_idx = max(0, (start_page - 1) if start_page else 0)
-    end_idx = (end_page - 1) if end_page else None
-    if end_idx is not None and end_idx < start_idx:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid assignment page range: start_page={start_page}, end_page={end_page}",
-        )
-    if end_idx is None:
-        filtered_chunks = [c for c in chunks if c.chunk_index >= start_idx]
-    else:
-        filtered_chunks = [c for c in chunks if start_idx <= c.chunk_index <= end_idx]
-    print(
-        f"[generate_scaffolds_with_session] Using page range start_page={start_page}, end_page={end_page} -> chunk_index {start_idx}..{end_idx}; selected {len(filtered_chunks)}/{len(chunks)} chunks"
-    )
     
     # Convert to workflow format: {"chunks": [...]}
     reading_chunks_data = {
@@ -444,7 +419,7 @@ def generate_scaffolds_with_session(
                 "content": chunk.content,
                 "token_count": chunk.chunk_metadata.get("token_count") if chunk.chunk_metadata else None,
             }
-            for chunk in filtered_chunks
+            for chunk in chunks
         ]
     }
     
@@ -549,6 +524,14 @@ def generate_scaffolds_with_session(
             )
             print(f"[generate_scaffolds_with_session] Built GenerateScaffoldsResponse with {len(full_scaffolds)} scaffolds")
             
+            # Warn if no scaffolds were found
+            if len(full_scaffolds) == 0:
+                print(f"[generate_scaffolds_with_session] WARNING: Returning empty scaffolds list!")
+                print(f"[generate_scaffolds_with_session] This may indicate:")
+                print(f"  1. Workflow did not generate any scaffolds")
+                print(f"  2. Scaffolds were generated but not saved to database")
+                print(f"  3. Database query returned empty (session_id or reading_id mismatch)")
+            
             # Convert to dict and encode
             response_dict = full_response.model_dump(mode='json')
             encoded = jsonable_encoder(response_dict)
@@ -556,7 +539,8 @@ def generate_scaffolds_with_session(
             print(f"[generate_scaffolds_with_session] Returning JSONResponse with full scaffold information...")
             print(f"[generate_scaffolds] Response contains {len(full_scaffolds)} scaffolds")
             return JSONResponse(content=encoded)
-        
+        except HTTPException:
+            raise
         except Exception as response_error:
             print(f"[generate_scaffolds_with_session] ERROR building response: {response_error}")
             import traceback
@@ -564,16 +548,6 @@ def generate_scaffolds_with_session(
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to build response: {str(response_error)}",
-            )
-        except HTTPException:
-            raise
-        except Exception as final_error:
-            print(f"[generate_scaffolds_with_session] ERROR: Response cannot be serialized: {final_error}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Response serialization failed: {str(final_error)}",
             )
     except HTTPException:
         raise
@@ -694,6 +668,36 @@ def run_material_focus_scaffold(
         )
 
     # Save scaffolds to database
+    # First, refresh the database connection to avoid timeout issues
+    # (workflow may have taken a long time, causing connection to timeout)
+    try:
+        print(f"[run_material_focus_scaffold] Refreshing database connection before saving scaffolds...")
+        # Try to ping the connection - if it fails, invalidate and reconnect
+        try:
+            db.execute(text("SELECT 1"))
+            db.commit()
+            print(f"[run_material_focus_scaffold] Database connection is valid")
+        except Exception as ping_error:
+            print(f"[run_material_focus_scaffold] Connection ping failed: {ping_error}, attempting to reconnect...")
+            # Invalidate the connection to force a new one from the pool
+            try:
+                db.connection().invalidate()
+            except:
+                pass
+            # Try again with a new connection
+            db.execute(text("SELECT 1"))
+            db.commit()
+            print(f"[run_material_focus_scaffold] Database connection reconnected successfully")
+    except Exception as conn_error:
+        print(f"[run_material_focus_scaffold] ERROR: Failed to refresh/reconnect database connection: {conn_error}")
+        import traceback
+        traceback.print_exc()
+        # Try to rollback and continue - connection pool should handle reconnection
+        try:
+            db.rollback()
+        except:
+            pass
+    
     saved_annotations = []
     try:
         for idx, scaf in enumerate(review_list):
@@ -701,26 +705,64 @@ def run_material_focus_scaffold(
             start_offset = scaf.get("start_offset")
             end_offset = scaf.get("end_offset")
             page_number = scaf.get("page_number")
-
-            try:
-                annotation = create_scaffold_annotation(
-                    db=db,
-                    session_id=session_id,
-                    reading_id=reading_id,
-                    highlight_text=scaf.get("fragment", ""),
-                    current_content=scaf.get("text", ""),
-                    start_offset=start_offset,
-                    end_offset=end_offset,
-                    page_number=page_number,
-                    status="draft",
-                )
-                saved_annotations.append(annotation)
-                print(f"[run_material_focus_scaffold] Successfully saved scaffold {idx + 1}")
-            except Exception as e:
-                print(f"[run_material_focus_scaffold] ERROR saving scaffold {idx + 1}: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+            
+            # Retry logic for database operations
+            max_retries = 3
+            retry_count = 0
+            annotation = None
+            
+            while retry_count < max_retries:
+                try:
+                    print(f"[run_material_focus_scaffold] Saving scaffold {idx + 1} with session_id={session_id}, reading_id={reading_id} (attempt {retry_count + 1}/{max_retries})")
+                    annotation = create_scaffold_annotation(
+                        db=db,
+                        session_id=session_id,
+                        reading_id=reading_id,
+                        highlight_text=scaf.get("fragment", ""),
+                        current_content=scaf.get("text", ""),
+                        start_offset=start_offset,
+                        end_offset=end_offset,
+                        page_number=page_number,
+                        status="draft",
+                    )
+                    saved_annotations.append(annotation)
+                    print(f"[run_material_focus_scaffold] Successfully saved scaffold {idx + 1} with annotation_id={annotation.id}")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    error_str = str(e)
+                    print(f"[run_material_focus_scaffold] ERROR saving scaffold {idx + 1} (attempt {retry_count}/{max_retries}): {e}")
+                    
+                    # Check if it's a connection error
+                    if "SSL SYSCALL error" in error_str or "EOF detected" in error_str or "connection" in error_str.lower() or "OperationalError" in str(type(e)):
+                        if retry_count < max_retries:
+                            print(f"[run_material_focus_scaffold] Connection error detected, attempting to reconnect...")
+                            try:
+                                db.rollback()
+                                # Invalidate the connection to force a new one from the pool
+                                try:
+                                    db.connection().invalidate()
+                                    print(f"[run_material_focus_scaffold] Connection invalidated")
+                                except Exception as invalidate_error:
+                                    print(f"[run_material_focus_scaffold] Could not invalidate connection: {invalidate_error}")
+                                
+                                # Test the new connection
+                                db.execute(text("SELECT 1"))
+                                db.commit()
+                                print(f"[run_material_focus_scaffold] Connection reconnected successfully, retrying...")
+                                continue
+                            except Exception as refresh_error:
+                                print(f"[run_material_focus_scaffold] Failed to reconnect: {refresh_error}")
+                                if retry_count >= max_retries:
+                                    raise
+                    else:
+                        # Not a connection error, don't retry
+                        import traceback
+                        traceback.print_exc()
+                        raise
+            
+            if annotation is None:
+                raise Exception(f"Failed to save scaffold {idx + 1} after {max_retries} attempts")
 
         print(f"[run_material_focus_scaffold] Saved {len(saved_annotations)} annotations to database")
     except Exception as e:
@@ -728,6 +770,58 @@ def run_material_focus_scaffold(
         import traceback
         traceback.print_exc()
         raise
+
+    # Convert to API response format
+    print(f"[run_material_focus_scaffold] Converting to API response format...")
+    api_review_objs = []
+    for idx, annotation in enumerate(saved_annotations):
+        try:
+            annotation_dict = scaffold_to_dict(annotation)
+            api_obj = scaffold_to_model(annotation_dict)
+            api_review_objs.append(api_obj)
+            print(f"[run_material_focus_scaffold] Converted annotation {idx + 1}")
+        except Exception as e:
+            print(f"[run_material_focus_scaffold] ERROR converting annotation {idx + 1}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    print(f"[run_material_focus_scaffold] Building response...")
+    try:
+        response = ReadingScaffoldsResponse(
+            annotation_scaffolds_review=api_review_objs,
+            session_id=str(session_id),
+            reading_id=str(reading_id),
+        )
+        print(f"[run_material_focus_scaffold] Response built successfully")
+        print(f"[run_material_focus_scaffold] Response annotation_scaffolds_review count: {len(response.annotation_scaffolds_review)}")
+        
+        # Try to serialize the response
+        try:
+            response_dict = response.model_dump()
+            print(f"[run_material_focus_scaffold] Response serialized successfully")
+        except Exception as serialize_error:
+            print(f"[run_material_focus_scaffold] ERROR: Response serialization failed: {serialize_error}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Response serialization failed: {str(serialize_error)}",
+            )
+        
+        print(f"[run_material_focus_scaffold] About to return response to FastAPI...")
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[run_material_focus_scaffold] ERROR in save/convert process: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[run_material_focus_scaffold] Full traceback:\n{error_trace}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save or convert scaffolds: {str(e)}",
+        )
 
 
 # ======================================================
@@ -1347,6 +1441,17 @@ def export_approved_scaffolds_endpoint(
     
     return ExportedScaffoldsResponse(annotation_scaffolds=items)
 
+
+# ======================================================
+# Thread-based Review API (compatibility endpoints)
+# ======================================================
+
+@router.post("/threads/{thread_id}/review")
+def thread_review_endpoint(
+    thread_id: str,
+    payload: ThreadReviewRequest,
+    db: Session = Depends(get_db)
+):
     """
     Compatibility endpoint for thread-based review API.
     Maps to individual scaffold endpoints based on actions.
