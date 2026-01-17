@@ -69,11 +69,12 @@ const EMPTY_PROFILE_SECTIONS: ProfileSections = {
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 const MOCK_COURSE_ID = 'fbaf501d-af97-4286-b5b0-d7b63b500b35';
 
-type DesignConsiderationPayload = string | null;
+type DesignRationaleText = string | null;
+type DesignConsiderationsPayload = Record<string, unknown> | null;
 
 const buildClassInputPayload = (
   data: ClassProfile,
-  designConsiderationText?: DesignConsiderationPayload | undefined
+  designConsiderationsPayload?: DesignConsiderationsPayload | undefined
 ) => ({
   discipline_info: {
     discipline_name: data.disciplineInfo.disciplineName,
@@ -101,18 +102,18 @@ const buildClassInputPayload = (
     background: data.classInfo.background || DEFAULT_CLASS_BACKGROUND,
     prior_knowledge: data.classInfo.priorKnowledge,
   },
-  design_considerations: designConsiderationText ?? null,
+  design_considerations: designConsiderationsPayload ?? null,
 });
 
 const buildRunClassProfileRequest = (
   data: ClassProfile,
-  designConsiderationText?: DesignConsiderationPayload
+  designConsiderationsPayload?: DesignConsiderationsPayload
 ) => ({
   instructor_id: MOCK_INSTRUCTOR_ID,
   title: data.courseInfo.courseName || 'Untitled Class',
   course_code: data.courseInfo.courseCode || 'TBD',
   description: data.courseInfo.description || 'Draft class profile generated via Inkspire',
-  class_input: buildClassInputPayload(data, designConsiderationText ?? null),
+  class_input: buildClassInputPayload(data, designConsiderationsPayload ?? null),
 });
 
 const extractProfileFromReview = (review: unknown): { profileText: string } => {
@@ -152,13 +153,16 @@ const extractProfileFromReview = (review: unknown): { profileText: string } => {
 
 const serializeProfileForExport = (
   data: ClassProfile,
-  designConsiderationText?: DesignConsiderationPayload | undefined
+  designRationaleText?: DesignRationaleText | undefined,
+  designConsiderationsPayload?: DesignConsiderationsPayload | undefined
 ) =>
   JSON.stringify({
     profile: data.generatedProfile ?? DEFAULT_CLASS_PROFILE_TEXT,
     design_consideration:
-      designConsiderationText !== undefined ? designConsiderationText : null,
-    class_input: buildClassInputPayload(data, designConsiderationText),
+      designRationaleText !== undefined ? designRationaleText : null,
+    design_rationale:
+      designRationaleText !== undefined ? designRationaleText : null,
+    class_input: buildClassInputPayload(data, designConsiderationsPayload),
   });
 
 
@@ -381,18 +385,43 @@ export default function ViewClassProfilePage() {
   const extractDesignConsiderationMetadataFromVersion = (version: any): unknown => {
     if (!version) return null;
     const meta = version.metadata_json;
-    const metaDesign = meta?.design_consideration ?? meta?.design_considerations;
+    const metaDesign = meta?.design_rationale ?? meta?.design_consideration ?? meta?.design_considerations;
     if (metaDesign) return metaDesign;
 
     try {
       const contentJson = typeof version.content === 'string' ? JSON.parse(version.content) : null;
-      return contentJson?.design_consideration ?? contentJson?.design_considerations ?? null;
+      return (
+        contentJson?.design_rationale ??
+        contentJson?.design_consideration ??
+        contentJson?.design_considerations ??
+        null
+      );
     } catch {
       return null;
     }
   };
 
-  const getDesignConsiderationsForSave = (): DesignConsiderationPayload | undefined => {
+  const extractUserDesignConsiderationsFromVersion = (version: any): DesignConsiderationsPayload => {
+    if (!version) return null;
+    const meta = version.metadata_json;
+    if (meta?.design_consideration) {
+      return meta.design_consideration as DesignConsiderationsPayload;
+    }
+    if (meta?.class_input?.design_considerations) {
+      return meta.class_input.design_considerations as DesignConsiderationsPayload;
+    }
+    try {
+      const contentJson = typeof version.content === 'string' ? JSON.parse(version.content) : null;
+      if (contentJson?.class_input?.design_considerations) {
+        return contentJson.class_input.design_considerations as DesignConsiderationsPayload;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const getDesignConsiderationsForSave = (): DesignRationaleText | undefined => {
     const fromVersion = extractDesignConsiderationMetadataFromVersion(currentVersion);
     const formatted = formatDesignConsiderationMetadata(fromVersion);
     if (formatted) {
@@ -405,6 +434,9 @@ export default function ViewClassProfilePage() {
 
     return null;
   };
+
+  const getUserDesignConsiderationsForPayload = (): DesignConsiderationsPayload | undefined =>
+    extractUserDesignConsiderationsFromVersion(currentVersion);
 
   // Simplified logic for upload readings button disabled state
   const isUploadReadingsDisabled = useMemo(() => {
@@ -862,13 +894,19 @@ const createDefaultProfile = (id: string): ClassProfile => ({
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              class_input: buildClassInputPayload(formData, designConsiderationMetadataText),
+              class_input: buildClassInputPayload(
+                formData,
+                getUserDesignConsiderationsForPayload() ?? null
+              ),
             }),
           }
         );
       } else {
         // For new profiles, use create endpoint
-        const payload = buildRunClassProfileRequest(formData, designConsiderationMetadataText);
+        const payload = buildRunClassProfileRequest(
+          formData,
+          getUserDesignConsiderationsForPayload() ?? null
+        );
         response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
           method: 'POST',
           headers: {
@@ -1121,14 +1159,21 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         : '/api/class-profiles';
       const method = 'POST'; // Backend uses POST for both create and edit
 
-      const designForSave = hasExistingId
+      const designRationaleForSave = hasExistingId
         ? getDesignConsiderationsForSave()
         : designConsiderationMetadataText;
+      const userDesignConsiderationsForSave = hasExistingId
+        ? getUserDesignConsiderationsForPayload()
+        : null;
 
       const payload = hasExistingId
         ? {
             // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
-            text: serializeProfileForExport(saveData, designForSave)
+            text: serializeProfileForExport(
+              saveData,
+              designRationaleForSave,
+              userDesignConsiderationsForSave
+            )
           }
         : {
             // For create endpoint - matches existing structure
@@ -1137,7 +1182,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             title: saveData.courseInfo.courseName || 'Untitled Class',
             course_code: saveData.courseInfo.courseCode || 'TBD',
             description: saveData.courseInfo.description || 'Draft class profile',
-            class_input: buildClassInputPayload(saveData, designForSave ?? null),
+            class_input: buildClassInputPayload(saveData, userDesignConsiderationsForSave),
             generated_profile: saveData.generatedProfile,
           };
 
@@ -1201,7 +1246,11 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            updated_text: serializeProfileForExport(saveData, designForSave),
+            updated_text: serializeProfileForExport(
+              saveData,
+              designRationaleForSave,
+              userDesignConsiderationsForSave
+            ),
           }),
         });
         const approveData = await approveResponse.json().catch(() => ({}));

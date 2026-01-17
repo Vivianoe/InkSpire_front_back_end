@@ -275,11 +275,16 @@ export default function EditClassProfilePage() {
   const extractDesignConsiderationMetadataFromVersion = (version: any): unknown => {
     if (!version) return null;
     const meta = version.metadata_json;
-    const metaDesign = meta?.design_consideration ?? meta?.design_considerations;
+    const metaDesign = meta?.design_rationale ?? meta?.design_consideration ?? meta?.design_considerations;
     if (metaDesign) return metaDesign;
     try {
       const contentJson = typeof version.content === 'string' ? JSON.parse(version.content) : null;
-      return contentJson?.design_consideration ?? contentJson?.design_considerations ?? null;
+      return (
+        contentJson?.design_rationale ??
+        contentJson?.design_consideration ??
+        contentJson?.design_considerations ??
+        null
+      );
     } catch {
       return null;
     }
@@ -948,6 +953,50 @@ export default function EditClassProfilePage() {
           {/* Design Considerations */}
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Design Considerations</h2>
+            <div className={styles.formGrid}>
+              {DESIGN_CONSIDERATION_FIELDS.map(field => {
+                const value = formData.designConsiderations[field.key] || '';
+                if (field.options && field.options.length > 0) {
+                  return (
+                    <div className={styles.inputGroup} key={field.key}>
+                      <label className={styles.label}>{field.label}</label>
+                      <select
+                        className={styles.input}
+                        value={value}
+                        onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
+                        disabled={generating}
+                      >
+                        <option value="">Select...</option>
+                        {field.options.map(option => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className={styles.inputGroupFull} key={field.key}>
+                    <label className={styles.label}>{field.label}</label>
+                    <textarea
+                      className={styles.textarea}
+                      rows={3}
+                      value={value}
+                      onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      disabled={generating}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* LLM Design Rationale */}
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>LLM Design Rationale</h2>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.75rem' }}>
               {editingDesignConsiderationMetadata ? (
                 <>
@@ -1038,4 +1087,3 @@ export default function EditClassProfilePage() {
     </div>
   );
 }
-
