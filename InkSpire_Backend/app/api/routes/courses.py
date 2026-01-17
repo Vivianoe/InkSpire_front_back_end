@@ -157,7 +157,7 @@ def edit_design_considerations(
     from app.services.class_profile_service import (
         get_class_profile_version_by_id,
         create_class_profile_version,
-        profile_to_dict,
+        class_profile_to_dict,
     )
     
     current_content = profile.description
@@ -193,7 +193,7 @@ def edit_design_considerations(
         
         return {
             "success": True,
-            "review": profile_to_dict(profile),
+            "review": class_profile_to_dict(profile),
         }
     except json.JSONDecodeError as e:
         raise HTTPException(

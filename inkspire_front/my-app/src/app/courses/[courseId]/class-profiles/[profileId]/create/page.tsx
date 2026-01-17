@@ -258,6 +258,55 @@ export default function EditClassProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [designConsiderationMetadataText, setDesignConsiderationMetadataText] = useState<string>('');
+  const [designConsiderationMetadataDraft, setDesignConsiderationMetadataDraft] = useState<string>('');
+  const [editingDesignConsiderationMetadata, setEditingDesignConsiderationMetadata] = useState(false);
+
+  const formatDesignConsiderationMetadata = (raw: unknown): string => {
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw;
+    try {
+      return JSON.stringify(raw, null, 2);
+    } catch {
+      return String(raw);
+    }
+  };
+
+  const extractDesignConsiderationMetadataFromVersion = (version: any): unknown => {
+    if (!version) return null;
+    const meta = version.metadata_json;
+    const metaDesign = meta?.design_consideration ?? meta?.design_considerations;
+    if (metaDesign) return metaDesign;
+    try {
+      const contentJson = typeof version.content === 'string' ? JSON.parse(version.content) : null;
+      return contentJson?.design_consideration ?? contentJson?.design_considerations ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const loadDesignConsiderationMetadataFromBackend = useCallback(async () => {
+    if (!profileId || profileId === 'new') return;
+    try {
+      const response = await fetch(`/api/class-profiles/${profileId}/versions`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return;
+      }
+      const versions = data.versions || [];
+      if (!Array.isArray(versions) || versions.length === 0) {
+        return;
+      }
+      const current = [...versions].sort((a: any, b: any) => b.version_number - a.version_number)[0];
+      const raw = extractDesignConsiderationMetadataFromVersion(current);
+      const text = formatDesignConsiderationMetadata(raw);
+      if (text) {
+        setDesignConsiderationMetadataText(text);
+      }
+    } catch {
+      // ignore
+    }
+  }, [profileId]);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -302,10 +351,11 @@ export default function EditClassProfilePage() {
   useEffect(() => {
     if (isEdit && profileId) {
       loadProfile();
+      loadDesignConsiderationMetadataFromBackend();
     } else if (!isEdit) {
       setFormData(createDefaultFormData('new'));
     }
-  }, [profileId, isEdit, loadProfile]);
+  }, [profileId, isEdit, loadProfile, loadDesignConsiderationMetadataFromBackend]);
 
   useEffect(() => {
     const fetchCurrentUser = async () => {
@@ -445,8 +495,14 @@ export default function EditClassProfilePage() {
 
       const mergedDesign: DesignConsiderations = {
         ...parsedDesign,                           // LLM-generated values as base
-		    ...formData.designConsiderations,          // User-entered values override LLM
+	    ...formData.designConsiderations,          // User-entered values override LLM
       };
+
+      if (design) {
+        if (!designConsiderationMetadataText) {
+          setDesignConsiderationMetadataText(formatDesignConsiderationMetadata(design));
+        }
+      }
 
       const nextId =
         data.class_profile?.id ||
@@ -892,45 +948,88 @@ export default function EditClassProfilePage() {
           {/* Design Considerations */}
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Design Considerations</h2>
-            <div className={styles.formGrid}>
-              {DESIGN_CONSIDERATION_FIELDS.map(field => {
-                const selectOptions =
-                  'options' in field && Array.isArray(field.options) ? field.options : null;
-                return (
-                  <div key={field.key} className={styles.inputGroupFull}>
-                    <label htmlFor={`design-${field.key}`} className={styles.label}>
-                      {field.label}
-                    </label>
-                    {selectOptions ? (
-                      <select
-                        id={`design-${field.key}`}
-                        className={styles.input}
-                        value={formData.designConsiderations[field.key]}
-                        onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
-                        disabled={generating}
-                      >
-                        <option value="">Select {field.label.toLowerCase()}</option>
-                        {selectOptions.map(option => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <textarea
-                        id={`design-${field.key}`}
-                        className={styles.textarea}
-                        rows={field.key === 'userDefined' ? 4 : 3}
-                        value={formData.designConsiderations[field.key]}
-                        onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
-                        placeholder={field.placeholder}
-                        disabled={generating}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              {editingDesignConsiderationMetadata ? (
+                <>
+                  <button
+                    type="button"
+                    className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                    onClick={() => {
+                      setEditingDesignConsiderationMetadata(false);
+                      setDesignConsiderationMetadataDraft('');
+                    }}
+                    disabled={saving || generating}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                    onClick={async () => {
+                      const courseIdForRequest = urlCourseId;
+                      if (!courseIdForRequest || courseIdForRequest === 'new') {
+                        setError('course_id is required to save design considerations.');
+                        return;
+                      }
+                      try {
+                        setSaving(true);
+                        setError(null);
+                        const response = await fetch(
+                          `/api/courses/${courseIdForRequest}/design-considerations/edit`,
+                          {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              course_id: courseIdForRequest,
+                              design_consideration: designConsiderationMetadataDraft,
+                            }),
+                          }
+                        );
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                          throw new Error(data?.detail || data?.message || 'Failed to save design considerations.');
+                        }
+                        setDesignConsiderationMetadataText(designConsiderationMetadataDraft);
+                        setDesignConsiderationMetadataDraft('');
+                        setEditingDesignConsiderationMetadata(false);
+                        await loadDesignConsiderationMetadataFromBackend();
+                      } catch (err: unknown) {
+                        setError(err instanceof Error ? err.message : 'Failed to save design considerations.');
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                    disabled={saving || generating}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                  onClick={() => {
+                    setEditingDesignConsiderationMetadata(true);
+                    setDesignConsiderationMetadataDraft(designConsiderationMetadataText);
+                  }}
+                  disabled={saving || generating}
+                >
+                  Edit
+                </button>
+              )}
             </div>
+            <textarea
+              className={styles.textarea}
+              rows={10}
+              value={editingDesignConsiderationMetadata ? designConsiderationMetadataDraft : designConsiderationMetadataText}
+              readOnly={!editingDesignConsiderationMetadata}
+              onChange={(e) => {
+                if (editingDesignConsiderationMetadata) {
+                  setDesignConsiderationMetadataDraft(e.target.value);
+                }
+              }}
+              placeholder="No design_consideration metadata available."
+            />
           </section>
 
         </form>
