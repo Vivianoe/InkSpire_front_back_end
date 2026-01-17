@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { supabase } from '@/lib/supabase/client';
 
 // Dynamically import PdfPreview from components to avoid SSR issues
 const PdfPreview = dynamic(
@@ -63,6 +64,8 @@ export default function ScaffoldPage() {
   const [modificationRequest, setModificationRequest] = useState('');
   const modificationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentReviewIndex, setCurrentReviewIndex] = useState<number>(-1);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
   
   // Form data for session info
   const [sessionInfo, setSessionInfo] = useState('');
@@ -83,6 +86,8 @@ export default function ScaffoldPage() {
   const sessionId = params.sessionId as string;
   const readingId = params.readingId as string;
   const enableNavigation = searchParams.get('navigation') === 'true';
+  const initialPageParam = searchParams.get('page') || searchParams.get('startPage');
+  const initialPage = initialPageParam ? Number(initialPageParam) : undefined;
 
   // Load navigation data from sessionStorage
   useEffect(() => {
@@ -105,6 +110,9 @@ export default function ScaffoldPage() {
       if (!courseId) return; // Wait for courseId to be available
       
       try {
+        setError(null);
+        setScaffolds([]);
+        setPdfUrl(null);
         setLoading(true);
         
         const response = await fetch(
@@ -130,6 +138,15 @@ export default function ScaffoldPage() {
       loadScaffolds();
     }
   }, [courseId, sessionId, readingId]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Navigation functions
   const navigateToReading = (direction: 'prev' | 'next') => {
@@ -168,6 +185,18 @@ export default function ScaffoldPage() {
   const canGoPrev = navigationData && navigationData.currentIndex > 0;
   const canGoNext = navigationData && navigationData.currentIndex < navigationData.readingIds.length - 1;
 
+  // Toast functions； need to be modified for better user experience
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, 5000);
+  };
+
   // Helper functions for processing review response
   const keyForId = (value: number | string) => String(value);
 
@@ -190,6 +219,7 @@ export default function ScaffoldPage() {
     }
 
     const actionResult = data?.action_result;
+    
     const resolveTargetKey = (): string | null => {
       if (targetCardId !== null && targetCardId !== undefined) {
         return keyForId(targetCardId);
@@ -215,9 +245,10 @@ export default function ScaffoldPage() {
       const normalizedResultText = typeof actionResult.text === 'string' ? actionResult.text : '';
       const normalizedStatus = typeof actionResult.status === 'string' ? actionResult.status.toLowerCase() : '';
 
-      setScaffolds((prev) =>
-        prev.map((s) => {
-          if (keyForId(s.id) === targetKey) {
+      setScaffolds((prev) => {
+        return prev.map((s) => {
+          const sKey = keyForId(s.id);
+          if (sKey === targetKey) {
             let nextStatus = s.status;
             // Backend historically used both "approved" and "accepted"
             if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') nextStatus = 'ACCEPTED';
@@ -233,8 +264,8 @@ export default function ScaffoldPage() {
             };
           }
           return s;
-        })
-      );
+        });
+      });
 
       setManualEditMap((prev) => {
         const next = { ...prev };
@@ -329,15 +360,19 @@ export default function ScaffoldPage() {
 
   // Scaffold action handlers
   const handleScaffoldAction = async (scaffoldId: string, action: 'accept' | 'reject' | 'llm-edit' | 'edit') => {
-    const scaffoldIndex = scaffolds.findIndex((s) => keyForId(s.id) === keyForId(scaffoldId));
-    if (scaffoldIndex === -1) return;
-    const scaffold = scaffolds[scaffoldIndex];
-
-    if (scaffold?.fragment) {
-      setActiveFragment(scaffold.fragment);
-    }
-
     try {
+      const scaffoldIndex = scaffolds.findIndex((s) => keyForId(s.id) === keyForId(scaffoldId));
+      
+      if (scaffoldIndex === -1) {
+        return;
+      }
+      const scaffold = scaffolds[scaffoldIndex];
+
+      if (scaffold?.fragment) {
+        setActiveFragment(scaffold.fragment);
+      }
+
+      try {
       if (action === 'edit') {
         setCurrentReviewIndex(scaffoldIndex);
         openManualEditForScaffold(scaffold);
@@ -378,6 +413,7 @@ export default function ScaffoldPage() {
         };
         processReviewResponse(scaffold.id, responseData);
         setModificationRequest('');
+        showToast('Refine with LLM succeeded.');
         return;
       }
 
@@ -409,10 +445,17 @@ export default function ScaffoldPage() {
       });
 
       if (!res.ok) {
-        throw new Error(`${action} API failed: ${res.status}`);
+        const errorText = await res.text().catch(() => '');
+        throw new Error(`${action} API failed: ${res.status} - ${errorText}`);
       }
 
-      const responseJson = await res.json();
+      const responseText = await res.text();
+      const responseJson = JSON.parse(responseText);
+      
+      if (!responseJson.scaffold) {
+        throw new Error('Response missing scaffold field');
+      }
+      
       const data = {
         action_result: responseJson.scaffold,
         __interrupt__: null,
@@ -424,6 +467,10 @@ export default function ScaffoldPage() {
       alert('Failed to process review action. Please try again.');
     } finally {
       setManualEditSubmittingId(null);
+    }
+    } catch (outerErr) {
+      console.error('Error in handleScaffoldAction:', outerErr);
+      alert('An error occurred. Please try again.');
     }
   };
 
@@ -461,6 +508,7 @@ export default function ScaffoldPage() {
 
       processReviewResponse(currentCard.id, responseData);
       setModificationRequest('');
+      showToast('Refine with LLM succeeded.');
     } catch (err) {
       console.error('Modification request failed:', err);
       alert('Failed to send modification request. Please try again.');
@@ -473,35 +521,83 @@ export default function ScaffoldPage() {
       setGenerating(true);
       setError(null);
       
-      console.log('[ScaffoldPage] Generating scaffolds for session:', sessionId, 'reading:', readingId);
       
+      
+      /* for demo only 
+      const payload = {
+        instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
+        session_id: '2b812623-3080-410b-87ec-7572833831f2',
+        reading_id: 'a7dce828-418f-49a6-9aab-c5c6f243787e',
+      };
+      
+      const generateUrl = `/api/load-scaffolds-from-session`;*/
+
+      /*real endpoint*/
       const payload = {
         instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
       };
+
+
+      const generateUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`;
       
-      const response = await fetch(`/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/generate`, {
+      const response = await fetch(generateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.detail || errorData?.message || 'Failed to generate scaffolds.');
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { detail: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        const errorMessage = errorData?.detail || errorData?.message || `Failed to generate scaffolds (HTTP ${response.status})`;
+        throw new Error(errorMessage);
       }
       
-      console.log('[ScaffoldPage] Scaffolds generated successfully');
+      // Try to use data from generate response first
+      const generateData = await response.json();
       
-      // Refresh scaffolds
-      const refreshResponse = await fetch(
-        `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
-      );
-      if (refreshResponse.ok) {
-        const data = await refreshResponse.json();
-        console.log('[ScaffoldPage] Refreshed scaffolds:', data.scaffolds);
-        setScaffolds(data.scaffolds || []);
+      // Check if response contains scaffolds
+      if (generateData.annotation_scaffolds_review && generateData.annotation_scaffolds_review.length > 0) {
+        // Convert to ScaffoldData format
+        const convertedScaffolds = generateData.annotation_scaffolds_review.map((scaffold: any) => ({
+          id: scaffold.id || scaffold.annotation_id || String(Math.random()),
+          fragment: scaffold.fragment || scaffold.highlight_text || '',
+          text: scaffold.text || scaffold.current_content || '',
+          status: scaffold.status || 'draft',
+          history: scaffold.history || [],
+        }));
+        setScaffolds(convertedScaffolds);
+        
+        // Update PDF URL if provided
+        if (generateData.pdf_url) {
+          setPdfUrl(generateData.pdf_url);
+        }
       } else {
-        console.error('[ScaffoldPage] Failed to refresh scaffolds');
+        // If no scaffolds in response, refresh from API
+        const refreshResponse = await fetch(
+          `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds`
+        );
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json();
+          setScaffolds(data.scaffolds || []);
+          
+          // Update PDF URL if provided
+          if (data.pdfUrl) {
+            setPdfUrl(data.pdfUrl);
+          }
+          
+          // If still no scaffolds, show a warning
+          if (!data.scaffolds || data.scaffolds.length === 0) {
+            setError('Scaffolds were not generated. Please check the backend logs for details.');
+          }
+        } else {
+          const errorData = await refreshResponse.json().catch(() => ({}));
+          throw new Error(errorData?.detail || errorData?.message || 'Failed to refresh scaffolds after generation.');
+        }
       }
       
       alert('Scaffolds generated successfully!');
@@ -538,7 +634,6 @@ export default function ScaffoldPage() {
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
       status: displayStatus,
     };
-    console.log(`[ScaffoldPage] Scaffold ${scaffold.id}: ${scaffold.status} -> ${processed.status}`);
     return processed;
   });
 
@@ -626,23 +721,41 @@ ${scaffold.text || 'No scaffold text available'}
     try {
       setPublishLoading(true);
       setPublishError(null);
-      console.log('[ScaffoldPage] Publishing annotations with IDs:', annotationIds);
-      const response = await fetch(`/api/perusall/annotations`, {
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ annotation_ids: annotationIds }),
+        headers,
+        body: JSON.stringify({ session_id: sessionId, annotation_ids: annotationIds }),
       });
 
       const data = await response.json().catch((e) => {
-        console.error('[ScaffoldPage] Failed to parse response JSON:', e);
+        console.error('Failed to parse response JSON:', e);
         return {};
       });
 
-      console.log('[ScaffoldPage] Perusall API response:', {
-        status: response.status,
-        ok: response.ok,
-        data: data
-      });
+      if (!response.ok) {
+        const detail = (data as any)?.detail;
+        if (
+          typeof detail === 'string' &&
+          detail.includes('No annotations found to post')
+        ) {
+          const nextMessage =
+            'Publish failed: highlight coordinates are missing for these scaffolds. Please wait for the PDF highlights to finish loading (coords are saved automatically), then try again. If the PDF never highlights, open the reading again and make sure fragments can be found.';
+          setPublishError(nextMessage);
+          showToast('Publish failed: missing highlight coordinates.');
+          return;
+        }
+
+        const fallback = typeof detail === 'string' ? detail : `Publish failed: ${response.status}`;
+        setPublishError(fallback);
+        return;
+      }
 
       if (!response.ok) {
         const errorMessage =
@@ -651,7 +764,7 @@ ${scaffold.text || 'No scaffold text available'}
           data?.message ||
           (data?.errors && JSON.stringify(data.errors)) ||
           `Publish failed with status ${response.status}: ${response.statusText}`;
-        console.error('[ScaffoldPage] Perusall API error:', errorMessage);
+        console.error('Perusall API error:', errorMessage);
         throw new Error(errorMessage);
       }
 
@@ -661,25 +774,20 @@ ${scaffold.text || 'No scaffold text available'}
           data?.message ||
           (data?.errors && JSON.stringify(data.errors)) ||
           'Publish failed: Unknown error';
-        console.error('[ScaffoldPage] Perusall API returned success=false:', data);
+        console.error('Perusall API returned success=false:', data);
         throw new Error(errorMessage);
       }
 
       setShowPublishModal(false);
       alert('Scaffolds published successfully!');
     } catch (error) {
-      console.error('[ScaffoldPage] Publish failed:', error);
-      console.error('[ScaffoldPage] Error details:', {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      console.error('Publish failed:', error);
       
       const errorMessage = error instanceof Error 
         ? error.message 
         : 'Failed to publish scaffolds. Please try again.';
       
       setPublishError(errorMessage);
-      console.error('[ScaffoldPage] Error message displayed to user:', errorMessage);
     } finally {
       setPublishLoading(false);
     }
@@ -691,18 +799,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <div className={styles.headerLeft}>
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className={styles.backIconButton}
-                aria-label="Back to Session"
-                title="Back to Session"
-              >
-                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
-              </button>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
-            </div>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div className={styles.loadingSpinner}>Loading scaffolds...</div>
@@ -718,18 +815,7 @@ ${scaffold.text || 'No scaffold text available'}
         <Navigation />
         <div className={styles.formContent}>
           <div className={styles.formHeader}>
-            <div className={styles.headerLeft}>
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className={styles.backIconButton}
-                aria-label="Back to Session"
-                title="Back to Session"
-              >
-                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
-              </button>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
-            </div>
+            {/* <h1 className={styles.formTitle}>Reading Scaffolds</h1> */}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
             <div style={{ color: '#dc2626', textAlign: 'center' }}>
@@ -745,28 +831,39 @@ ${scaffold.text || 'No scaffold text available'}
   return (
     <div className={`${styles.page} ${styles.hasThreeColumnLayout}`}>
       <Navigation />
-      
+
+      {toastMessage ? (
+        <div
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            right: '1rem',
+            zIndex: 1000,
+            background: '#ecfdf5',
+            border: '1px solid #34d399',
+            color: '#065f46',
+            padding: '0.75rem 1rem',
+            borderRadius: '0.75rem',
+            boxShadow: '0 16px 32px rgba(15, 23, 42, 0.12)',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            maxWidth: '22rem',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          {toastMessage}
+        </div>
+      ) : null}
+
       {/* Three-column layout */}
       <div className={styles.layoutAfterGeneration}>
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
-          {/* Header (outside card) */}
-          <div className={styles.formHeader}>
-            <div className={styles.headerLeft}>
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className={styles.backIconButton}
-                aria-label="Back to Session"
-                title="Back to Session"
-              >
-                <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
-              </button>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1>
-            </div>
-          </div>
-
           <div className={styles.formCard}>
+            {/* <div className={styles.formHeader}>
+              <h1 className={styles.formTitle}>Reading Scaffolds</h1> 
+            </div>*/}
             
             {/* Session Information Form */}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
@@ -806,6 +903,21 @@ ${scaffold.text || 'No scaffold text available'}
                 rows={3}
               />
             </div>
+
+            {/* The number of scaffolds you want to generate; to be changed to a number input to control the generation workflow */}
+            {/* 
+            <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
+              <div className={styles.labelWithIcon}>
+                <label className={uiStyles.fieldLabel}>The number of scaffolds you want to generate</label>
+              </div>
+              <textarea
+                value={assignmentGoals}
+                onChange={(e) => setAssignmentGoals(e.target.value)}
+                className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
+                placeholder="Input the number of scaffolds you want to generate."
+                rows={2}
+              />
+            </div>*/}
             
             {/* Session Info Display */}
             {/*
@@ -829,8 +941,10 @@ ${scaffold.text || 'No scaffold text available'}
             </div>
             */}
 
+            
+
             {/* Generate Scaffolds Button */}
-            <div style={{ textAlign: 'center' }}>
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
               <button
                 onClick={handleGenerateScaffolds}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
@@ -840,6 +954,39 @@ ${scaffold.text || 'No scaffold text available'}
                 {generating ? 'Generating...' : 'Generate Scaffolds'}
               </button>
             </div>
+
+            {/* Navigation buttons */}
+            {enableNavigation && navigationData && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <button
+                  onClick={() => navigateToReading('prev')}
+                  disabled={!canGoPrev}
+                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                  style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
+                >
+                  ← Previous Reading
+                </button>
+                <button
+                  onClick={() => navigateToReading('next')}
+                  disabled={!canGoNext}
+                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+                  style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
+                >
+                  Next Reading →
+                </button>
+              </div>
+            )}
+
+            {/* Back button */}
+            <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+              <button
+                onClick={() => router.back()}
+                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              >
+                ← Back to Session
+              </button>
+            </div>
+
             {/* Publish and Download buttons */}
             {/*
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
@@ -878,28 +1025,6 @@ ${scaffold.text || 'No scaffold text available'}
             </div> 
             */}
           </div> 
-
-          {/* Navigation buttons (outside card, below it) */}
-          {/* {enableNavigation && navigationData && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.5rem' }}>
-              <button
-                onClick={() => navigateToReading('prev')}
-                disabled={!canGoPrev}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
-              >
-                ← Previous Reading
-              </button>
-              <button
-                onClick={() => navigateToReading('next')}
-                disabled={!canGoNext}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
-              >
-                Next Reading →
-              </button>
-            </div>
-          )} */}
         </div>
 
         {/* Middle: PDF content */}
@@ -919,6 +1044,7 @@ ${scaffold.text || 'No scaffold text available'}
               readingId={readingId}
               scrollToFragment={activeFragment || undefined}
               scaffoldIndex={activeFragment ? processedScaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
+              initialPage={Number.isFinite(initialPage) && (initialPage as number) > 0 ? (initialPage as number) : undefined}
             />
           </div>
         </div>
@@ -950,9 +1076,10 @@ ${scaffold.text || 'No scaffold text available'}
               ) : (
                 processedScaffolds.map((scaffold) => {
                   const scaffoldKey = scaffold.id;
-                  const hasDecisionButtons = scaffold.status !== 'ACCEPTED' && scaffold.status !== 'REJECTED';
-                  const actionClassName = `${styles.scaffoldActions} ${!hasDecisionButtons ? styles.scaffoldActionsCompact : ''}`;
+                  // Show decision buttons if status is not ACCEPTED/REJECTED, OR if currently editing (to allow re-review)
                   const isEditing = manualEditOpenId === scaffoldKey;
+                  const hasDecisionButtons = (scaffold.status !== 'ACCEPTED' && scaffold.status !== 'REJECTED') || isEditing;
+                  const actionClassName = `${styles.scaffoldActions} ${!hasDecisionButtons ? styles.scaffoldActionsCompact : ''}`;
                   
                   return (
                     <div
@@ -1098,8 +1225,10 @@ ${scaffold.text || 'No scaffold text available'}
                           <>
                             <button
                               className={`${uiStyles.btn} ${uiStyles.btnAccept}`}
+                              type="button"
                               disabled={manualEditSubmittingId === scaffoldKey}
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleScaffoldAction(scaffold.id, 'accept');
                               }}
@@ -1108,7 +1237,9 @@ ${scaffold.text || 'No scaffold text available'}
                             </button>
                             <button
                               className={`${uiStyles.btn} ${uiStyles.btnReject}`}
+                              type="button"
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleScaffoldAction(scaffold.id, 'reject');
                               }}
@@ -1167,76 +1298,43 @@ ${scaffold.text || 'No scaffold text available'}
                     </div>
                   </div>
                 </div>
-                {/* Actions moved to floating dock */}
+                <div className={styles.footerPrimary}>
+                  <button
+                    className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.publishButton}`}
+                    type="button"
+                    onClick={() => {
+                      const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+                      if (acceptedScaffolds.length === 0) {
+                        alert('No accepted scaffolds to download.');
+                        return;
+                      }
+                      const md = generateMarkdown(acceptedScaffolds);
+                      setMdContent(md);
+                      setShowDownloadModal(true);
+                    }}
+                    disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+                    style={{ marginRight: '0.75rem' }}
+                  >
+                    Download / Export
+                  </button>
+                  <button
+                    className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.publishButton}`}
+                    type="button"
+                    onClick={() => {
+                      const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+                      if (acceptedScaffolds.length === 0) {
+                        alert('No accepted scaffolds to publish.');
+                        return;
+                      }
+                      setShowPublishModal(true);
+                    }}
+                    disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+                  >
+                    Publish Accepted Scaffolds
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Floating Dock (bottom bar) */}
-      <div className={styles.floatingDock} role="navigation" aria-label="Reading scaffolds dock">
-        <div className={styles.floatingDockInner}>
-          {/* Left: browsing controls */}
-          <div className={styles.dockGroupLeft} aria-label="Browsing controls">
-            {enableNavigation && navigationData ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => navigateToReading('prev')}
-                  disabled={!canGoPrev}
-                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                  style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
-                >
-                  ← Previous Reading
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigateToReading('next')}
-                  disabled={!canGoNext}
-                  className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                  style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
-                >
-                  Next Reading →
-                </button>
-              </>
-            ) : null}
-          </div>
-
-          {/* Right: output controls */}
-          <div className={styles.dockGroupRight} aria-label="Task completion controls">
-            <button
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.publishButton}`}
-              type="button"
-              onClick={() => {
-                const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-                if (acceptedScaffolds.length === 0) {
-                  alert('No accepted scaffolds to download.');
-                  return;
-                }
-                const md = generateMarkdown(acceptedScaffolds);
-                setMdContent(md);
-                setShowDownloadModal(true);
-              }}
-              disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-            >
-              Download / Export
-            </button>
-            <button
-              className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.publishButton}`}
-              type="button"
-              onClick={() => {
-                const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-                if (acceptedScaffolds.length === 0) {
-                  alert('No accepted scaffolds to publish.');
-                  return;
-                }
-                setShowPublishModal(true);
-              }}
-              disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-            >
-              Publish Accepted Scaffolds
-            </button>
           </div>
         </div>
       </div>

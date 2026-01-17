@@ -517,26 +517,23 @@ export default function EditClassProfilePage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-          <div className={styles.headerLeft}>
+          <div>
+            <h1 className={styles.title}>
+              {isEdit ? 'Edit Class Profile' : 'Create New Class Profile'}
+            </h1>
+            <p className={styles.subtitle}>
+              Fill in the details below to generate your class profile
+            </p>
+          </div>
+          <div className={styles.headerActions}>
             <button
               type="button"
               onClick={handleCancel}
-              className={styles.backIconButton}
-              aria-label="Back to Dashboard"
+              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
               disabled={generating || saving}
             >
-              <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
+              ← Back to Dashboard
             </button>
-            <div>
-              <h1 className={styles.title}>
-                {isEdit ? 'Edit Class Profile' : 'Create New Class Profile'}
-              </h1>
-              <p className={styles.subtitle}>
-                Fill in the details below to generate your class profile
-              </p>
-            </div>
-          </div>
-          <div className={styles.headerActions}>
             <button
               type="button"
               onClick={handleGenerateProfile}
