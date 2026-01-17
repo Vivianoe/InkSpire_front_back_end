@@ -415,14 +415,9 @@ export default function ReadingUploadPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-          <div>
-            <h1 className={styles.title}>Reading Uploads</h1>
-            <p className={styles.subtitle}>
-              Upload and process readings for this course.
-            </p>
-          </div>
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
+              type="button"
               onClick={() => {
                 // Navigate back to course or profile
                 if (profileId) {
@@ -431,11 +426,20 @@ export default function ReadingUploadPage() {
                   router.push(`/courses/${courseId}`);
                 }
               }}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              className={styles.backIconButton}
+              aria-label="Back"
               disabled={uploading}
             >
-              ← Back
+              <i className="fa-solid fa-arrow-left-long" aria-hidden="true"></i>
             </button>
+            <div>
+              <h1 className={styles.title}>Reading Uploads</h1>
+              <p className={styles.subtitle}>
+                Upload and process readings for this course.
+              </p>
+            </div>
+          </div>
+          <div className={styles.headerActions}>
             <button
               onClick={handleCreateSession}
               className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}

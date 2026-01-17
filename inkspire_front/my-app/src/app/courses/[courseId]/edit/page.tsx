@@ -1,9 +1,6 @@
-// RESTful route: /courses/[courseId]/class-profiles/[profileId]/create
 'use client';
 
-//export { default } from '@/app/class-profile/[id]/edit/page';
-
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
@@ -14,9 +11,8 @@ import {
   createDefaultDesignConsiderations,
   normalizeDesignConsiderations,
   parseDesignConsiderations,
-} from '@/app/courses/[courseId]/class-profiles/designConsiderations';
+} from '@/app/class-profile/designConsiderations';
 import styles from './page.module.css';
-import { supabase } from '@/lib/supabase/client';
 
 interface ClassProfile {
   id: string;
@@ -59,70 +55,37 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
   { value: 'mixed', label: 'Mixed proficiency cohort' },
 ];
 
-// const DEFAULT_CLASS_BACKGROUND = '';
-
-// const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
-//   disciplineInfo: {
-//     disciplineName: '',
-//     department: '',
-//     fieldDescription: '',
-//   },
-//   courseInfo: {
-//     courseName: '',
-//     courseCode: '',
-//     description: '',
-//     credits: '',
-//     prerequisites: '',
-//     learningObjectives: '',
-//     assessmentMethods: '',
-//     deliveryMode: '',
-//   },
-//   classInfo: {
-//     semester: '',
-//     year: '',
-//     section: '',
-//     meetingDays: '',
-//     meetingTime: '',
-//     location: '',
-//     enrollment: '',
-//     background: DEFAULT_CLASS_BACKGROUND,
-//     priorKnowledge: '',
-//   },
-//   generatedProfile: undefined,
-//   designConsiderations: createDefaultDesignConsiderations(),
-// };
-
 const DEFAULT_CLASS_BACKGROUND =
   'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
-    disciplineName: 'Education',
-    department: 'Graduate School of Education',
+    disciplineName: 'Computer Science',
+    department: 'Department of Computer and Information Science',
     fieldDescription:
-      'Explores educational theory, teaching and learning practices, and problem-driven inquiry within education research contexts.',
+      'Explores computational theory, software engineering practices, and data-driven inquiry within education research contexts.',
   },
   courseInfo: {
-    courseName: 'Learning Sciences: Past, Present, and Future',
-    courseCode: 'EDUC 6144',
+    courseName: 'Introduction to Python',
+    courseCode: 'CS101',
     description:
-      'This course is a survey of the kinds of theories, methods, and applications through which educational researchers understand learning and how to improve it. The course is designed to provide information about how the field of the learning sciences emerged, has evolved, and is growing to address current and future learning needs. ',
-    credits: '1',
+      'This is a beginner-level course focusing on Python programming basics for college students. The course covers the fundamentals of Python programming, including syntax, data structures, and basic algorithms.',
+    credits: '3',
     prerequisites: 'None required',
     learningObjectives:
-      'Investigating the roots of the learning sciences field and how it has evolved',
-    assessmentMethods: 'In-class participation, short writing assignments, and a final exam.',
+      'Equip graduate researchers with the ability to design, implement, and evaluate Python-based workflows for education data analysis.',
+    assessmentMethods: 'Project-based assessments, annotated code portfolios, collaborative labs, and reflective participation.',
     deliveryMode: 'in-person',
   },
   classInfo: {
-    semester: 'Spring',
-    year: '2026',
+    semester: 'Fall',
+    year: '2024',
     section: 'A',
     meetingDays: 'MW',
     meetingTime: '10:00 AM - 11:30 AM',
-    location: 'STIT Building, Room 210',
+    location: 'Engineering Building, Room 210',
     enrollment: '30',
-    background: 'Cohort includes graduate students from education discipline.',
+    background: DEFAULT_CLASS_BACKGROUND,
     priorKnowledge: 'mixed',
   },
   generatedProfile: undefined,
@@ -237,59 +200,68 @@ const createDefaultFormData = (id: string): ClassProfile => ({
   designConsiderations: { ...DEFAULT_PREFILL_PROFILE.designConsiderations },
 });
 
-export default function EditClassProfilePage() {
+export default function EditCoursePage() {
   const router = useRouter();
-  // Path parameters (from route: /class-profile/[id]/edit)
-  const pathParams = useParams();
-  // Query parameters (from URL: ?courseId=xxx&instructorId=yyy)
+  const params = useParams();
   const searchParams = useSearchParams();
-  const profileId = (pathParams?.id || pathParams?.profileId) as string;
-  const isEdit = profileId !== 'new';
+  const courseId = params?.courseId as string;
+  const isEdit = courseId !== 'new';
   
-  // Extract course_id from URL path structure: /courses/{courseId}/class-profiles/{profileId}/edit
-  const urlCourseId =
-    (pathParams?.courseId as string | undefined) ||
-    searchParams?.get('courseId') ||
-    (typeof window !== 'undefined' && window.location.pathname.match(/\/courses\/([^\/]+)/)?.[1]);
+  // Get course_id and instructor_id from URL params
+  const urlCourseId = courseId || searchParams?.get('courseId');
   const urlInstructorId = searchParams?.get('instructorId');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(courseId || 'new'));
 
-  const loadProfile = useCallback(async () => {
+  useEffect(() => {
+    if (isEdit && courseId) {
+      loadProfile();
+    } else if (!isEdit) {
+      setFormData(createDefaultFormData('new'));
+    }
+  }, [courseId, isEdit]);
+
+  const loadProfile = async () => {
     setLoading(true);
     setError(null);
     try {
-      if (!profileId || profileId === 'new') {
+      if (!courseId || courseId === 'new') {
         setLoading(false);
         return;
       }
 
-      const courseIdParam = urlCourseId ? `?course_id=${urlCourseId}` : '';
-      const response = await fetch(`/api/class-profiles/${profileId}${courseIdParam}`);
+      // Try to load from class profile if it exists for this course
+      // For now, we'll use a simplified approach
+      const response = await fetch(`/api/courses/instructor/${urlInstructorId || MOCK_INSTRUCTOR_ID}`);
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.message || 'Failed to load profile');
-      }
+      
+      if (response.ok && Array.isArray(data.courses)) {
+        const course = data.courses.find((c: any) => c.id === courseId);
+        if (course && course.class_profile_id) {
+          // Load the class profile
+          const profileResponse = await fetch(`/api/class-profiles/${course.class_profile_id}`);
+          const profileData = await profileResponse.json().catch(() => ({}));
+          
+          if (profileResponse.ok) {
+            const payload = profileData.profile ?? profileData.class_profile ?? null;
+            const profileDataFormatted = payload
+              ? {
+                  ...createDefaultFormData(courseId),
+                  ...payload,
+                  designConsiderations: normalizeDesignConsiderations(
+                    payload.designConsiderations ?? parseDesignConsiderations(payload.generatedProfile)
+                  ),
+                }
+              : null;
 
-      const payload = data.profile ?? data.class_profile ?? null;
-      const profileData = payload
-        ? {
-            ...createDefaultFormData(profileId),
-            ...payload,
-            designConsiderations: normalizeDesignConsiderations(
-              payload.designConsiderations ?? parseDesignConsiderations(payload.generatedProfile)
-            ),
+            if (profileDataFormatted) {
+              setFormData(profileDataFormatted);
+            }
           }
-        : null;
-
-      if (profileData) {
-        setFormData(profileData);
-      } else {
-        throw new Error('Failed to load profile');
+        }
       }
     } catch (err) {
       setError('Failed to load profile. Please try again.');
@@ -297,45 +269,7 @@ export default function EditClassProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [profileId]);
-
-  useEffect(() => {
-    if (isEdit && profileId) {
-      loadProfile();
-    } else if (!isEdit) {
-      setFormData(createDefaultFormData('new'));
-    }
-  }, [profileId, isEdit, loadProfile]);
-
-  useEffect(() => {
-    const fetchCurrentUser = async () => {
-      try {
-        // TODO: replace with httponly cookies for security
-        // Get auth token from Supabase session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          throw new Error('Not authenticated. Please sign in again.');
-        }
-
-        const headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        };
-
-        const response = await fetch('/api/users/me', { headers });
-        if (response.ok) {
-          const userData = await response.json();
-          setCurrentUserId(userData.id);
-        } else {
-          console.error('Failed to fetch current user');
-        }
-      } catch (err) {
-        console.error('Error fetching current user:', err);
-      }
-    }
-    
-    fetchCurrentUser();
-  }, []);
+  };
 
   const handleInputChange = (section: keyof ClassProfile, field: string, value: string) => {
     setFormData(prev => {
@@ -386,29 +320,25 @@ export default function EditClassProfilePage() {
       return;
     }
 
-    if (!currentUserId && !urlInstructorId) {
-      setError('Unable to identify instructor. Please try refreshing the page.');
-      return;
-    }
-
     setGenerating(true);
     setError(null);
 
     try {
-      // Use course_id from URL params, or "new" to create a new course
-      const courseIdForRequest = urlCourseId || 'new';
-
       const payload = {
-        instructor_id: urlInstructorId || currentUserId || MOCK_INSTRUCTOR_ID,
-        course_id: courseIdForRequest,
+        instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
         title: formData.courseInfo.courseName || 'Untitled Class',
         course_code: formData.courseInfo.courseCode || 'TBD',
         description:
           formData.courseInfo.description || 'Draft class profile generated via Inkspire',
         class_input: buildClassInputPayload(formData),
       };
+      
+      // Add course_id if provided in URL params
+      if (urlCourseId && urlCourseId !== 'new') {
+        (payload as any).course_id = urlCourseId;
+      }
 
-      const response = await fetch(`/api/courses/${courseIdForRequest}/class-profiles`, {
+      const response = await fetch('/api/class-profiles', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -416,15 +346,13 @@ export default function EditClassProfilePage() {
         body: JSON.stringify(payload),
       });
 
-      
-
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || 'Failed to generate profile');
       }
 
+      console.log('data:', data);
       const review = data.review ?? null;
-      const completeProfile = data.profile; // Backend returns reconstructed profile with all basic info
 
       const { profileText, design } = extractProfileFromReview(review);
       const textToUse = profileText || formData.generatedProfile || '';
@@ -444,8 +372,9 @@ export default function EditClassProfilePage() {
       );
 
       const mergedDesign: DesignConsiderations = {
-        ...parsedDesign,                           // LLM-generated values as base
-		    ...formData.designConsiderations,          // User-entered values override LLM
+        ...parsedDesign,
+        userDefined:
+          formData.designConsiderations.userDefined?.trim() || parsedDesign.userDefined || '',
       };
 
       const nextId =
@@ -455,31 +384,20 @@ export default function EditClassProfilePage() {
         formData.id ||
         'new';
 
-      // Update formData with complete profile including all basic info from backend
-      const updatedFormData = {
-        ...formData,
-        id: typeof nextId === 'string' ? nextId : formData.id,
-        disciplineInfo: completeProfile?.disciplineInfo || formData.disciplineInfo,
-        courseInfo: completeProfile?.courseInfo || formData.courseInfo,
-        classInfo: completeProfile?.classInfo || formData.classInfo,
+      setFormData(prev => ({
+        ...prev,
+        id: typeof nextId === 'string' ? nextId : prev.id,
         generatedProfile: textToUse,
         designConsiderations: mergedDesign,
-      };
-
-      setFormData(updatedFormData);
+      }));
 
       if (typeof nextId === 'string' && nextId !== 'new') {
-        // Use RESTful URL structure if courseId is available, otherwise fallback to old structure
-        if (urlCourseId) {
-          router.push(`/courses/${urlCourseId}/class-profiles/${nextId}/view`);
-        } else {
-          // Fallback to old structure with query params
-          const navParams = new URLSearchParams();
-          if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
-          const queryString = navParams.toString();
-          router.push(`/courses/${urlCourseId || 'new'}/class-profiles/${nextId}/view${queryString ? `?${queryString}` : ''}`);
-        }
+        // Preserve course_id and instructor_id when navigating
+        const navParams = new URLSearchParams();
+        if (urlCourseId && urlCourseId !== 'new') navParams.set('courseId', urlCourseId);
+        if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+        const queryString = navParams.toString();
+        router.push(`/courses/${urlCourseId || courseId}/view${queryString ? `?${queryString}` : ''}`);
       } else {
         setError('Profile ID was not returned by the server.');
       }
@@ -491,7 +409,14 @@ export default function EditClassProfilePage() {
   };
 
   const handleCancel = () => {
-    router.push('/');
+    if (urlCourseId && urlCourseId !== 'new') {
+      const navParams = new URLSearchParams();
+      if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
+      const queryString = navParams.toString();
+      router.push(`/courses/${urlCourseId}/view${queryString ? `?${queryString}` : ''}`);
+    } else {
+      router.push('/');
+    }
   };
 
   if (loading) {
@@ -573,7 +498,6 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Computer Science (pre-filled), Educational Psychology, Mechanical Engineering"
                   required
-                  disabled={generating}
                 />
               </div>
 
@@ -589,7 +513,6 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Department of Computer and Information Science (pre-filled), School of Education"
                   required
-                  disabled={generating}
                 />
               </div>
 
@@ -602,9 +525,8 @@ export default function EditClassProfilePage() {
                   value={formData.disciplineInfo.fieldDescription}
                   onChange={(e) => handleInputChange('disciplineInfo', 'fieldDescription', e.target.value)}
                   className={styles.textarea}
-                  placeholder="Summarize the discipline’s focus areas, core questions, and primary methods."
+                  placeholder="Summarize the discipline's focus areas, core questions, and primary methods."
                   rows={3}
-                  disabled={generating}
                 />
               </div>
             </div>
@@ -626,7 +548,6 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., Introduction to Universal Design for Learning"
                   required
-                  disabled={generating}
                 />
               </div>
 
@@ -642,7 +563,6 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., EDU 101"
                   required
-                  disabled={generating}
                 />
               </div>
 
@@ -657,7 +577,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('courseInfo', 'credits', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 3"
-                  disabled={generating}
                 />
               </div>
 
@@ -672,7 +591,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('courseInfo', 'prerequisites', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., EDU 100 or instructor permission"
-                  disabled={generating}
                 />
               </div>
 
@@ -687,7 +605,6 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Outline the learning objectives or expected outcomes."
                   rows={3}
-                  disabled={generating}
                 />
               </div>
 
@@ -702,7 +619,6 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Describe the assessment methods (exams, projects, participation, etc.)."
                   rows={3}
-                  disabled={generating}
                 />
               </div>
 
@@ -715,7 +631,6 @@ export default function EditClassProfilePage() {
                   value={formData.courseInfo.deliveryMode}
                   onChange={(e) => handleInputChange('courseInfo', 'deliveryMode', e.target.value)}
                   className={styles.input}
-                  disabled={generating}
                 >
                   <option value="">Select delivery mode</option>
                   <option value="in-person">In-person</option>
@@ -735,7 +650,6 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Enter a detailed description of the course..."
                   rows={4}
-                  disabled={generating}
                 />
               </div>
             </div>
@@ -755,7 +669,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'semester', e.target.value)}
                   className={styles.input}
                   required
-                  disabled={generating}
                 >
                   <option value="">Select semester</option>
                   <option value="Fall">Fall</option>
@@ -777,7 +690,6 @@ export default function EditClassProfilePage() {
                   className={styles.input}
                   placeholder="e.g., 2024"
                   required
-                  disabled={generating}
                 />
               </div>
 
@@ -792,7 +704,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'section', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., A, B, 01"
-                  disabled={generating}
                 />
               </div>
 
@@ -807,7 +718,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'enrollment', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 25"
-                  disabled={generating}
                 />
               </div>
 
@@ -822,7 +732,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'meetingDays', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., MWF, TTh"
-                  disabled={generating}
                 />
               </div>
 
@@ -837,7 +746,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'meetingTime', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., 10:00 AM - 11:30 AM"
-                  disabled={generating}
                 />
               </div>
 
@@ -852,7 +760,6 @@ export default function EditClassProfilePage() {
                   onChange={(e) => handleInputChange('classInfo', 'location', e.target.value)}
                   className={styles.input}
                   placeholder="e.g., Building A, Room 201"
-                  disabled={generating}
                 />
               </div>
 
@@ -867,7 +774,6 @@ export default function EditClassProfilePage() {
                   className={styles.textarea}
                   placeholder="Provide background information about this class and its learners."
                   rows={3}
-                  disabled={generating}
                 />
               </div>
 
@@ -880,7 +786,6 @@ export default function EditClassProfilePage() {
                   value={formData.classInfo.priorKnowledge}
                   onChange={(e) => handleInputChange('classInfo', 'priorKnowledge', e.target.value)}
                   className={styles.input}
-                  disabled={generating}
                 >
                   {PRIOR_KNOWLEDGE_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>
@@ -910,7 +815,6 @@ export default function EditClassProfilePage() {
                         className={styles.input}
                         value={formData.designConsiderations[field.key]}
                         onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
-                        disabled={generating}
                       >
                         <option value="">Select {field.label.toLowerCase()}</option>
                         {selectOptions.map(option => (
@@ -927,7 +831,6 @@ export default function EditClassProfilePage() {
                         value={formData.designConsiderations[field.key]}
                         onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
                         placeholder={field.placeholder}
-                        disabled={generating}
                       />
                     )}
                   </div>
@@ -942,4 +845,3 @@ export default function EditClassProfilePage() {
     </div>
   );
 }
-

@@ -37,7 +37,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.5rem;
 }
 
 .formTitle {
@@ -46,6 +46,46 @@ html, body {
   font-weight: 700;
   color: var(--gray-900);
   line-height: 1.2;
+}
+
+.backIconButton {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 9999px;
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  color: var(--gray-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.headerLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.backIconButton i {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.backIconButton:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+}
+
+.backIconButton:active {
+  transform: translateY(1px);
+}
+
+.backIconButton:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.6);
+  outline-offset: 2px;
 }
 
 .formCard {
@@ -254,6 +294,7 @@ html, body {
   overflow-x: hidden;
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
+  padding-bottom: 6.25rem; /* space for floating dock */
 }
 
 .leftPanel::-webkit-scrollbar {
@@ -265,6 +306,7 @@ html, body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  padding-bottom: 6.25rem; /* space for floating dock */
 }
 
 .rightPanel {
@@ -275,6 +317,7 @@ html, body {
     overflow-x: hidden;
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
+  padding-bottom: 6.25rem; /* space for floating dock */
 }
 
 .rightPanel::-webkit-scrollbar {
@@ -580,6 +623,61 @@ html, body {
 .inlineTextarea {
   flex: 1;
   min-height: 5rem;
+}
+
+/* ===== Floating Dock ===== */
+.floatingDock {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  width: min(1100px, calc(100% - 2rem));
+  z-index: 40;
+}
+
+.floatingDockInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(16px) saturate(80%);
+  -webkit-backdrop-filter: blur(16px) saturate(80%);
+}
+
+.dockGroupLeft,
+.dockGroupRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dockGroupRight {
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .floatingDock {
+    bottom: 0.75rem;
+    width: calc(100% - 1rem);
+  }
+  .floatingDockInner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+  .dockGroupLeft,
+  .dockGroupRight {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
 }
 
 /* ===== Header & Title ===== */
