@@ -89,15 +89,7 @@ export default function ReadingUploadPage() {
   const [loadingPerusall, setLoadingPerusall] = useState(false);
   const [selectedPerusallReading, setSelectedPerusallReading] = useState<string | null>(null);
 
-<<<<<<< HEAD
   const MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024;
-=======
-  // Get instructor_id from query params, ensure it's never null or undefined
-  const instructorIdFromParams = searchParams?.get('instructorId');
-  const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
-    ? instructorIdFromParams 
-    : MOCK_INSTRUCTOR_ID;
->>>>>>> origin/button-functionality
 
   // Get instructor_id from query params, ensure it's never null or undefined
   const instructorIdFromParams = searchParams?.get('instructorId');

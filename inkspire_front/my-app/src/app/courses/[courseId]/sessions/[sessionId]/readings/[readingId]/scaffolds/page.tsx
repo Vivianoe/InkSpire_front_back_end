@@ -117,8 +117,9 @@ export default function ScaffoldPage() {
         }
         
         const data = await response.json();
-        setScaffolds(data.scaffolds || []);
-        setPdfUrl(data.pdfUrl || null);
+      setScaffolds(data.scaffolds || []);
+      // Backend returns pdf_url (snake_case); some clients may return pdfUrl (camelCase)
+      setPdfUrl((data.pdfUrl ?? data.pdf_url) || null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load scaffolds');
       } finally {
@@ -541,9 +542,9 @@ export default function ScaffoldPage() {
           const data = await refreshResponse.json();
           setScaffolds(data.scaffolds || []);
           
-          // Update PDF URL if provided
-          if (data.pdfUrl) {
-            setPdfUrl(data.pdfUrl);
+          // Update PDF URL if provided (support both pdfUrl and pdf_url)
+          if (data.pdfUrl || data.pdf_url) {
+            setPdfUrl((data.pdfUrl ?? data.pdf_url) || null);
           }
           
           // If still no scaffolds, show a warning
@@ -568,7 +569,6 @@ export default function ScaffoldPage() {
 
   // Process scaffolds for display
   const processedScaffolds = scaffolds.map((scaffold, index) => {
-<<<<<<< HEAD
     const normalizedStatus = (typeof scaffold.status === 'string' ? scaffold.status : '').toLowerCase();
     const displayStatus =
       normalizedStatus === 'approved' || normalizedStatus === 'accepted'
@@ -582,23 +582,6 @@ export default function ScaffoldPage() {
             normalizedStatus === 'in_progress'
             ? 'IN PROGRESS'
             : 'IN PROGRESS';
-=======
-    // Map status: preserve ACCEPTED/REJECTED, convert pending/approved/rejected to display format
-    let displayStatus: string;
-    if (scaffold.status === 'ACCEPTED' || scaffold.status === 'REJECTED' || scaffold.status === 'IN PROGRESS') {
-      // Already in display format, use as-is
-      displayStatus = scaffold.status;
-    } else if (scaffold.status === 'pending' || scaffold.status === 'draft' || scaffold.status === 'edit_pending') {
-      displayStatus = 'IN PROGRESS';
-    } else if (scaffold.status === 'approved') {
-      displayStatus = 'ACCEPTED';
-    } else if (scaffold.status === 'rejected') {
-      displayStatus = 'REJECTED';
-    } else {
-      displayStatus = 'IN PROGRESS';
-    }
-    
->>>>>>> origin/button-functionality
     const processed = {
       ...scaffold,
       number: index + 1,
@@ -606,11 +589,7 @@ export default function ScaffoldPage() {
       type: 'Scaffold',
       backgroundColor: ['#f0fdf4', '#eff6ff', '#f9fafb', '#fef3c7', '#fce7f3'][index % 5],
       borderColor: ['#22c55e', '#3b82f6', '#6b7280', '#f59e0b', '#ec4899'][index % 5],
-<<<<<<< HEAD
       status: displayStatus,
-=======
-      status: displayStatus
->>>>>>> origin/button-functionality
     };
     return processed;
   });
@@ -699,12 +678,7 @@ ${scaffold.text || 'No scaffold text available'}
     try {
       setPublishLoading(true);
       setPublishError(null);
-<<<<<<< HEAD
-      console.log('[ScaffoldPage] Publishing annotations with IDs:', annotationIds);
-      const response = await fetch(`/api/perusall/annotations`, {
-=======
       const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
->>>>>>> origin/button-functionality
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ annotation_ids: annotationIds }),
