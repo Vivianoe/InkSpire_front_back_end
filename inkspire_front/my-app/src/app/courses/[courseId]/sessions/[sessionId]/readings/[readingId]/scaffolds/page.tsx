@@ -125,9 +125,8 @@ export default function ScaffoldPage() {
         }
         
         const data = await response.json();
-      setScaffolds(data.scaffolds || []);
-      // Backend returns pdf_url (snake_case); some clients may return pdfUrl (camelCase)
-      setPdfUrl((data.pdfUrl ?? data.pdf_url) || null);
+        setScaffolds(data.scaffolds || []);
+        setPdfUrl(data.pdfUrl || null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load scaffolds');
       } finally {
