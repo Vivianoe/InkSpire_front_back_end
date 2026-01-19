@@ -385,7 +385,11 @@ export default function ViewClassProfilePage() {
   const extractDesignConsiderationMetadataFromVersion = (version: any): unknown => {
     if (!version) return null;
     const meta = version.metadata_json;
-    const metaDesign = meta?.design_rationale ?? meta?.design_consideration ?? meta?.design_considerations;
+    const metaDesign =
+      meta?.profile?.design_consideration ??
+      meta?.design_rationale ??
+      meta?.design_consideration ??
+      meta?.design_considerations;
     if (metaDesign) return metaDesign;
 
     try {
