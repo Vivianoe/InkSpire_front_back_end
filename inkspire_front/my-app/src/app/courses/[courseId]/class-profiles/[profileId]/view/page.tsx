@@ -1003,7 +1003,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     setError(null);
 
     try {
-      const payload = buildRunClassProfileRequest(currentData, designConsiderationMetadataText);
+      const payload = buildRunClassProfileRequest(
+        currentData,
+        getUserDesignConsiderationsForPayload() ?? null
+      );
       
       // Get course_id from URL params, or use "new" to create a new course
       const urlParams = new URLSearchParams(window.location.search);
