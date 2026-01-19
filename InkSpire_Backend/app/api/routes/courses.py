@@ -157,7 +157,7 @@ def edit_design_considerations(
     from app.services.class_profile_service import (
         get_class_profile_version_by_id,
         create_class_profile_version,
-        profile_to_dict,
+        class_profile_to_dict,
     )
     
     current_content = profile.description
@@ -169,14 +169,22 @@ def edit_design_considerations(
     # Parse and update the class profile JSON
     try:
         profile_json = json.loads(current_content)
-        profile_json["design_consideration"] = payload.design_consideration
+        profile_json["design_rationale"] = payload.design_consideration
         updated_text = json.dumps(profile_json, ensure_ascii=False, indent=2)
         
         # Extract metadata
+        existing_meta = profile.metadata_json or {}
+        user_design_considerations = existing_meta.get("design_consideration")
+        if user_design_considerations is None:
+            class_input = profile_json.get("class_input")
+            if isinstance(class_input, dict):
+                user_design_considerations = class_input.get("design_considerations")
         metadata_json = {
             "class_id": profile_json.get("class_id"),
             "profile": profile_json.get("profile"),
-            "design_consideration": profile_json.get("design_consideration"),
+            "design_consideration": user_design_considerations,
+            "design_rationale": payload.design_consideration,
+            "class_input": existing_meta.get("class_input") or profile_json.get("class_input"),
         }
         
         # Create a new version
@@ -193,7 +201,7 @@ def edit_design_considerations(
         
         return {
             "success": True,
-            "review": profile_to_dict(profile),
+            "review": class_profile_to_dict(profile),
         }
     except json.JSONDecodeError as e:
         raise HTTPException(
