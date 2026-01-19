@@ -895,26 +895,27 @@ export default function EditClassProfilePage() {
             <div className={styles.formGrid}>
               {DESIGN_CONSIDERATION_FIELDS.map(field => {
                 const value = formData.designConsiderations[field.key] || '';
-                if (field.options && field.options.length > 0) {
-                  const normalizedValue = value.trim();
-                  const selectedValues = (() => {
-                    if (normalizedValue && field.options.includes(normalizedValue)) {
-                      return [normalizedValue];
-                    }
-                    if (normalizedValue.includes('||')) {
-                      return normalizedValue
-                        .split('||')
-                        .map(item => item.trim())
-                        .filter(Boolean);
-                    }
-                    if (normalizedValue.includes(',')) {
-                      return normalizedValue
-                        .split(',')
-                        .map(item => item.trim())
-                        .filter(Boolean);
-                    }
-                    return normalizedValue ? [normalizedValue] : [];
-                  })();
+                if ('options' in field && field.options.length > 0) {
+                  const normalizedValue = value.trim().replace(/_/g, ' ');
+                  let selectedValues: string[] = [];
+                  if (
+                    normalizedValue &&
+                    field.options.includes(normalizedValue as (typeof field.options)[number])
+                  ) {
+                    selectedValues = [normalizedValue];
+                  } else if (normalizedValue.includes('||')) {
+                    selectedValues = normalizedValue
+                      .split('||')
+                      .map(item => item.trim())
+                      .filter(Boolean);
+                  } else if (normalizedValue.includes(',')) {
+                    selectedValues = normalizedValue
+                      .split(',')
+                      .map(item => item.trim())
+                      .filter(Boolean);
+                  } else if (normalizedValue) {
+                    selectedValues = [normalizedValue];
+                  }
                   return (
                     <div className={styles.inputGroup} key={field.key}>
                       <label className={styles.label}>{field.label}</label>
