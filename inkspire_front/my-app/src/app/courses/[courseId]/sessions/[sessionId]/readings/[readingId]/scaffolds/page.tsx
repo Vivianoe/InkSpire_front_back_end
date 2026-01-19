@@ -585,9 +585,9 @@ export default function ScaffoldPage() {
           const data = await refreshResponse.json();
           setScaffolds(data.scaffolds || []);
           
-          // Update PDF URL if provided
-          if (data.pdfUrl) {
-            setPdfUrl(data.pdfUrl);
+          // Update PDF URL if provided (support both pdfUrl and pdf_url)
+          if (data.pdfUrl || data.pdf_url) {
+            setPdfUrl((data.pdfUrl ?? data.pdf_url) || null);
           }
           
           // If still no scaffolds, show a warning

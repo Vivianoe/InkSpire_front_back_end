@@ -46,6 +46,7 @@ router = APIRouter()
 MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
+
 @router.post("/courses/{course_id}/readings/from-storage", response_model=CreateReadingFromStorageResponse)
 def create_reading_from_storage(
     course_id: str,
