@@ -20,6 +20,7 @@ class ScaffoldAnnotation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     reading_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    generation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     highlight_text = Column(Text, nullable=False)
     start_offset = Column(Integer, nullable=True)
     end_offset = Column(Integer, nullable=True)
@@ -456,4 +457,3 @@ class UserPerusallCredentials(Base):
 
     def __repr__(self):
         return f"<UserPerusallCredentials(id={self.id}, user_id={self.user_id}, is_validated={self.is_validated})>"
-

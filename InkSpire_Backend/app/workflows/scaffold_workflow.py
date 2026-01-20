@@ -54,6 +54,7 @@ class WorkflowState(TypedDict, total=False):
     reading_chunks: Any        # JSON: { "chunks": [ {...}, ... ] }
     class_profile: Any         # JSON: { "class_id", "profile", "design_consideration" }
     reading_info: Any          # JSON: { "assignment_id", "session_description", ... }
+    scaffold_count: int
 
     # Intermediate / Outputs
     material_report_text: str                  # free text
@@ -408,6 +409,7 @@ def node_scaffold(state: WorkflowState) -> dict:
             "reading_info": state["reading_info"],
             "reading_chunks": state["reading_chunks"],
             "focus_report_json": state["focus_report_json"],
+            "scaffold_count": state.get("scaffold_count", "unspecified"),
         },
         context="node_scaffold",
     )
@@ -474,6 +476,10 @@ def node_init_scaffold_review(state: WorkflowState) -> dict:
     if not annos:
         print("WARNING: node_init_scaffold_review: 'annotation_scaffolds' list is empty")
         return {"annotation_scaffolds_review": []}
+
+    scaffold_count = state.get("scaffold_count")
+    if isinstance(scaffold_count, int) and scaffold_count > 0:
+        annos = annos[:scaffold_count]
 
     # Get reading_chunks to match position data
     reading_chunks_data = state.get("reading_chunks", {})

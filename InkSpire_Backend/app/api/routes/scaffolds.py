@@ -329,7 +329,7 @@ def generate_scaffolds_with_session(
             status_code=400,
             detail=f"Session {session_id} does not belong to course {course_id}",
         )
-    
+
     # Establish session-reading relationship (if not already exists)
     existing_relations = get_session_readings(db, session_uuid)
     reading_exists = any(sr.reading_id == reading_uuid for sr in existing_relations)
@@ -466,7 +466,15 @@ def generate_scaffolds_with_session(
     
     print(f"[generate_scaffolds_with_session] Loaded {len(chunks)} chunks from database for reading {reading_uuid}")
     
+    scaffold_count = payload.scaffold_count
+    if scaffold_count is not None and scaffold_count < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="scaffold_count must be a positive integer",
+        )
+
     # Create ReadingScaffoldsRequest with data from database
+    generation_uuid = uuid.uuid4()
     scaffold_request = ReadingScaffoldsRequest(
         class_profile=class_profile_json,
         reading_chunks=reading_chunks_data,
@@ -474,6 +482,8 @@ def generate_scaffolds_with_session(
         session_id=str(session_uuid),
         reading_id=str(reading_uuid),
         course_id=str(course_uuid),  # Include course_id from path parameter
+        generation_id=str(generation_uuid),
+        scaffold_count=scaffold_count,
     )
     
     # Call the existing workflow function
@@ -490,7 +500,10 @@ def generate_scaffolds_with_session(
         all_annotations = get_scaffold_annotations_by_session(db, session_uuid)
         print(f"[generate_scaffolds_with_session] Found {len(all_annotations)} total annotations for session {session_uuid}")
         # Filter by reading_id to only return annotations for this specific reading
-        annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
+        annotations = [
+            a for a in all_annotations
+            if a.reading_id == reading_uuid and a.generation_id == generation_uuid
+        ]
         print(f"[generate_scaffolds_with_session] Found {len(annotations)} annotations in database for reading {reading_uuid}")
         
         # If no annotations found, check if run_material_focus_scaffold returned any
@@ -607,6 +620,7 @@ def run_material_focus_scaffold(
     # Get session_id and reading_id from request, or from reading_info, or generate new ones
     session_id_str = payload.session_id or reading_info.get("session_id")
     reading_id_str = payload.reading_id or reading_info.get("reading_id")
+    generation_id_str = getattr(payload, "generation_id", None)
     
     print(f"[run_material_focus_scaffold] Received session_id_str: {session_id_str}, reading_id_str: {reading_id_str}")
     print(f"[run_material_focus_scaffold] payload.session_id: {payload.session_id}, payload.reading_id: {payload.reading_id}")
@@ -631,10 +645,23 @@ def run_material_focus_scaffold(
             detail=f"Invalid reading_id format: {reading_id_str}",
         )
 
+    generation_id = None
+    if generation_id_str:
+        try:
+            generation_id = uuid.UUID(generation_id_str)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid generation_id format: {generation_id_str}",
+            )
+
+    scaffold_count = getattr(payload, "scaffold_count", None)
+
     initial_state: ScaffoldWorkflowState = {
         "reading_chunks": payload.reading_chunks,
         "class_profile": payload.class_profile,
         "reading_info": reading_info,
+        "scaffold_count": scaffold_count,
         "model": "gemini-2.5-flash",
         "temperature": 0.3,
         "max_output_tokens": 8192,
@@ -707,6 +734,7 @@ def run_material_focus_scaffold(
                     db=db,
                     session_id=session_id,
                     reading_id=reading_id,
+                    generation_id=generation_id,
                     highlight_text=scaf.get("fragment", ""),
                     current_content=scaf.get("text", ""),
                     start_offset=start_offset,
@@ -819,6 +847,19 @@ def load_scaffolds_from_session(
         annotations = [a for a in all_annotations if a.reading_id == reading_uuid]
     else:
         annotations = all_annotations
+
+    # If scaffolds have generation_id, only return the latest generation
+    latest_generation_id = None
+    if annotations:
+        latest = max(
+            annotations,
+            key=lambda a: a.created_at.timestamp() if a.created_at else 0,
+        )
+        latest_generation_id = latest.generation_id
+    if latest_generation_id is not None:
+        annotations = [a for a in annotations if a.generation_id == latest_generation_id]
+    elif annotations:
+        annotations = [a for a in annotations if a.generation_id is None]
     
     if not annotations:
         raise HTTPException(
@@ -944,13 +985,32 @@ def get_scaffolds_by_session_and_reading(
     
     # Get all annotations for the session
     annotations = get_scaffold_annotations_by_session(db, session_uuid)
+
+    # Determine latest generation_id for this session + reading
+    latest_generation_id = None
+    latest_annotation = (
+        db.query(ScaffoldAnnotation)
+        .filter(
+            ScaffoldAnnotation.session_id == session_uuid,
+            ScaffoldAnnotation.reading_id == reading_uuid,
+        )
+        .order_by(ScaffoldAnnotation.created_at.desc())
+        .first()
+    )
+    if latest_annotation:
+        latest_generation_id = latest_annotation.generation_id
     
     # Filter by reading_id and convert to API format with status and history
     scaffolds = []
     for annotation in annotations:
-        if annotation.reading_id == reading_uuid:
-            annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
-            scaffolds.append(annotation_dict)
+        if annotation.reading_id != reading_uuid:
+            continue
+        if latest_generation_id is not None and annotation.generation_id != latest_generation_id:
+            continue
+        if latest_generation_id is None and annotation.generation_id is not None:
+            continue
+        annotation_dict = scaffold_to_dict_with_status_and_history(annotation)
+        scaffolds.append(annotation_dict)
     
     # Get PDF URL for the reading
     pdf_url = None
@@ -1776,4 +1836,3 @@ def get_queries(
     print(f"[get_queries] Extracted {len(queries)} queries from {len(annotations)} annotations")
     
     return {"queries": queries}
-

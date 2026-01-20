@@ -251,7 +251,7 @@ html, body {
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: visible;
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
 }
@@ -682,8 +682,14 @@ html, body {
   align-items: center;
   margin-bottom: 0.5rem;
 }
+.infoTooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.5rem;
+  cursor: help;
+}
 .infoIcon {
-  margin-left: 0.5rem;       /* ml-2 */
   width: 1.25rem;            /* w-5 */
   height: 1.25rem;           /* h-5 */
   border-radius: 9999px;
@@ -693,6 +699,28 @@ html, body {
   color: #fff;
   font-size: 0.75rem;        /* text-xs */
   font-weight: 700;          /* font-bold */
+}
+.infoTooltipText {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 20%;
+  background: #111827;
+  color: #fff;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  white-space: pre-line;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 5;
+}
+.infoTooltip:hover .infoTooltipText,
+.infoTooltip:focus .infoTooltipText {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* Hint */

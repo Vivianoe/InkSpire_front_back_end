@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS scaffold_annotations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL,
     reading_id UUID NOT NULL,
+    generation_id UUID,
     highlight_text TEXT NOT NULL,
     start_offset INTEGER,
     end_offset INTEGER,
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS scaffold_annotations (
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_session_id ON scaffold_annotations(session_id);
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_reading_id ON scaffold_annotations(reading_id);
+CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_generation_id ON scaffold_annotations(generation_id);
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_status ON scaffold_annotations(status);
 
 -- Create scaffold_annotation_versions table
@@ -389,4 +391,3 @@ COMMENT ON TABLE session_items IS 'Independent content for each reading within a
 COMMENT ON TABLE annotation_highlight_coords IS 'Stores coordinate information for annotation highlights, one record per annotation version';
 COMMENT ON TABLE perusall_mappings IS 'Maps courses and readings to Perusall course_id, assignment_id, and document_id';
 COMMENT ON TABLE user_perusall_credentials IS 'Stores per-user Perusall API credentials for integration';
-
