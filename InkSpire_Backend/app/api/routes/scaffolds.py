@@ -466,6 +466,13 @@ def generate_scaffolds_with_session(
     
     print(f"[generate_scaffolds_with_session] Loaded {len(chunks)} chunks from database for reading {reading_uuid}")
     
+    scaffold_count = payload.scaffold_count
+    if scaffold_count is not None and scaffold_count < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="scaffold_count must be a positive integer",
+        )
+
     # Create ReadingScaffoldsRequest with data from database
     generation_uuid = uuid.uuid4()
     scaffold_request = ReadingScaffoldsRequest(
@@ -476,6 +483,7 @@ def generate_scaffolds_with_session(
         reading_id=str(reading_uuid),
         course_id=str(course_uuid),  # Include course_id from path parameter
         generation_id=str(generation_uuid),
+        scaffold_count=scaffold_count,
     )
     
     # Call the existing workflow function
@@ -647,10 +655,13 @@ def run_material_focus_scaffold(
                 detail=f"Invalid generation_id format: {generation_id_str}",
             )
 
+    scaffold_count = getattr(payload, "scaffold_count", None)
+
     initial_state: ScaffoldWorkflowState = {
         "reading_chunks": payload.reading_chunks,
         "class_profile": payload.class_profile,
         "reading_info": reading_info,
+        "scaffold_count": scaffold_count,
         "model": "gemini-2.5-flash",
         "temperature": 0.3,
         "max_output_tokens": 8192,

@@ -72,6 +72,7 @@ export default function ScaffoldPage() {
   const [sessionInfo, setSessionInfo] = useState('');
   const [assignmentDescription, setAssignmentDescription] = useState('');
   const [assignmentGoals, setAssignmentGoals] = useState('');
+  const [scaffoldCount, setScaffoldCount] = useState(6);
   
   // Generate scaffolds state
   const [generating, setGenerating] = useState(false);
@@ -560,6 +561,7 @@ export default function ScaffoldPage() {
       /*real endpoint*/
       const payload = {
         instructor_id: '550e8400-e29b-41d4-a716-446655440000', // Default instructor ID
+        scaffold_count: scaffoldCount,
       };
 
 
@@ -929,20 +931,25 @@ ${scaffold.text || 'No scaffold text available'}
               />
             </div>
 
-            {/* The number of scaffolds you want to generate; to be changed to a number input to control the generation workflow */}
-            {/* 
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
-                <label className={uiStyles.fieldLabel}>The number of scaffolds you want to generate</label>
+                <label className={uiStyles.fieldLabel}>Scaffolds to generate</label>
               </div>
-              <textarea
-                value={assignmentGoals}
-                onChange={(e) => setAssignmentGoals(e.target.value)}
-                className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
-                placeholder="Input the number of scaffolds you want to generate."
-                rows={2}
+              <input
+                type="number"
+                min={1}
+                value={scaffoldCount}
+                onChange={(e) => {
+                  const nextValue = Number(e.target.value);
+                  const normalized = Number.isFinite(nextValue)
+                    ? Math.max(1, Math.floor(nextValue))
+                    : 1;
+                  setScaffoldCount(normalized);
+                }}
+                className={uiStyles.fieldControl}
+                placeholder="6"
               />
-            </div>*/}
+            </div>
             
             {/* Session Info Display */}
             {/*
