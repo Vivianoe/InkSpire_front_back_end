@@ -1102,8 +1102,16 @@ ${scaffold.text || 'No scaffold text available'}
                   borderRadius: '0.5rem',
                   border: '1px solid #e5e7eb'
                 }}>
-                  <p style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>No scaffolds found</p>
-                  <p style={{ fontSize: '0.9rem' }}>No scaffolds have been generated for this reading yet.</p>
+                  {generating && hasScaffolds ? (
+                    <p style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
+                      Scaffolds regenerating...
+                    </p>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>No scaffolds found</p>
+                      <p style={{ fontSize: '0.9rem' }}>No scaffolds have been generated for this reading yet.</p>
+                    </>
+                  )}
                 </div>
               ) : (
                 processedScaffolds.map((scaffold) => {
