@@ -51,6 +51,7 @@ def create_scaffold_annotation(
     db: Session,
     session_id: uuid.UUID,
     reading_id: uuid.UUID,
+    generation_id: Optional[uuid.UUID],
     highlight_text: str,
     current_content: str,
     start_offset: Optional[int] = None,
@@ -66,6 +67,7 @@ def create_scaffold_annotation(
         id=uuid.uuid4(),
         session_id=session_id,
         reading_id=reading_id,
+        generation_id=generation_id,
         highlight_text=highlight_text,
         current_content=current_content,
         start_offset=start_offset,
@@ -328,4 +330,3 @@ def _map_change_type_to_action(change_type: str) -> str:
         "revert": "revert",
     }
     return mapping.get(change_type, "unknown")
-

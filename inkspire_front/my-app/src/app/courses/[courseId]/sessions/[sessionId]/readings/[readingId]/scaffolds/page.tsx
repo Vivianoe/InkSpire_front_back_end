@@ -57,6 +57,7 @@ export default function ScaffoldPage() {
   const [error, setError] = useState<string | null>(null);
   const [navigationData, setNavigationData] = useState<SessionReadingNavigation | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfResetKey, setPdfResetKey] = useState(0);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
   const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
@@ -81,6 +82,7 @@ export default function ScaffoldPage() {
   const [publishLoading, setPublishLoading] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [mdContent, setMdContent] = useState('');
+  const hasScaffolds = scaffolds.length > 0;
 
   const courseId = params.courseId as string;
   const sessionId = params.sessionId as string;
@@ -516,8 +518,31 @@ export default function ScaffoldPage() {
   };
 
   // Handle generate scaffolds
-  const handleGenerateScaffolds = async () => {
+  const resetScaffoldUi = () => {
+    setActiveFragment(null);
+    setManualEditSubmittingId(null);
+    setManualEditOpenId(null);
+    setManualEditMap({});
+    setModificationRequest('');
+    setCurrentReviewIndex(-1);
+    setToastMessage(null);
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setPublishError(null);
+    setShowPublishModal(false);
+    setShowDownloadModal(false);
+    setMdContent('');
+    setScaffolds([]);
+    setPdfResetKey((prev) => prev + 1);
+  };
+
+  const handleGenerateScaffolds = async (options?: { resetBeforeGenerate?: boolean }) => {
     try {
+      if (options?.resetBeforeGenerate) {
+        resetScaffoldUi();
+      }
       setGenerating(true);
       setError(null);
       
@@ -946,12 +971,18 @@ ${scaffold.text || 'No scaffold text available'}
             {/* Generate Scaffolds Button */}
             <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
               <button
-                onClick={handleGenerateScaffolds}
+                onClick={() =>
+                  handleGenerateScaffolds({ resetBeforeGenerate: hasScaffolds })
+                }
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
                 disabled={generating}
                 style={{ width: '100%', maxWidth: '300px' }}
               >
-                {generating ? 'Generating...' : 'Generate Scaffolds'}
+                {generating
+                  ? 'Generating...'
+                  : hasScaffolds
+                    ? 'Regenerate Scaffolds'
+                    : 'Generate Scaffolds'}
               </button>
             </div>
 
@@ -1031,6 +1062,7 @@ ${scaffold.text || 'No scaffold text available'}
         <div className={styles.middlePanel}>
           <div className={styles.pdfContent}>
             <PdfPreview 
+              key={pdfResetKey}
               url={pdfUrl || undefined}
               file={null}
               searchQueries={processedScaffolds.map(s => s.fragment).filter(f => f && f.trim())}

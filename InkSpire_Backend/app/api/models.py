@@ -257,6 +257,7 @@ class ReadingScaffoldsRequest(BaseModel):
     session_id: str
     reading_id: str
     course_id: Optional[str] = None  # Optional course_id for filtering/verification
+    generation_id: Optional[str] = None  # UUID for grouping a single generation
     class_profile: Dict[str, Any]
     reading_chunks: Dict[str, Any]
     reading_info: Dict[str, Any]
@@ -503,4 +504,3 @@ class AssignmentReadingsResponse(BaseModel):
     assignment_name: str
     readings: List[AssignmentReadingStatus]
     message: Optional[str] = None
-
