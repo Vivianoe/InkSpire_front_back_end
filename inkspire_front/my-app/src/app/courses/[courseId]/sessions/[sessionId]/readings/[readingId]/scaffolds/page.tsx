@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
+import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
 import { supabase } from '@/lib/supabase/client';
@@ -91,6 +92,22 @@ export default function ScaffoldPage() {
   const enableNavigation = searchParams.get('navigation') === 'true';
   const initialPageParam = searchParams.get('page') || searchParams.get('startPage');
   const initialPage = initialPageParam ? Number(initialPageParam) : undefined;
+  const infoTooltipText = 'Please edit in the session page.';
+
+  const formatSessionField = (raw: unknown, key: string) => {
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'object') {
+      const value = (raw as Record<string, unknown>)[key];
+      if (typeof value === 'string') return value;
+      try {
+        return JSON.stringify(raw, null, 2);
+      } catch {
+        return '';
+      }
+    }
+    return String(raw);
+  };
 
   // Load navigation data from sessionStorage
   useEffect(() => {
@@ -143,6 +160,36 @@ export default function ScaffoldPage() {
   }, [courseId, sessionId, readingId]);
 
   useEffect(() => {
+    const loadSessionInfo = async () => {
+      if (!sessionId) return;
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.detail || data?.message || 'Failed to load session info');
+        }
+        const currentVersion = data?.current_version ?? null;
+        setSessionInfo(
+          formatSessionField(currentVersion?.session_info_json, 'description')
+        );
+        setAssignmentDescription(
+          formatSessionField(currentVersion?.assignment_info_json, 'description')
+        );
+        setAssignmentGoals(
+          formatSessionField(currentVersion?.assignment_goals_json, 'goal')
+        );
+      } catch (err) {
+        console.warn('Failed to load session info:', err);
+        setSessionInfo('');
+        setAssignmentDescription('');
+        setAssignmentGoals('');
+      }
+    };
+
+    loadSessionInfo();
+  }, [sessionId]);
+
+  useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
         window.clearTimeout(toastTimeoutRef.current);
@@ -187,6 +234,21 @@ export default function ScaffoldPage() {
 
   const canGoPrev = navigationData && navigationData.currentIndex > 0;
   const canGoNext = navigationData && navigationData.currentIndex < navigationData.readingIds.length - 1;
+  const handleBackToSession = () => {
+    if (courseId && sessionId) {
+      const navParams = new URLSearchParams();
+      navParams.set('sessionId', sessionId);
+      if (navigationData?.profileId) {
+        navParams.set('profileId', navigationData.profileId);
+      }
+      if (navigationData?.instructorId) {
+        navParams.set('instructorId', navigationData.instructorId);
+      }
+      router.push(`/courses/${courseId}/sessions/create?${navParams.toString()}`);
+      return;
+    }
+    router.back();
+  };
 
   // Toast functions； need to be modified for better user experience
   const showToast = (message: string) => {
@@ -896,38 +958,59 @@ ${scaffold.text || 'No scaffold text available'}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
                 <label className={uiStyles.fieldLabel}>Session information</label>
+                <span className={styles.infoTooltip} tabIndex={0}>
+                  <span className={styles.infoIcon} aria-hidden="true">
+                    <InformationCircleIcon aria-hidden="true" style={{ width: '0.85rem', height: '0.85rem' }} />
+                  </span>
+                  <span className={styles.infoTooltipText}>{infoTooltipText}</span>
+                </span>
               </div>
               <textarea
                 value={sessionInfo}
-                onChange={(e) => setSessionInfo(e.target.value)}
                 className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
                 placeholder="Include the session name, learning objectives, and any constraints in a single summary."
+                readOnly
+                aria-readonly="true"
               />
             </div>
 
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
                 <label className={uiStyles.fieldLabel}>Assignment description</label>
+                <span className={styles.infoTooltip} tabIndex={0}>
+                  <span className={styles.infoIcon} aria-hidden="true">
+                    <InformationCircleIcon aria-hidden="true" style={{ width: '0.85rem', height: '0.85rem' }} />
+                  </span>
+                  <span className={styles.infoTooltipText}>{infoTooltipText}</span>
+                </span>
               </div>
               <textarea
                 value={assignmentDescription}
-                onChange={(e) => setAssignmentDescription(e.target.value)}
                 className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
                 placeholder="Describe the assignment deliverable or activity focus."
                 rows={3}
+                readOnly
+                aria-readonly="true"
               />
             </div>
 
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
                 <label className={uiStyles.fieldLabel}>Assignment goals</label>
+                <span className={styles.infoTooltip} tabIndex={0}>
+                  <span className={styles.infoIcon} aria-hidden="true">
+                    <InformationCircleIcon aria-hidden="true" style={{ width: '0.85rem', height: '0.85rem' }} />
+                  </span>
+                  <span className={styles.infoTooltipText}>{infoTooltipText}</span>
+                </span>
               </div>
               <textarea
                 value={assignmentGoals}
-                onChange={(e) => setAssignmentGoals(e.target.value)}
                 className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
                 placeholder="List the goals or competencies this assignment reinforces."
                 rows={3}
+                readOnly
+                aria-readonly="true"
               />
             </div>
 
@@ -1018,7 +1101,7 @@ ${scaffold.text || 'No scaffold text available'}
             {/* Back button */}
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
               <button
-                onClick={() => router.back()}
+                onClick={handleBackToSession}
                 className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
               >
                 ← Back to Session

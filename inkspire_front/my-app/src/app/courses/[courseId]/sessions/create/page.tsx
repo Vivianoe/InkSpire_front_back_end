@@ -122,6 +122,7 @@ export default function SessionCreationPage() {
       setSessionTitle(sessionData.title || '');
       setWeekNumber(sessionData.week_number || 1);
       setSelectedSessionId(sessionId);
+      setSelectedPerusallAssignmentId(sessionData.perusall_assignment_id || null);
 
       // Get current version data
       let currentVersionData = sessionData.current_version;
@@ -1022,7 +1023,14 @@ export default function SessionCreationPage() {
             {sessions.length > 0 && (
               <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <button
-                  onClick={() => setMode('select')}
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    params.set('courseId', courseId);
+                    params.set('instructorId', resolvedInstructorId);
+                    setMode('select');
+                    setSelectedSessionId('');
+                    router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
+                  }}
                   className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
                   disabled={creating}
                 >
