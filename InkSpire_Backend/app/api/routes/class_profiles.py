@@ -3,6 +3,7 @@ Class profile management endpoints
 """
 import uuid
 import json
+import logging
 from typing import Any, List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -47,6 +48,7 @@ from app.api.models import (
     HistoryEntryModel,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -250,6 +252,22 @@ def _build_frontend_profile(
     result["generatedProfile"] = profile_text
     return result
 
+def _extract_design_rationale(profile_json: Dict[str, Any]) -> Optional[Any]:
+    """Return LLM-generated design rationale from known keys."""
+    if not isinstance(profile_json, dict):
+        return None
+    design_rationale = (
+        profile_json.get("design_rationale")
+        or profile_json.get("design_consideration")
+        or profile_json.get("design_considerations")
+    )
+    if design_rationale is None:
+        logger.warning(
+            "design_rationale missing in profile JSON",
+            extra={"class_id": profile_json.get("class_id"), "keys": list(profile_json.keys())},
+        )
+    return design_rationale
+
 @router.post("/courses/{course_id}/class-profiles", response_model=RunClassProfileResponse)
 def create_class_profile(
     course_id: str,
@@ -371,6 +389,7 @@ def create_class_profile(
         metadata_json = {
             "profile": profile_json.get("profile"),
             "design_consideration": user_design_considerations,  # Store user input only
+            "design_rationale": _extract_design_rationale(profile_json),
             "class_input": payload.class_input,  # Store full class_input for reference
         }
     except json.JSONDecodeError:
@@ -648,10 +667,18 @@ def edit_class_profile(
     # Parse new text to extract metadata if it's JSON
     try:
         new_json = json.loads(payload.text)
+        class_input = new_json.get("class_input") if isinstance(new_json, dict) else None
+        user_design_considerations = None
+        if isinstance(class_input, dict):
+            user_design_considerations = class_input.get("design_considerations")
+        if user_design_considerations is None and profile.metadata_json:
+            user_design_considerations = profile.metadata_json.get("design_consideration")
+        design_rationale = _extract_design_rationale(new_json)
         metadata_json = {
             "profile": new_json.get("profile"),
-            "design_consideration": new_json.get("design_consideration"),
-            "class_input": new_json.get("class_input"),
+            "design_consideration": user_design_considerations,
+            "design_rationale": design_rationale,
+            "class_input": class_input,
         }
     except json.JSONDecodeError:
         metadata_json = None
@@ -771,11 +798,18 @@ def _parse_and_format_profile_json(content: str, error_context: str) -> tuple:
         raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON ({error_context})")
 
 
-def _build_metadata_json(profile_json: Dict[str, Any], class_input: Dict[str, Any], design_considerations: Dict[str, Any]) -> Dict[str, Any]:
+def _build_metadata_json(
+    profile_json: Dict[str, Any],
+    class_input: Dict[str, Any],
+    design_considerations: Dict[str, Any],
+    design_rationale: Optional[Any] = None,
+) -> Dict[str, Any]:
     """Build metadata JSON structure for class profile."""
     return {
+        "class_id": profile_json.get("class_id"),
         "profile": profile_json.get("profile"),
         "design_consideration": design_considerations,
+        "design_rationale": design_rationale,
         "class_input": class_input,
     }
 
@@ -843,7 +877,12 @@ def _handle_full_regeneration(
     user_design_considerations = payload.class_input.get("design_considerations", {})
 
     # Build metadata
-    metadata_json = _build_metadata_json(profile_json, payload.class_input, user_design_considerations)
+    metadata_json = _build_metadata_json(
+        profile_json,
+        payload.class_input,
+        user_design_considerations,
+        _extract_design_rationale(profile_json),
+    )
 
     return refined_content, metadata_json
 
@@ -906,12 +945,15 @@ def _handle_llm_refinement(
                 "class_info": basic_info.class_info_json or {},
             }
 
-    metadata_json = {
-        "class_id": refined_json.get("class_id"),
-        "profile": refined_json.get("profile"),
-        "design_consideration": refined_json.get("design_consideration"),
-        "class_input": current_class_input,
-    }
+    user_design_considerations = None
+    if isinstance(current_class_input, dict):
+        user_design_considerations = current_class_input.get("design_considerations")
+    metadata_json = _build_metadata_json(
+        refined_json,
+        current_class_input,
+        user_design_considerations,
+        _extract_design_rationale(refined_json),
+    )
 
     return refined_content, metadata_json
 

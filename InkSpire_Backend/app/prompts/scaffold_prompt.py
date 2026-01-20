@@ -48,9 +48,11 @@ def get_scaffold_prompt():
             "Reading info (JSON):\n{reading_info}\n\n"
             "Reading chunks (JSON):\n{reading_chunks}\n\n"
             "Focus areas (JSON from Focus Area Identifier Agent):\n{focus_report_json}\n\n"
+            "Scaffold count target:\n{scaffold_count}\n\n"
             "Task:\n"
             "- Use the focus areas to select which fragments require scaffolds.\n"
-            "- For each chosen fragment, generate ONE scaffold according to the scaffold rules.\n"
+            "- For each chosen fragment, generate ONE or more scaffold according to the scaffold rules.\n"
+            "- If a numeric scaffold count target is provided, return exactly that many scaffolds.\n"
             "- Return ONLY a single JSON object with the schema described in the system message."
         ),
     ])

@@ -761,6 +761,9 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       'Ω': 'omega',
     };
     return s
+      // fold accents/diacritics (e.g., naïve -> naive)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       // normalize common ligatures (PDF text often uses these)
       .replace(/[\uFB00-\uFB06]/g, (m) => ligMap[m] ?? m)
@@ -869,6 +872,22 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         for (const outCh of rep) pushNorm(outCh, i);
         i += 1;
         continue;
+      }
+
+      // Fold accents/diacritics to ASCII when possible (e.g., naïve -> naive)
+      // Keep mapping stable by mapping all produced chars back to the same original index.
+      try {
+        const folded = ch.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+        if (folded && folded !== ch) {
+          for (const outCh of folded) {
+            if (/[A-Za-z0-9]/.test(outCh)) pushNorm(outCh.toLowerCase(), i);
+            else if (/[\s\u00A0]/.test(outCh)) pushSpace(i);
+          }
+          i += 1;
+          continue;
+        }
+      } catch {
+        // ignore normalization errors; fall through
       }
 
       // Greek letters (keep as ASCII words so we can match formulas)
@@ -1110,6 +1129,404 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     }
 
     return best;
+  }
+
+  function splitEllipsisSegments(raw: string): string[] {
+    return (raw || '')
+      .split(/\.{3,}|…/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  
+  function makeAnchorCandidates(segment: string, side: 'prefix' | 'suffix'): string[] {
+    const norm = normalizeForMatch(segment);
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (s: string) => {
+      const v = (s || '').trim();
+      if (!v) return;
+      if (v.length < 12) return; // too ambiguous
+      if (seen.has(v)) return;
+      seen.add(v);
+      out.push(v);
+    };
+    
+    // Prefer word-based anchors
+    const words = norm.split(' ').filter(Boolean);
+    const maxWords = Math.min(words.length, 24);
+    const ns = [maxWords, 20, 16, 12, 10, 8, 6, 5].filter((n) => n >= 5 && n <= maxWords);
+    for (const n of ns) {
+      const cand = side === 'prefix' ? words.slice(0, n).join(' ') : words.slice(words.length - n).join(' ');
+      push(cand);
+    }
+    
+    // Fallback: character-based anchors (useful when PDF merges tokens oddly)
+    const lens = [140, 120, 100, 80, 60, 45, 30];
+    for (const L of lens) {
+      if (norm.length < L) continue;
+      const cand = side === 'prefix' ? norm.slice(0, L) : norm.slice(-L);
+      push(cand);
+    }
+    return out;
+  }
+
+  /**
+   * For "ellipsis" fragments (containing .../…), highlight the entire span between the prefix and suffix.
+   * This is used when scaffolds compress a longer excerpt with an ellipsis, but we still want to
+   * visually cover the omitted middle section in the PDF (often across a page boundary).
+   */
+  function highlightEllipsisSpanAcrossLayers(
+    layers: Element[],
+    fullFragment: string,
+    applier: any,
+    annotationId?: string,
+    debug?: boolean
+  ): number {
+    const segs = splitEllipsisSegments(fullFragment);
+    if (segs.length < 2) return 0;
+    const prefix = segs[0];
+    const suffix = segs[segs.length - 1];
+    if (!prefix || !suffix) return 0;
+
+    const prefixCands = makeAnchorCandidates(prefix, 'prefix');
+    const suffixCands = makeAnchorCandidates(suffix, 'suffix');
+    if (!prefixCands.length || !suffixCands.length) return 0;
+    
+    const prefixCompactCands = makeAnchorCandidates(prefix, 'prefix')
+      .map((s) => s.replace(/\s+/g, ''))
+      .filter(Boolean);
+    const suffixCompactCands = makeAnchorCandidates(suffix, 'suffix')
+      .map((s) => s.replace(/\s+/g, ''))
+      .filter(Boolean);
+
+    const applyRangeInLayer = (
+      layer: Element,
+      pageNum: number,
+      start: number,
+      end: number,
+      text: string,
+      map: any[]
+    ) => {
+      if (end <= start) return 0;
+      
+      // Very large ranges can be brittle; apply in chunks to improve stability.
+      const CHUNK = 3500;
+      const OVERLAP = 30;
+      let applied = 0;
+      for (let s = start; s < end; s += (CHUNK - OVERLAP)) {
+        const e = Math.min(end, s + CHUNK);
+        const rng: any = indexToDomRange(s, e, map);
+        if (!rng) continue;
+        try {
+          if (!applier) continue;
+          applier.applyToRange(rng);
+        } catch {
+          continue;
+        }
+        const pageEl = layer.closest('.page') as HTMLElement | null;
+        if (pageEl) {
+          const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+          highlightRecordsRef.current.push({
+            rangeType: 'text',
+            rangePage: pageNum,
+            rangeStart: s,
+            rangeEnd: e,
+            fragment: text.substring(s, e),
+            queryFragment: fullFragment,
+            ...coords,
+            ...(annotationId ? { annotation_id: annotationId } : {}),
+          });
+        }
+        try { rng.detach?.(); } catch {}
+        applied += 1;
+      }
+      return applied;
+    };
+
+    // Find a good (prefix, suffix) pair such that suffix occurs AFTER prefix.
+    // We choose the closest suffix after a candidate prefix, preferring minimal page distance.
+    let bestPair:
+      | { pLayer: number; pStart: number; pNormStart: number; sLayer: number; sEnd: number; sNormEnd: number }
+      | null = null;
+    const layerCache: Array<{
+      layer: Element;
+      pageNum: number;
+      text: string;
+      map: any[];
+      norm: string;
+      normToOrig: number[];
+      compact: string;
+      compactToOrig: number[];
+    } | null> = new Array(layers.length).fill(null);
+
+    const getLayerData = (idx: number) => {
+      const existing = layerCache[idx];
+      if (existing) return existing;
+      const layer = layers[idx];
+      const nodes = getTextNodesIn(layer);
+      const { text, map } = buildIndex(nodes);
+      const pageEl = layer.closest('.page') as HTMLElement | null;
+      const pageNum = pageEl ? parseInt(pageEl.dataset.page || '1', 10) : (idx + 1);
+      const { normalized: norm, normToOrig } = buildNormalizedIndexWithMap(text);
+      const compactIndex = buildCompactNormalizedIndexWithMap(text);
+      const data = {
+        layer,
+        pageNum,
+        text,
+        map,
+        norm,
+        normToOrig,
+        compact: compactIndex.normalized,
+        compactToOrig: compactIndex.normToOrig,
+      };
+      layerCache[idx] = data;
+      return data;
+    };
+
+    // Ellipsis fragments often span a page boundary, but sometimes can spill a few pages.
+    // Keep a moderate lookahead to avoid matching a suffix much later in the document.
+    const MAX_LOOKAHEAD_PAGES = 10;
+    
+    const findCandSpan = (hay: string, cand: string) => {
+      if (!hay || !cand) return null;
+      const idx = hay.indexOf(cand);
+      if (idx !== -1) return { start: idx, end: idx + cand.length, method: 'full' as const };
+      return findBestNormSpan(hay, cand);
+    };
+    
+    const findAnyPrefix = (d: NonNullable<typeof layerCache[number]>) => {
+      // Try norm candidates first
+      for (const pCand of prefixCands) {
+        const pSpan = findCandSpan(d.norm, pCand);
+        if (!pSpan) continue;
+        const pOrig = mapNormRangeToOrig(pSpan.start, pSpan.end, d.normToOrig, d.text.length);
+        if (!pOrig) continue;
+        return { origStart: pOrig.start, normStart: pSpan.start };
+      }
+      // Fallback: compact (space-free) candidates
+      for (const pCand of prefixCompactCands) {
+        if (!pCand) continue;
+        const pSpan = findCandSpan(d.compact, pCand);
+        if (!pSpan) continue;
+        const pOrig = mapNormRangeToOrig(pSpan.start, pSpan.end, d.compactToOrig, d.text.length);
+        if (!pOrig) continue;
+        return { origStart: pOrig.start, normStart: pSpan.start };
+      }
+      return null;
+    };
+    
+    const findAnySuffix = (d: NonNullable<typeof layerCache[number]>) => {
+      for (const sCand of suffixCands) {
+        const sSpan = findCandSpan(d.norm, sCand);
+        if (!sSpan) continue;
+        const sOrig = mapNormRangeToOrig(sSpan.start, sSpan.end, d.normToOrig, d.text.length);
+        if (!sOrig) continue;
+        return { origEnd: sOrig.end, normEnd: sSpan.end };
+      }
+      for (const sCand of suffixCompactCands) {
+        if (!sCand) continue;
+        const sSpan = findCandSpan(d.compact, sCand);
+        if (!sSpan) continue;
+        const sOrig = mapNormRangeToOrig(sSpan.start, sSpan.end, d.compactToOrig, d.text.length);
+        if (!sOrig) continue;
+        return { origEnd: sOrig.end, normEnd: sSpan.end };
+      }
+      return null;
+    };
+
+    for (let pi = 0; pi < layers.length; pi += 1) {
+      const pd = getLayerData(pi);
+      const pFound = findAnyPrefix(pd);
+      if (!pFound) continue;
+      const pStart = pFound.origStart;
+      const pNormStart = pFound.normStart;
+
+        // Search suffix after this prefix, in this page and a few pages ahead.
+        for (let si = pi; si < Math.min(layers.length, pi + MAX_LOOKAHEAD_PAGES + 1); si += 1) {
+          const sd = getLayerData(si);
+          const sFound = findAnySuffix(sd);
+          if (!sFound) continue;
+          const sEnd = sFound.origEnd;
+          const sNormEnd = sFound.normEnd;
+
+            // Enforce ordering: suffix must end after prefix start.
+            if (si === pi && sNormEnd <= pNormStart + 5) {
+              // Suffix hit is before prefix (or too close); keep searching.
+              continue;
+            }
+
+            const score =
+              (si - pi) * 1_000_000 + (si === pi ? (sNormEnd - pNormStart) : 0);
+            const bestScore =
+              bestPair
+                ? (bestPair.sLayer - bestPair.pLayer) * 1_000_000 +
+                  (bestPair.sLayer === bestPair.pLayer ? (bestPair.sNormEnd - bestPair.pNormStart) : 0)
+                : Number.POSITIVE_INFINITY;
+            if (score < bestScore) {
+              bestPair = { pLayer: pi, pStart, pNormStart, sLayer: si, sEnd, sNormEnd };
+            }
+          if (bestPair && bestPair.pLayer === pi && bestPair.sLayer === si) break;
+        }
+      // If we found a pair on an earlier page, that's likely the right span; stop early.
+      if (bestPair && bestPair.pLayer === pi) break;
+    }
+
+    // If we couldn't find a pair using per-page search, fall back to a global doc search
+    // (concatenate page texts and search across boundaries). This handles cases where
+    // prefix/suffix anchors themselves are split across a page boundary.
+    if (!bestPair) {
+      const pageDatas = layers.map((_, idx) => getLayerData(idx));
+      const pageStarts: number[] = [];
+      const texts: string[] = [];
+      let globalAcc = '';
+      for (let i = 0; i < pageDatas.length; i += 1) {
+        pageStarts.push(globalAcc.length);
+        const t = pageDatas[i].text || '';
+        texts.push(t);
+        globalAcc += t;
+        // Separator between pages (not mapped to any page). Keep short to avoid huge shifts.
+        globalAcc += '\n';
+      }
+
+      const globalNormIndex = buildNormalizedIndexWithMap(globalAcc);
+      const globalCompactIndex = buildCompactNormalizedIndexWithMap(globalAcc);
+
+      const findFirst = (hay: string, candList: string[]) => {
+        for (const c of candList) {
+          if (!c) continue;
+          const idx = hay.indexOf(c);
+          if (idx !== -1) return { idx, len: c.length };
+        }
+        return null;
+      };
+
+      // Find a prefix occurrence (try norm then compact)
+      const pHitNorm = findFirst(globalNormIndex.normalized, prefixCands);
+      const pHitCompact = !pHitNorm ? findFirst(globalCompactIndex.normalized, prefixCompactCands) : null;
+      const pHit = pHitNorm
+        ? { normStart: pHitNorm.idx, normEnd: pHitNorm.idx + pHitNorm.len, map: globalNormIndex.normToOrig }
+        : pHitCompact
+          ? { normStart: pHitCompact.idx, normEnd: pHitCompact.idx + pHitCompact.len, map: globalCompactIndex.normToOrig }
+          : null;
+
+      if (!pHit) {
+        if (debug) {
+          console.warn('[PdfPreview][EllipsisSpan] No (prefix,suffix) pair found', {
+            prefixSample: prefixCands.slice(0, 3),
+            suffixSample: suffixCands.slice(0, 3),
+            prefixCompactSample: prefixCompactCands.slice(0, 3),
+            suffixCompactSample: suffixCompactCands.slice(0, 3),
+            layers: layers.length,
+          });
+        }
+        return 0;
+      }
+
+      const pOrig = mapNormRangeToOrig(pHit.normStart, pHit.normEnd, pHit.map, globalAcc.length);
+      if (!pOrig) return 0;
+
+      // Find a suffix occurrence AFTER prefix (try norm then compact)
+      const searchFromNorm = pHitNorm ? (pHitNorm.idx + pHitNorm.len) : 0;
+      const searchFromCompact = pHitCompact ? (pHitCompact.idx + pHitCompact.len) : 0;
+
+      const findSuffixAfter = (hay: string, candList: string[], from: number) => {
+        for (const c of candList) {
+          if (!c) continue;
+          const idx = hay.indexOf(c, from);
+          if (idx !== -1) return { idx, len: c.length };
+        }
+        return null;
+      };
+
+      const sHitNorm = pHitNorm ? findSuffixAfter(globalNormIndex.normalized, suffixCands, searchFromNorm) : null;
+      const sHitCompact = !sHitNorm ? findSuffixAfter(globalCompactIndex.normalized, suffixCompactCands, searchFromCompact) : null;
+      const sHit = sHitNorm
+        ? { normStart: sHitNorm.idx, normEnd: sHitNorm.idx + sHitNorm.len, map: globalNormIndex.normToOrig }
+        : sHitCompact
+          ? { normStart: sHitCompact.idx, normEnd: sHitCompact.idx + sHitCompact.len, map: globalCompactIndex.normToOrig }
+          : null;
+
+      if (!sHit) {
+        if (debug) {
+          console.warn('[PdfPreview][EllipsisSpan] No (prefix,suffix) pair found (prefix hit, suffix missing)', {
+            prefixSample: prefixCands.slice(0, 2),
+            suffixSample: suffixCands.slice(0, 2),
+            layers: layers.length,
+          });
+        }
+        return 0;
+      }
+
+      const sOrig = mapNormRangeToOrig(sHit.normStart, sHit.normEnd, sHit.map, globalAcc.length);
+      if (!sOrig) return 0;
+
+      const globalStart = pOrig.start;
+      const globalEnd = sOrig.end;
+      if (globalEnd <= globalStart) return 0;
+
+      // Apply across pages based on global offsets
+      let applied = 0;
+      for (let i = 0; i < pageDatas.length; i += 1) {
+        const pageStart = pageStarts[i];
+        const pageText = texts[i];
+        const pageEnd = pageStart + (pageText?.length || 0);
+        const overlapStart = Math.max(globalStart, pageStart);
+        const overlapEnd = Math.min(globalEnd, pageEnd);
+        if (overlapEnd <= overlapStart) continue;
+
+        const localStart = overlapStart - pageStart;
+        const localEnd = overlapEnd - pageStart;
+        const d = pageDatas[i];
+        applied += applyRangeInLayer(d.layer, d.pageNum, localStart, localEnd, d.text, d.map);
+      }
+
+      if (debug) {
+        console.log('[PdfPreview][EllipsisSpan] Global fallback span:', {
+          globalStart,
+          globalEnd,
+          applied,
+        });
+      }
+
+      return applied;
+    }
+    if (debug) {
+      console.log('[PdfPreview][EllipsisSpan] Selected pair:', {
+        pLayer: bestPair.pLayer + 1,
+        pStart: bestPair.pStart,
+        sLayer: bestPair.sLayer + 1,
+        sEnd: bestPair.sEnd,
+        layers: layers.length,
+      });
+    }
+
+    // Step 3: highlight the span between prefix and suffix across pages
+    let applied = 0;
+    if (bestPair.pLayer === bestPair.sLayer) {
+      const d = getLayerData(bestPair.pLayer);
+      applied += applyRangeInLayer(d.layer, d.pageNum, bestPair.pStart, bestPair.sEnd, d.text, d.map);
+      if (debug) console.log('[PdfPreview][EllipsisSpan] Applied chunks:', applied);
+      return applied;
+    }
+
+    // Start page: from prefix to end-of-page
+    {
+      const d = getLayerData(bestPair.pLayer);
+      applied += applyRangeInLayer(d.layer, d.pageNum, bestPair.pStart, d.text.length, d.text, d.map);
+    }
+    // Middle pages: highlight whole page text (covers omitted ellipsis region)
+    for (let i = bestPair.pLayer + 1; i < bestPair.sLayer; i += 1) {
+      const d = getLayerData(i);
+      applied += applyRangeInLayer(d.layer, d.pageNum, 0, d.text.length, d.text, d.map);
+    }
+    // End page: from start-of-page to suffix end
+    {
+      const d = getLayerData(bestPair.sLayer);
+      applied += applyRangeInLayer(d.layer, d.pageNum, 0, bestPair.sEnd, d.text, d.map);
+    }
+    if (debug) console.log('[PdfPreview][EllipsisSpan] Applied chunks:', applied);
+
+    return applied;
   }
 
   /**
@@ -1605,11 +2022,22 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     const pageEl = layer.closest('.page') as HTMLElement | null;
     const pageNum = pageEl ? parseInt(pageEl.dataset.page || '1', 10) : 1;
 
-    // Check if simple match mode is enabled (via localStorage or window variable)
-    const useSimpleMatch = typeof window !== 'undefined' && (
-      (window as any).USE_SIMPLE_MATCH === true ||
-      localStorage.getItem('USE_SIMPLE_MATCH') === 'true'
-    );
+    // Match mode:
+    // - Simple match (default): robust normalization + index mapping (best for ligatures, hyphenation, formulas)
+    // - Complex match (opt-out): regex-based fallback (can be brittle)
+    const useSimpleMatch = (() => {
+      if (typeof window === 'undefined') return false;
+      try {
+        const win = (window as any).USE_SIMPLE_MATCH;
+        if (win === false) return false;
+        const ls = localStorage.getItem('USE_SIMPLE_MATCH');
+        if (ls === 'false') return false;
+        // Default ON unless explicitly disabled
+        return true;
+      } catch {
+        return true;
+      }
+    })();
     
     // SIMPLE MATCH MODE: Use basic text search
     if (useSimpleMatch) {
@@ -1618,6 +2046,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         console.log('[PdfPreview] Text length:', text.length);
         console.log('[PdfPreview] Text sample (first 300 chars):', text.substring(0, 300));
       }
+      const queryFragmentForRecord = originalQueryFragment || query;
       const queryNorm = normalizeForMatch(query);
       const { normalized: textNorm, normToOrig } = buildNormalizedIndexWithMap(text);
 
@@ -1627,6 +2056,36 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       const queryCompact = queryNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
       const compactIndex = (!span && queryCompact.length >= 8) ? buildCompactNormalizedIndexWithMap(text) : null;
       const spanCompact = (!span && compactIndex) ? findBestNormSpan(compactIndex.normalized, queryCompact) : null;
+
+      const applyOrigRange = (start: number, end: number) => {
+        const rng: any = indexToDomRange(start, end, map);
+        if (!rng) return 0;
+        try {
+          if (!applier) {
+            console.error('[PdfPreview] ❌ Applier is null or undefined!');
+            return 0;
+          }
+          applier.applyToRange(rng);
+        } catch (e) {
+          console.error('[PdfPreview] ❌ Error applying highlight:', e);
+          return 0;
+        }
+        if (pageEl) {
+          const coords = coordsPageEncodedY(rng, pageEl, pageNum);
+          highlightRecordsRef.current.push({
+            rangeType: 'text',
+            rangePage: pageNum,
+            rangeStart: start,
+            rangeEnd: end,
+            fragment: text.substring(start, end),
+            queryFragment: queryFragmentForRecord,
+            ...coords,
+            ...(annotationId ? { annotation_id: annotationId } : {}),
+          });
+        }
+        try { rng.detach?.(); } catch {}
+        return 1;
+      };
 
       const selected = span
         ? { normStart: span.start, normEnd: span.end, normToOrig: normToOrig, mode: 'norm' as const }
@@ -1645,67 +2104,37 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
       if (selected) {
         const origRange = mapNormRangeToOrig(selected.normStart, selected.normEnd, selected.normToOrig, text.length);
         if (!origRange) return 0;
-        const start = origRange.start;
-        const end = origRange.end;
-        const rng: any = indexToDomRange(start, end, map);
-        if (rng) {
-          try { 
-            if (!applier) {
-              console.error('[PdfPreview] ❌ Applier is null or undefined!');
-              return 0;
-            }
-            applier.applyToRange(rng);
-            if (debug) {
-              console.log('[PdfPreview] ✅ Applied highlight to range (exact match)');
-              console.log('[PdfPreview] Range details:', { 
-                start, 
-                end, 
-                fragment: text.substring(start, end),
-                queryLength: query.length,
-                textLength: text.length
-              });
-            }
-            // Verify highlight was applied (check after a short delay)
-            setTimeout(() => {
-              const highlights = layer.querySelectorAll('mark.pdf-highlight, mark.pdf-highlight-alt');
-              if (debug || highlights.length === 0) {
-                console.log(`[PdfPreview] Highlights found after applying: ${highlights.length}`);
-                if (highlights.length === 0) {
-                  console.warn('[PdfPreview] ⚠️ No highlights found in DOM - highlight may not have been applied!');
-                }
-              }
-            }, 50);
-    } catch (e) {
-            console.error('[PdfPreview] ❌ Error applying highlight:', e);
-      return 0;
-    }
-          if (pageEl) {
-            const coords = coordsPageEncodedY(rng, pageEl, pageNum);
-            highlightRecordsRef.current.push({
-              rangeType: 'text',
-              rangePage: pageNum,
-              rangeStart: start,
-              rangeEnd: end,
-              fragment: text.substring(start, end),
-              queryFragment: originalQueryFragment || query,
-              ...coords,
-              ...(annotationId ? { annotation_id: annotationId } : {}),
-            });
-            if (debug) console.log('[PdfPreview] Added highlight record to array');
-          }
-          try { rng.detach?.(); } catch {}
-          return 1;
-        } else {
-          if (debug) {
-            console.warn('[PdfPreview] ❌ Failed to create DOM range from index', { 
-              start, 
-              end, 
-              textLength: text.length,
-              mapSize: map ? map.length : 'unknown'
-            });
-          }
-        }
+        return applyOrigRange(origRange.start, origRange.end);
       } else {
+        // Ellipsis/non-contiguous fragment support:
+        // If query contains "..." or "…" (common when scaffolds compress long spans),
+        // match/highlight each segment independently so we cover both pages/ends.
+        const rawSegments = (query || '').split(/\.{3,}|…/g).map(s => s.trim()).filter(Boolean);
+        if (rawSegments.length >= 2) {
+          let segMatches = 0;
+          const compactAll = buildCompactNormalizedIndexWithMap(text);
+          const maxSegs = 4;
+          for (const seg of rawSegments.slice(0, maxSegs)) {
+            const segNorm = normalizeForMatch(seg);
+            if (segNorm.length < 20) continue;
+            const segSpan = findBestNormSpan(textNorm, segNorm);
+            if (segSpan) {
+              const segOrig = mapNormRangeToOrig(segSpan.start, segSpan.end, normToOrig, text.length);
+              if (segOrig) segMatches += applyOrigRange(segOrig.start, segOrig.end);
+              continue;
+            }
+            const segCompact = segNorm.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+            if (segCompact.length >= 8) {
+              const segSpanC = findBestNormSpan(compactAll.normalized, segCompact);
+              if (segSpanC) {
+                const segOrig = mapNormRangeToOrig(segSpanC.start, segSpanC.end, compactAll.normToOrig, text.length);
+                if (segOrig) segMatches += applyOrigRange(segOrig.start, segOrig.end);
+                continue;
+              }
+            }
+          }
+          if (segMatches > 0) return segMatches;
+        }
         if (debug) {
           console.warn('[PdfPreview] No match found for query:', query.substring(0, 100));
           console.warn('[PdfPreview] Text sample:', text.substring(0, 200));
@@ -2009,6 +2438,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
           
           let fragmentTotal = 0;
                 let foundInLayer = false;
+                const isEllipsisQuery = /\.{3,}|…/.test(q);
             const applier = (i % 2 === 0) ? appliersRef.current.A : appliersRef.current.B;
 
                   if (!applier) {
@@ -2026,7 +2456,26 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
                       console.log(`[PdfPreview] ✅ Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               fragmentTotal += matches;
                       foundInLayer = true;
-                      break;
+                      // For ellipsis/non-contiguous fragments, keep scanning later pages to highlight the suffix too.
+                      if (!isEllipsisQuery) break;
+                }
+
+                // For ellipsis fragments, additionally try to fill the "..." gap by highlighting
+                // the full span between prefix and suffix across pages.
+                if (isEllipsisQuery && layerIdx === 0) {
+                  // Debug for the "Toulmin ... conceptual ecology" fragment regardless of its index.
+                  const isEllipsisDebug =
+                    i === 1 ||
+                    /toulmin/i.test(q) ||
+                    /conceptual ecology/i.test(q);
+                  const spanMatches = highlightEllipsisSpanAcrossLayers(layers, q, applier, annotationId, isEllipsisDebug);
+                  if (spanMatches > 0) {
+                    fragmentTotal += spanMatches;
+                    foundInLayer = true;
+                    console.log(`[PdfPreview] ✅ Ellipsis span highlight for fragment ${i + 1}: +${spanMatches} match(es)`);
+                    // Keep scanning to allow other fragments, but no need to keep searching for this one.
+                    break;
+                  }
                 }
 
                 // Try cross-page match opportunistically for long fragments (likely to cross boundary)
@@ -2040,7 +2489,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
                   }
                 }
               }
-              if (foundInLayer) break;
+              if (foundInLayer && !isEllipsisQuery) break;
               // yield to UI thread between batches
               await new Promise<void>((r) => setTimeout(r, 0));
                   }

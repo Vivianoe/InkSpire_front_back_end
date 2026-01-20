@@ -257,6 +257,8 @@ class ReadingScaffoldsRequest(BaseModel):
     session_id: str
     reading_id: str
     course_id: Optional[str] = None  # Optional course_id for filtering/verification
+    generation_id: Optional[str] = None  # UUID for grouping a single generation
+    scaffold_count: Optional[int] = None
     class_profile: Dict[str, Any]
     reading_chunks: Dict[str, Any]
     reading_info: Dict[str, Any]
@@ -264,6 +266,7 @@ class ReadingScaffoldsRequest(BaseModel):
 
 class GenerateScaffoldsRequest(BaseModel):
     instructor_id: str  # UUID as string
+    scaffold_count: Optional[int] = None
     # course_id, session_id, and reading_id are now path parameters, not in request body
 
 # return value of reading-scaffolds endpoint
@@ -503,4 +506,3 @@ class AssignmentReadingsResponse(BaseModel):
     assignment_name: str
     readings: List[AssignmentReadingStatus]
     message: Optional[str] = None
-

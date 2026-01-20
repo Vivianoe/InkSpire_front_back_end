@@ -2034,6 +2034,7 @@ def run_material_focus_scaffold(
                     db=db,
                     session_id=session_id,
                     reading_id=reading_id,
+                    generation_id=None,
                     highlight_text=scaf.get("fragment", ""),
                     current_content=scaf.get("text", ""),
                     start_offset=start_offset,

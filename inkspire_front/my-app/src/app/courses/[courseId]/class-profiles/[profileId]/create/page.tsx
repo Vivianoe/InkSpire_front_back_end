@@ -445,7 +445,7 @@ export default function EditClassProfilePage() {
 
       const mergedDesign: DesignConsiderations = {
         ...parsedDesign,                           // LLM-generated values as base
-		    ...formData.designConsiderations,          // User-entered values override LLM
+	    ...formData.designConsiderations,          // User-entered values override LLM
       };
 
       const nextId =
@@ -894,44 +894,76 @@ export default function EditClassProfilePage() {
             <h2 className={styles.sectionTitle}>Design Considerations</h2>
             <div className={styles.formGrid}>
               {DESIGN_CONSIDERATION_FIELDS.map(field => {
-                const selectOptions =
-                  'options' in field && Array.isArray(field.options) ? field.options : null;
+                const value = formData.designConsiderations[field.key] || '';
+                if ('options' in field && field.options.length > 0) {
+                  const normalizedValue = value.trim().replace(/_/g, ' ');
+                  let selectedValues: string[] = [];
+                  if (
+                    normalizedValue &&
+                    field.options.includes(normalizedValue as (typeof field.options)[number])
+                  ) {
+                    selectedValues = [normalizedValue];
+                  } else if (normalizedValue.includes('||')) {
+                    selectedValues = normalizedValue
+                      .split('||')
+                      .map(item => item.trim())
+                      .filter(Boolean);
+                  } else if (normalizedValue.includes(',')) {
+                    selectedValues = normalizedValue
+                      .split(',')
+                      .map(item => item.trim())
+                      .filter(Boolean);
+                  } else if (normalizedValue) {
+                    selectedValues = [normalizedValue];
+                  }
+                  return (
+                    <div className={styles.inputGroup} key={field.key}>
+                      <label className={styles.label}>{field.label}</label>
+                      <div className={styles.checkboxGroup}>
+                        {field.options.map(option => {
+                          const isChecked = selectedValues.includes(option);
+                          return (
+                            <label key={option} className={styles.checkboxOption}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const nextValues = e.target.checked
+                                    ? [...selectedValues, option]
+                                    : selectedValues.filter(item => item !== option);
+                                  handleDesignConsiderationChange(
+                                    field.key,
+                                    nextValues.join(' || ')
+                                  );
+                                }}
+                                disabled={generating}
+                              />
+                              <span>{option}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
-                  <div key={field.key} className={styles.inputGroupFull}>
-                    <label htmlFor={`design-${field.key}`} className={styles.label}>
-                      {field.label}
-                    </label>
-                    {selectOptions ? (
-                      <select
-                        id={`design-${field.key}`}
-                        className={styles.input}
-                        value={formData.designConsiderations[field.key]}
-                        onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
-                        disabled={generating}
-                      >
-                        <option value="">Select {field.label.toLowerCase()}</option>
-                        {selectOptions.map(option => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <textarea
-                        id={`design-${field.key}`}
-                        className={styles.textarea}
-                        rows={field.key === 'userDefined' ? 4 : 3}
-                        value={formData.designConsiderations[field.key]}
-                        onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
-                        placeholder={field.placeholder}
-                        disabled={generating}
-                      />
-                    )}
+                  <div className={styles.inputGroupFull} key={field.key}>
+                    <label className={styles.label}>{field.label}</label>
+                    <textarea
+                      className={styles.textarea}
+                      rows={3}
+                      value={value}
+                      onChange={(e) => handleDesignConsiderationChange(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      disabled={generating}
+                    />
                   </div>
                 );
               })}
             </div>
           </section>
+
 
         </form>
       </div>
@@ -939,4 +971,3 @@ export default function EditClassProfilePage() {
     </div>
   );
 }
-

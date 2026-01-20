@@ -120,7 +120,22 @@ export default function DashboardPage() {
       // Step 1: Get internal user ID from /api/users/me
       const userResponse = await fetch('/api/users/me', { headers });
       if (!userResponse.ok) {
-        throw new Error(`Failed to fetch user info: ${userResponse.status} ${userResponse.statusText}`);
+        const bodyText = await userResponse.text().catch(() => '');
+        let backendDetail = bodyText;
+        try {
+          const parsed = bodyText ? JSON.parse(bodyText) : null;
+          backendDetail = parsed?.detail || parsed?.message || backendDetail;
+        } catch {
+          // ignore JSON parse errors
+        }
+
+        if (userResponse.status === 401 || userResponse.status === 403) {
+          throw new Error(backendDetail || 'Not authenticated. Please sign in again.');
+        }
+
+        throw new Error(
+          `Failed to fetch user info: ${userResponse.status} ${userResponse.statusText}${backendDetail ? ` - ${backendDetail}` : ''}`
+        );
       }
       const userData = await userResponse.json();
 

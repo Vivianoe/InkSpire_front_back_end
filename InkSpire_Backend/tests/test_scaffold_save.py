@@ -70,6 +70,7 @@ def test_scaffold_save_and_convert():
                     db=db,
                     session_id=session_id,
                     reading_id=reading_id,
+                    generation_id=None,
                     highlight_text=scaf.get("fragment", ""),
                     current_content=scaf.get("text", ""),
                     start_offset=scaf.get("start_offset"),
@@ -137,4 +138,3 @@ def test_scaffold_save_and_convert():
 
 if __name__ == "__main__":
     test_scaffold_save_and_convert()
-

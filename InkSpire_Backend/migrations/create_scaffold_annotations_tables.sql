@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS scaffold_annotations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL,
     reading_id UUID NOT NULL,
+    generation_id UUID,
     highlight_text TEXT NOT NULL,
     start_offset INTEGER,
     end_offset INTEGER,
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS scaffold_annotations (
 -- Create indexes for scaffold_annotations
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_session_id ON scaffold_annotations(session_id);
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_reading_id ON scaffold_annotations(reading_id);
+CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_generation_id ON scaffold_annotations(generation_id);
 CREATE INDEX IF NOT EXISTS idx_scaffold_annotations_status ON scaffold_annotations(status);
 
 -- Create scaffold_annotation_versions table
@@ -78,4 +80,3 @@ CREATE INDEX IF NOT EXISTS idx_annotation_highlight_coords_valid ON annotation_h
 COMMENT ON TABLE scaffold_annotations IS 'Each annotation corresponds to a text fragment in a reading';
 COMMENT ON TABLE scaffold_annotation_versions IS 'Each automatic generation, manual edit, LLM rewrite, accept/reject creates a record';
 COMMENT ON TABLE annotation_highlight_coords IS 'Stores coordinate information for annotation highlights, one record per annotation version';
-
