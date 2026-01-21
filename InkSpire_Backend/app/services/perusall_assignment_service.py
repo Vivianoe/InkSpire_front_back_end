@@ -67,10 +67,10 @@ def upsert_perusall_assignment(
             db.commit()
             db.refresh(existing)
 
-            # If this assignment is linked to a session, rebuild structural session_readings.
+            # If this assignment is linked to sessions, rebuild structural session_readings.
             # Note: missing PDFs will not create rows; UI should use expected_readings for visibility.
-            if existing.session is not None:
-                rederive_session_readings_for_session(db, existing.session.id)
+            for session in existing.sessions or []:
+                rederive_session_readings_for_session(db, session.id)
         
         return existing
     else:

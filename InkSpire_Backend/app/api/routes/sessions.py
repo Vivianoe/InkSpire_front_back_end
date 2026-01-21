@@ -161,13 +161,6 @@ def create_session_with_readings(
             detail=f"Perusall assignment {payload.perusall_assignment_id} not found. Please fetch assignments first via /api/courses/{course_id}/perusall/assignments"
         )
     
-    # Check if this assignment is already linked to a session
-    if perusall_assignment.session:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Perusall assignment {payload.perusall_assignment_id} is already linked to session {perusall_assignment.session.id}"
-        )
-    
     perusall_assignment_uuid = perusall_assignment.id
     
     # Create session (identity only)
@@ -547,4 +540,3 @@ def get_current_session_version(
         status_code=404,
         detail=f"No version found for session {session_id}"
     )
-
