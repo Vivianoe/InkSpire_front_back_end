@@ -282,7 +282,7 @@ class Session(Base):
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
     week_number = Column(Integer, nullable=False)  # Week number (1, 2, 3...)
     title = Column(Text, nullable=True)  # Session title (optional)
-    perusall_assignment_id = Column(UUID(as_uuid=True), ForeignKey("perusall_assignments.id"), nullable=True, unique=True, index=True)  # Foreign key to perusall_assignments
+    perusall_assignment_id = Column(UUID(as_uuid=True), ForeignKey("perusall_assignments.id"), nullable=True, index=True)  # Foreign key to perusall_assignments
     current_version_id = Column(UUID(as_uuid=True), ForeignKey("session_versions.id"), nullable=True, index=True)  # Current active version
     status = Column(String(50), nullable=False, default="draft")  # draft, active, archived, etc.
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
@@ -290,7 +290,7 @@ class Session(Base):
 
     # Relationships
     course = relationship("Course", foreign_keys=[course_id])
-    perusall_assignment = relationship("PerusallAssignment", back_populates="session", foreign_keys=[perusall_assignment_id])
+    perusall_assignment = relationship("PerusallAssignment", back_populates="sessions", foreign_keys=[perusall_assignment_id])
     current_version = relationship("SessionVersion", foreign_keys=[current_version_id], post_update=True)
     versions = relationship(
         "SessionVersion",
@@ -393,7 +393,7 @@ class PerusallAssignment(Base):
     """
     perusall_assignments table
     Stores Perusall assignment data with minimal fields
-    Enforces 1:1 relationship with sessions via foreign key
+    Allows one assignment to be linked to multiple sessions
     """
     __tablename__ = "perusall_assignments"
 
@@ -407,7 +407,7 @@ class PerusallAssignment(Base):
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    session = relationship("Session", back_populates="perusall_assignment", uselist=False)
+    sessions = relationship("Session", back_populates="perusall_assignment")
 
     def __repr__(self):
         return f"<PerusallAssignment(id={self.id}, perusall_course_id={self.perusall_course_id}, perusall_assignment_id={self.perusall_assignment_id}, name={self.name})>"
