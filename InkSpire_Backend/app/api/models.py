@@ -155,7 +155,7 @@ class CourseSummaryModel(BaseModel):
     id: str
     title: str
     perusall_course_id: Optional[str] = None
-    description: str
+    description: Optional[str] = None
     class_profile_id: Optional[str] = None
 
 

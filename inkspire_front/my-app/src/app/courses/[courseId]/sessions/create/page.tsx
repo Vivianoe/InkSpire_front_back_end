@@ -360,18 +360,9 @@ export default function SessionCreationPage() {
     
     // Fetch assignment readings status
     await fetchAssignmentReadings(assignmentId);
-    
-    // Check if a session already exists for this assignment
-    const existingSession = sessions.find(s => s.perusall_assignment_id === assignmentId);
-    if (existingSession) {
-      // Open existing session directly in the unified edit UI
-      setSelectedSessionId(existingSession.id);
-      setMode('edit');
-      loadExistingSession(existingSession.id);
-    } else {
-      // Create new session for this assignment
-      handleCreateNew(assignmentId);
-    }
+
+    // Always allow creating a new session for this assignment
+    handleCreateNew(assignmentId);
   };
 
   /* functions for previous non-perusall integration session creation 

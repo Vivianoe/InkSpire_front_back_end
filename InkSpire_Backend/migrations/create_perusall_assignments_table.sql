@@ -138,8 +138,8 @@ BEGIN
     END IF;
 END $$;
 
--- Step 3: Add foreign key constraint with UNIQUE constraint (idempotent)
--- This ensures each Perusall assignment can map to at most one session
+-- Step 3: Add foreign key constraint (idempotent)
+-- Perusall assignments can map to multiple sessions
 DO $$
 BEGIN
     -- Add foreign key constraint if it doesn't exist
@@ -160,11 +160,6 @@ BEGIN
         RAISE NOTICE 'Foreign key constraint already exists.';
     END IF;
 END $$;
-
--- Add UNIQUE constraint to enforce 1:1 relationship
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_unique
-ON sessions(perusall_assignment_id)
-WHERE perusall_assignment_id IS NOT NULL;
 
 -- Create index for the foreign key
 CREATE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_id ON sessions(perusall_assignment_id);
