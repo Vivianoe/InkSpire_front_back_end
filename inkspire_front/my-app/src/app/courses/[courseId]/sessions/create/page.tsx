@@ -357,11 +357,30 @@ export default function SessionCreationPage() {
   const handleSelectAssignment = async (assignmentId: string) => {
     setSelectedPerusallAssignmentId(assignmentId);
     setSelectedReadingIds([]);
-    
+
     // Fetch assignment readings status
     await fetchAssignmentReadings(assignmentId);
 
-    // Always allow creating a new session for this assignment
+    const matchingSessions = sessions.filter(s => s.perusall_assignment_id === assignmentId);
+    if (matchingSessions.length > 0) {
+      const latestSession = [...matchingSessions].sort((a, b) => {
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return bTime - aTime;
+      })[0];
+
+      setSelectedSessionId(latestSession.id);
+      setMode('edit');
+      loadExistingSession(latestSession.id);
+
+      const params = new URLSearchParams();
+      params.set('sessionId', latestSession.id);
+      params.set('courseId', courseId);
+      params.set('instructorId', resolvedInstructorId);
+      router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
+      return;
+    }
+
     handleCreateNew(assignmentId);
   };
 

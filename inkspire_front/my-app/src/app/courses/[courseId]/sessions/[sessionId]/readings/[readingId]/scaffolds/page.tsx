@@ -48,6 +48,14 @@ interface SessionReadingNavigation {
   instructorId: string;
 }
 
+interface PerusallUser {
+  id: string;
+  role: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  display?: string | null;
+}
+
 export default function ScaffoldPage() {
   const router = useRouter();
   const params = useParams();
@@ -85,6 +93,10 @@ export default function ScaffoldPage() {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [mdContent, setMdContent] = useState('');
   const hasScaffolds = scaffolds.length > 0;
+  const [perusallUsers, setPerusallUsers] = useState<PerusallUser[]>([]);
+  const [perusallUsersLoading, setPerusallUsersLoading] = useState(false);
+  const [perusallUsersError, setPerusallUsersError] = useState<string | null>(null);
+  const [selectedPerusallUserId, setSelectedPerusallUserId] = useState<string>('');
 
   const courseId = params.courseId as string;
   const sessionId = params.sessionId as string;
@@ -820,7 +832,11 @@ ${scaffold.text || 'No scaffold text available'}
       const response = await fetch(`/api/courses/${courseId}/readings/${readingId}/perusall/annotations`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ session_id: sessionId, annotation_ids: annotationIds }),
+        body: JSON.stringify({
+          session_id: sessionId,
+          annotation_ids: annotationIds,
+          perusall_user_id: selectedPerusallUserId || undefined,
+        }),
       });
 
       const data = await response.json().catch((e) => {
@@ -881,6 +897,49 @@ ${scaffold.text || 'No scaffold text available'}
       setPublishLoading(false);
     }
   };
+
+  const formatPerusallUserLabel = (user: PerusallUser) => {
+    if (user.display) return `${user.display} (${user.role})`;
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+    if (name) return `${name} (${user.role})`;
+    return `Unknown user (${user.role})`;
+  };
+
+  useEffect(() => {
+    if (!showPublishModal) return;
+    const loadPerusallUsers = async () => {
+      setPerusallUsersLoading(true);
+      setPerusallUsersError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = {};
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+        const response = await fetch(`/api/courses/${courseId}/perusall/users`, { headers });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.detail || data?.message || 'Failed to load Perusall users.');
+        }
+        const users = Array.isArray(data?.users) ? data.users : [];
+        setPerusallUsers(users);
+        const defaultUserId =
+          (typeof data?.default_user_id === 'string' && data.default_user_id) || '';
+        if (!selectedPerusallUserId) {
+          setSelectedPerusallUserId(
+            defaultUserId || (users[0]?.id ? String(users[0].id) : '')
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load Perusall users.';
+        setPerusallUsersError(message);
+      } finally {
+        setPerusallUsersLoading(false);
+      }
+    };
+
+    loadPerusallUsers();
+  }, [showPublishModal, courseId, selectedPerusallUserId]);
 
   if (loading) {
     return (
@@ -1481,6 +1540,28 @@ ${scaffold.text || 'No scaffold text available'}
                 Perusall credentials are managed via backend configuration. Each accepted scaffold will be
                 posted as an annotation for the configured course and assignment.
               </p>
+              <div className={uiStyles.field}>
+                <label className={uiStyles.fieldLabel}>Post as user</label>
+                {perusallUsersLoading ? (
+                  <p className={uiStyles.fieldHint}>Loading Perusall users…</p>
+                ) : perusallUsersError ? (
+                  <p style={{ color: 'var(--red-600)', marginTop: 0, fontSize: '0.875rem' }}>
+                    {perusallUsersError}
+                  </p>
+                ) : (
+                  <select
+                    className={uiStyles.fieldControl}
+                    value={selectedPerusallUserId}
+                    onChange={(event) => setSelectedPerusallUserId(event.target.value)}
+                  >
+                    {perusallUsers.map(user => (
+                      <option key={user.id} value={user.id}>
+                        {formatPerusallUserLabel(user)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               {publishError && (
                 <p style={{ color: 'var(--red-600)', marginTop: 0, fontSize: '0.875rem' }}>{publishError}</p>
               )}
@@ -1514,7 +1595,12 @@ ${scaffold.text || 'No scaffold text available'}
                 type="button"
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
                 onClick={handleConfirmPublish}
-                disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0 || publishLoading}
+                disabled={
+                  processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0 ||
+                  publishLoading ||
+                  perusallUsersLoading ||
+                  !selectedPerusallUserId
+                }
               >
                 {publishLoading ? 'Publishing…' : 'Confirm & Publish'}
               </button>

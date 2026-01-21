@@ -340,6 +340,7 @@ class PerusallAnnotationRequest(BaseModel):
     session_id: Optional[str] = None
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
+    perusall_user_id: Optional[str] = None  # Optional Perusall user ID to post as
 
 
 class PerusallAnnotationResponse(BaseModel):
@@ -364,6 +365,19 @@ class PerusallMappingResponse(BaseModel):
     perusall_course_id: str
     perusall_assignment_id: str
     perusall_document_id: str
+
+
+class PerusallUserItem(BaseModel):
+    id: str
+    role: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    display: Optional[str] = None
+
+
+class PerusallUsersResponse(BaseModel):
+    users: List[PerusallUserItem]
+    default_user_id: Optional[str] = None
 
 
 # ======================================================
