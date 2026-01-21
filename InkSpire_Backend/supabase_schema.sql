@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     week_number INTEGER NOT NULL,
     title TEXT,
+    perusall_assignment_id UUID REFERENCES perusall_assignments(id) ON DELETE SET NULL,
     current_version_id UUID,  -- Points to the current active version in session_versions (FK added after table creation)
     status VARCHAR(50) NOT NULL DEFAULT 'draft',  -- draft, active, archived, etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -225,6 +226,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_course_id ON sessions(course_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_week_number ON sessions(course_id, week_number);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_current_version_id ON sessions(current_version_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_id ON sessions(perusall_assignment_id);
 
 -- Create session_versions table
 -- Stores immutable version snapshots of session data

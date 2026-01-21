@@ -59,9 +59,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const currentModalFlowRef = useRef<ModalFlow>(ModalFlow.None)
   const [coursesRefreshTrigger, setCoursesRefreshTrigger] = useState(0)
   const [pendingEmail, setPendingEmail] = useState<string | null>(null)
-  const isTestingAuth =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NEXT_PUBLIC_AUTH_TESTING === 'true'
 
   // Keep ref in sync with state for use in subscription callbacks (avoids stale closure)
   useEffect(() => {
@@ -173,7 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Check email confirmation status using utility
       const { isConfirmed } = await getCurrentUser()
 
-      if (!isConfirmed && !isTestingAuth) {
+      if (!isConfirmed) {
         // Email not confirmed - show confirmation waiting modal
         setCurrentModalFlow(ModalFlow.EmailConfirmation)
       }
@@ -224,13 +221,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         // Set modal flow based on confirmation status
         setCurrentModalFlow(
-          isConfirmed || isTestingAuth ? ModalFlow.PerusallSetup : ModalFlow.EmailConfirmation
+          isConfirmed ? ModalFlow.PerusallSetup : ModalFlow.EmailConfirmation
         )
       } else {
         // No tokens = email confirmation required before session is created
-        if (!isTestingAuth) {
-          setCurrentModalFlow(ModalFlow.EmailConfirmation)
-        }
+        setCurrentModalFlow(ModalFlow.EmailConfirmation)
       }
 
       // Session will be automatically detected by onAuthStateChange listener
