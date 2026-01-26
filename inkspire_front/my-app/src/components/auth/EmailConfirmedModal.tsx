@@ -2,10 +2,15 @@
 
 interface EmailConfirmedModalProps {
   isOpen: boolean
+  requiresReauth?: boolean
   onContinue: () => void
 }
 
-export const EmailConfirmedModal = ({ isOpen, onContinue }: EmailConfirmedModalProps) => {
+export const EmailConfirmedModal = ({
+  isOpen,
+  requiresReauth = false,
+  onContinue
+}: EmailConfirmedModalProps) => {
   if (!isOpen) return null
 
   return (
@@ -20,7 +25,9 @@ export const EmailConfirmedModal = ({ isOpen, onContinue }: EmailConfirmedModalP
           </h3>
 
           <p className="text-gray-600 mb-6">
-            Your email has been successfully confirmed.
+            {requiresReauth
+              ? 'Your email is confirmed. Please sign in again to continue.'
+              : 'Your email has been successfully confirmed.'}
           </p>
 
           {/* Manual proceed button */}
@@ -28,7 +35,7 @@ export const EmailConfirmedModal = ({ isOpen, onContinue }: EmailConfirmedModalP
             onClick={onContinue}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
           >
-            Continue to Perusall Setup →
+            {requiresReauth ? 'Sign In Again' : 'Continue to Perusall Setup →'}
           </button>
         </div>
       </div>

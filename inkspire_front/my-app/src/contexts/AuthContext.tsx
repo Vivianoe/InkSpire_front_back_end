@@ -9,6 +9,7 @@ import { EmailConfirmedModal } from '@/components/auth/EmailConfirmedModal'
 import { useEmailConfirmation } from '@/hooks/useEmailConfirmation'
 import { getCurrentUser } from '@/lib/utils/authUtils'
 import { resendConfirmationEmail } from '@/lib/utils/emailUtils'
+import { EMAIL_CONFIRMATION_REDIRECT } from '@/lib/constants/auth'
 
 /**
  * Modal flow states - enforces sequential progression
@@ -69,6 +70,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Replaces all polling and localStorage detection logic
   useEmailConfirmation({
     enabled: currentModalFlow === ModalFlow.EmailConfirmation,
+    email: pendingEmail || user?.email || null,
     onConfirmed: () => {
       setCurrentModalFlow(ModalFlow.EmailConfirmed)
     }
@@ -188,11 +190,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Store the email for the confirmation modal
       setPendingEmail(email)
+      const emailRedirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${EMAIL_CONFIRMATION_REDIRECT}`
+          : null
 
       const response = await fetch('/api/users/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name })
+        body: JSON.stringify({
+          email,
+          password,
+          name,
+          email_redirect_to: emailRedirectTo
+        })
       })
 
       if (!response.ok) {
@@ -248,6 +259,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Called when EmailConfirmedModal "Continue" is clicked
    */
   const handleEmailConfirmed = () => {
+    if (!session?.access_token) {
+      setCurrentModalFlow(ModalFlow.None)
+      return
+    }
     setCurrentModalFlow(ModalFlow.PerusallSetup)
   }
 
@@ -331,6 +346,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       {/* Email Confirmed Success Modal */}
       <EmailConfirmedModal
         isOpen={currentModalFlow === ModalFlow.EmailConfirmed}
+        requiresReauth={!session?.access_token}
         onContinue={handleEmailConfirmed}
       />
 

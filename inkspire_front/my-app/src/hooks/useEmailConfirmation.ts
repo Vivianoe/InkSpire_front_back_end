@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { checkAndRefreshSession } from '@/lib/utils/authUtils'
+import { checkEmailConfirmationStatus } from '@/lib/utils/emailUtils'
 import {
   EMAIL_CONFIRMATION_CHANNEL,
   CONFIRMATION_POLL_INTERVAL,
@@ -38,6 +39,11 @@ interface UseEmailConfirmationOptions {
    * Default: 5000ms (5 seconds)
    */
   pollingInterval?: number
+
+  /**
+   * Email used for backend confirmation checks (cross-browser fallback)
+   */
+  email?: string | null
 }
 
 /**
@@ -100,7 +106,8 @@ interface UseEmailConfirmationReturn {
 export function useEmailConfirmation({
   enabled,
   onConfirmed,
-  pollingInterval = CONFIRMATION_POLL_INTERVAL
+  pollingInterval = CONFIRMATION_POLL_INTERVAL,
+  email = null
 }: UseEmailConfirmationOptions): UseEmailConfirmationReturn {
   const [isConfirmed, setIsConfirmed] = useState(false)
   const [isChecking, setIsChecking] = useState(false)
@@ -130,6 +137,19 @@ export function useEmailConfirmation({
       const result = await checkAndRefreshSession()
 
       if (result.error) {
+        if (email) {
+          const status = await checkEmailConfirmationStatus(email)
+          if (status.error) {
+            setError(status.error)
+            return
+          }
+          if (status.confirmed && !isConfirmed) {
+            setIsConfirmed(true)
+            onConfirmedRef.current?.()
+          }
+          return
+        }
+
         setError(result.error.message)
         return
       }
@@ -152,7 +172,7 @@ export function useEmailConfirmation({
     } finally {
       setIsChecking(false)
     }
-  }, [enabled, isConfirmed])
+  }, [enabled, isConfirmed, email])
 
   /**
    * Setup cross-tab synchronization

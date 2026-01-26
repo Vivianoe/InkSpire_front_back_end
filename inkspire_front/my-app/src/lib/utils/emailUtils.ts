@@ -4,13 +4,18 @@
  */
 
 import { useState, useEffect } from 'react'
-import { RESEND_COOLDOWN_SECONDS } from '@/lib/constants/auth'
+import { EMAIL_CONFIRMATION_REDIRECT, RESEND_COOLDOWN_SECONDS } from '@/lib/constants/auth'
 
 /**
  * Result of resend email operation
  */
 export interface ResendEmailResult {
   success: boolean
+  error: string | null
+}
+
+export interface ConfirmationStatusResult {
+  confirmed: boolean
   error: string | null
 }
 
@@ -35,10 +40,14 @@ export interface ResendEmailResult {
  */
 export async function resendConfirmationEmail(email: string): Promise<ResendEmailResult> {
   try {
+    const emailRedirectTo =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}${EMAIL_CONFIRMATION_REDIRECT}`
+        : null
     const response = await fetch('/api/users/resend-confirmation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, email_redirect_to: emailRedirectTo })
     })
 
     if (!response.ok) {
@@ -50,6 +59,34 @@ export async function resendConfirmationEmail(email: string): Promise<ResendEmai
   } catch (err) {
     return {
       success: false,
+      error: err instanceof Error ? err.message : 'An error occurred'
+    }
+  }
+}
+
+/**
+ * Check email confirmation status via backend
+ */
+export async function checkEmailConfirmationStatus(
+  email: string
+): Promise<ConfirmationStatusResult> {
+  try {
+    const response = await fetch('/api/users/confirmation-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    })
+
+    if (!response.ok) {
+      const data = await response.json()
+      return { confirmed: false, error: data.detail || 'Failed to check confirmation status' }
+    }
+
+    const data = await response.json()
+    return { confirmed: Boolean(data.confirmed), error: null }
+  } catch (err) {
+    return {
+      confirmed: false,
       error: err instanceof Error ? err.message : 'An error occurred'
     }
   }
