@@ -4,7 +4,7 @@ Uses PostgreSQL/Supabase compatible data types
 """
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, Integer, ForeignKey, func, Float, Boolean
+from sqlalchemy import Column, String, Text, Integer, ForeignKey, func, Float, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -457,3 +457,61 @@ class UserPerusallCredentials(Base):
 
     def __repr__(self):
         return f"<UserPerusallCredentials(id={self.id}, user_id={self.user_id}, is_validated={self.is_validated})>"
+
+
+class PerusallCourseUser(Base):
+    """
+    perusall_course_users table
+    Stores cached Perusall users for a course
+    """
+    __tablename__ = "perusall_course_users"
+    __table_args__ = (
+        UniqueConstraint("course_id", "perusall_user_id", name="unique_course_perusall_user"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
+    perusall_user_id = Column(Text, nullable=False, index=True)
+    role = Column(Text, nullable=False)
+    first_name = Column(Text, nullable=True)
+    last_name = Column(Text, nullable=True)
+    display = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    course = relationship("Course", foreign_keys=[course_id])
+
+    def __repr__(self):
+        return f"<PerusallCourseUser(id={self.id}, course_id={self.course_id}, perusall_user_id={self.perusall_user_id})>"
+
+
+class PerusallAnnotationPost(Base):
+    """
+    perusall_annotation_posts table
+    Stores idempotency and posting status for Perusall annotation uploads
+    """
+    __tablename__ = "perusall_annotation_posts"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="unique_perusall_annotation_idempotency"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    idempotency_key = Column(Text, nullable=False, index=True)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
+    reading_id = Column(UUID(as_uuid=True), ForeignKey("readings.id"), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=True, index=True)
+    perusall_user_id = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, default="pending")
+    request_payload = Column(JSONB, nullable=True)
+    response_payload = Column(JSONB, nullable=True)
+    created_ids = Column(JSONB, nullable=True)
+    errors = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+    course = relationship("Course", foreign_keys=[course_id])
+    reading = relationship("Reading", foreign_keys=[reading_id])
+    session = relationship("Session", foreign_keys=[session_id])
+
+    def __repr__(self):
+        return f"<PerusallAnnotationPost(id={self.id}, idempotency_key={self.idempotency_key}, status={self.status})>"

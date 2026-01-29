@@ -4,12 +4,23 @@ Perusall integration endpoints
 import os
 import uuid
 import requests
+import hashlib
+import json
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
 from app.core.database import get_db
-from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotation, ScaffoldAnnotationVersion, PerusallMapping, Reading, User
+from app.models.models import (
+    AnnotationHighlightCoords,
+    ScaffoldAnnotation,
+    ScaffoldAnnotationVersion,
+    PerusallMapping,
+    PerusallCourseUser,
+    PerusallAnnotationPost,
+    Reading,
+    User,
+)
 from app.services.course_service import get_course_by_id
 from app.services.reading_service import get_reading_by_id, get_readings_by_course
 from app.services.session_service import (
@@ -72,6 +83,111 @@ def normalize_name(name: str) -> str:
     # Convert to lowercase, remove all whitespace (spaces, tabs, newlines)
     normalized = "".join(name.lower().split())
     return normalized
+
+
+def _get_perusall_headers(
+    course: "Course",
+    current_user: User,
+    db: Session,
+) -> Dict[str, str]:
+    env_institution = os.getenv("PERUSALL_INSTITUTION")
+    env_api_token = os.getenv("PERUSALL_API_TOKEN")
+
+    if env_institution and env_api_token:
+        institution_id = env_institution
+        api_token = env_api_token
+    else:
+        credentials = get_user_perusall_credentials(db, current_user.id)
+        if not credentials or not credentials.is_validated:
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Perusall credentials not found or not validated. "
+                    "Please authenticate first at /api/perusall/authenticate, "
+                    "or set PERUSALL_INSTITUTION and PERUSALL_API_TOKEN in environment variables."
+                )
+            )
+        institution_id = credentials.institution_id
+        api_token = credentials.api_token
+
+    return {
+        "X-Institution": institution_id,
+        "X-API-Token": api_token,
+    }
+
+
+def _fetch_perusall_users_for_course(
+    course: "Course",
+    headers: Dict[str, str],
+) -> PerusallUsersResponse:
+    try:
+        course_resp = requests.get(
+            f"{PERUSALL_BASE_URL}/courses/{course.perusall_course_id}",
+            headers=headers,
+            timeout=30,
+        )
+        course_resp.raise_for_status()
+        course_payload = course_resp.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch Perusall course users: {str(e)}")
+
+    instructor_ids = course_payload.get("instructorIds") or []
+    student_ids = course_payload.get("studentIds") or []
+    unique_ids: Dict[str, str] = {}
+    for user_id in instructor_ids:
+        unique_ids[str(user_id)] = "instructor"
+    for user_id in student_ids:
+        unique_ids.setdefault(str(user_id), "student")
+
+    users: List[PerusallUserItem] = []
+    for user_id, role in unique_ids.items():
+        try:
+            user_resp = requests.get(
+                f"{PERUSALL_BASE_URL}/users/{user_id}",
+                headers=headers,
+                timeout=30,
+            )
+            user_resp.raise_for_status()
+            user_payload = user_resp.json()
+            first_name = user_payload.get("firstname") or user_payload.get("firstName")
+            last_name = user_payload.get("lastname") or user_payload.get("lastName")
+            display = user_payload.get("display")
+            if not display:
+                display = " ".join(part for part in [first_name, last_name] if part)
+            users.append(
+                PerusallUserItem(
+                    id=str(user_id),
+                    role=role,
+                    first_name=first_name,
+                    last_name=last_name,
+                    display=display,
+                )
+            )
+        except requests.exceptions.RequestException:
+            users.append(PerusallUserItem(id=str(user_id), role=role))
+
+    default_user_id = PERUSALL_POST_USER_ID if PERUSALL_POST_USER_ID in unique_ids else None
+    return PerusallUsersResponse(users=users, default_user_id=default_user_id)
+
+
+def _build_perusall_idempotency_source(
+    course_id: str,
+    reading_id: str,
+    session_id: str,
+    perusall_user_id: str,
+    req: PerusallAnnotationRequest,
+) -> str:
+    payload: Dict[str, Any] = {
+        "course_id": course_id,
+        "reading_id": reading_id,
+        "session_id": session_id,
+        "perusall_user_id": perusall_user_id,
+    }
+    if req.annotation_ids:
+        payload["annotation_ids"] = sorted(req.annotation_ids)
+    elif req.annotations:
+        payload["annotations"] = [item.model_dump() for item in req.annotations]
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 @router.post("/courses/{course_id}/sessions/{session_id}/perusall/assignment/sync")
@@ -283,7 +399,8 @@ def post_annotations_to_perusall(
     reading_id: str,
     req: PerusallAnnotationRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    idempotency_header: str = Header(None, alias="Idempotency-Key"),
 ):
     """
     Upload multiple annotations into Perusall.
@@ -565,8 +682,58 @@ def post_annotations_to_perusall(
                 "X-API-Token": api_token,
             }
 
+            post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
+            if not post_user_id:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+                )
+
+            idempotency_key = (
+                req.idempotency_key
+                or idempotency_header
+                or hashlib.sha256(
+                    _build_perusall_idempotency_source(
+                        course_id=str(course_uuid),
+                        reading_id=str(reading_uuid),
+                        session_id=str(session_uuid),
+                        perusall_user_id=str(post_user_id),
+                        req=req,
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
+
+            existing = (
+                db.query(PerusallAnnotationPost)
+                .filter(PerusallAnnotationPost.idempotency_key == idempotency_key)
+                .first()
+            )
+            if existing:
+                if existing.status == "pending":
+                    raise HTTPException(status_code=409, detail="Perusall post is already in progress for this idempotency key.")
+                cached = existing.response_payload or {}
+                return PerusallAnnotationResponse(
+                    success=bool(cached.get("success", False)),
+                    created_ids=list(cached.get("created_ids") or []),
+                    errors=list(cached.get("errors") or []),
+                )
+
+            post_record = PerusallAnnotationPost(
+                idempotency_key=idempotency_key,
+                course_id=course_uuid,
+                reading_id=reading_uuid,
+                session_id=session_uuid,
+                perusall_user_id=str(post_user_id),
+                status="pending",
+                request_payload={
+                    "annotation_ids": req.annotation_ids,
+                    "annotations": [item.model_dump() for item in req.annotations] if req.annotations else None,
+                },
+            )
+            db.add(post_record)
+            db.commit()
+
             for idx, item in enumerate(annotations_to_post):
-                post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
                 if not post_user_id:
                     raise HTTPException(
                         status_code=500,
@@ -669,6 +836,21 @@ def post_annotations_to_perusall(
                         "payload": payload
                     })
 
+        response_payload = {
+            "success": len(errors) == 0,
+            "created_ids": created_ids,
+            "errors": errors,
+        }
+        try:
+            post_record.status = "succeeded" if len(errors) == 0 else "failed"
+            post_record.response_payload = response_payload
+            post_record.created_ids = created_ids
+            post_record.errors = errors
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[post_annotations_to_perusall] Failed to update post record: {e}")
+
         return PerusallAnnotationResponse(
             success=len(errors) == 0,
             created_ids=created_ids,
@@ -687,14 +869,14 @@ def post_annotations_to_perusall(
         )
 
 
-@router.get("/courses/{course_id}/perusall/users", response_model=PerusallUsersResponse)
-def get_perusall_users_for_course(
+@router.post("/courses/{course_id}/perusall/users/sync", response_model=PerusallUsersResponse)
+def sync_perusall_users_for_course(
     course_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Fetch Perusall users for a course (instructors + students).
+    Fetch Perusall users and cache them in the database for a course.
     """
     try:
         course_uuid = uuid.UUID(course_id)
@@ -707,78 +889,74 @@ def get_perusall_users_for_course(
     if not course.perusall_course_id:
         raise HTTPException(status_code=400, detail=f"Course {course_id} does not have perusall_course_id")
 
-    env_institution = os.getenv("PERUSALL_INSTITUTION")
-    env_api_token = os.getenv("PERUSALL_API_TOKEN")
-
-    if env_institution and env_api_token:
-        institution_id = env_institution
-        api_token = env_api_token
-    else:
-        credentials = get_user_perusall_credentials(db, current_user.id)
-        if not credentials or not credentials.is_validated:
-            raise HTTPException(
-                status_code=401,
-                detail=(
-                    "Perusall credentials not found or not validated. "
-                    "Please authenticate first at /api/perusall/authenticate, "
-                    "or set PERUSALL_INSTITUTION and PERUSALL_API_TOKEN in environment variables."
-                )
-            )
-        institution_id = credentials.institution_id
-        api_token = credentials.api_token
-
-    headers = {
-        "X-Institution": institution_id,
-        "X-API-Token": api_token,
-    }
+    headers = _get_perusall_headers(course, current_user, db)
+    response = _fetch_perusall_users_for_course(course, headers)
 
     try:
-        course_resp = requests.get(
-            f"{PERUSALL_BASE_URL}/courses/{course.perusall_course_id}",
-            headers=headers,
-            timeout=30,
+        db.query(PerusallCourseUser).filter(
+            PerusallCourseUser.course_id == course_uuid
+        ).delete(synchronize_session=False)
+
+        records = [
+            PerusallCourseUser(
+                course_id=course_uuid,
+                perusall_user_id=user.id,
+                role=user.role,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                display=user.display,
+            )
+            for user in response.users
+        ]
+        if records:
+            db.add_all(records)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to cache Perusall users: {str(e)}")
+
+    return response
+
+
+@router.get("/courses/{course_id}/perusall/users", response_model=PerusallUsersResponse)
+def get_perusall_users_for_course(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch cached Perusall users for a course.
+    """
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid course_id format")
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(status_code=404, detail=f"Course {course_id} not found")
+    if not course.perusall_course_id:
+        raise HTTPException(status_code=400, detail=f"Course {course_id} does not have perusall_course_id")
+
+    rows = db.query(PerusallCourseUser).filter(
+        PerusallCourseUser.course_id == course_uuid
+    ).all()
+
+    users = [
+        PerusallUserItem(
+            id=row.perusall_user_id,
+            role=row.role,
+            first_name=row.first_name,
+            last_name=row.last_name,
+            display=row.display,
         )
-        course_resp.raise_for_status()
-        course_payload = course_resp.json()
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch Perusall course users: {str(e)}")
+        for row in rows
+    ]
 
-    instructor_ids = course_payload.get("instructorIds") or []
-    student_ids = course_payload.get("studentIds") or []
-    unique_ids: Dict[str, str] = {}
-    for user_id in instructor_ids:
-        unique_ids[str(user_id)] = "instructor"
-    for user_id in student_ids:
-        unique_ids.setdefault(str(user_id), "student")
+    default_user_id = None
+    if PERUSALL_POST_USER_ID and any(u.id == PERUSALL_POST_USER_ID for u in users):
+        default_user_id = PERUSALL_POST_USER_ID
 
-    users: List[PerusallUserItem] = []
-    for user_id, role in unique_ids.items():
-        try:
-            user_resp = requests.get(
-                f"{PERUSALL_BASE_URL}/users/{user_id}",
-                headers=headers,
-                timeout=30,
-            )
-            user_resp.raise_for_status()
-            user_payload = user_resp.json()
-            first_name = user_payload.get("firstname") or user_payload.get("firstName")
-            last_name = user_payload.get("lastname") or user_payload.get("lastName")
-            display = user_payload.get("display")
-            if not display:
-                display = " ".join(part for part in [first_name, last_name] if part)
-            users.append(
-                PerusallUserItem(
-                    id=str(user_id),
-                    role=role,
-                    first_name=first_name,
-                    last_name=last_name,
-                    display=display,
-                )
-            )
-        except requests.exceptions.RequestException:
-            users.append(PerusallUserItem(id=str(user_id), role=role))
-
-    default_user_id = PERUSALL_POST_USER_ID if PERUSALL_POST_USER_ID in unique_ids else None
     return PerusallUsersResponse(users=users, default_user_id=default_user_id)
 
 
