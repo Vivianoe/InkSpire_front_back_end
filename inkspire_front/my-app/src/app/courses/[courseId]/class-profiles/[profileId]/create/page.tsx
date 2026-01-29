@@ -942,10 +942,22 @@ export default function EditClassProfilePage() {
                             </label>
                           );
                         })}
-                      </div>
-                    </div>
-                  );
-                }
+      </div>
+      {generating && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Generating class profile</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>Generating the class profile. This may take a few minutes. Please wait.</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
                 return (
                   <div className={styles.inputGroupFull} key={field.key}>

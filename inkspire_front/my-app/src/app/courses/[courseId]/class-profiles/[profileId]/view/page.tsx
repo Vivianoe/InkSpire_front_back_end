@@ -2013,6 +2013,22 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         </div>
 
       </div>
+      {(generating || busyRegenerating) && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>{busyRegenerating ? 'Regenerating class profile' : 'Generating class profile'}</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>
+                {busyRegenerating
+                  ? 'Regenerating the class profile. This may take a few seconds. Please wait.'
+                  : 'Generating the class profile. This may take a few minutes. Please wait.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
