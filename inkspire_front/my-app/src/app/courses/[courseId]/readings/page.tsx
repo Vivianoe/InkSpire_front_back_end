@@ -415,30 +415,34 @@ export default function ReadingUploadPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-          <div>
-            <h1 className={styles.title}>Reading Uploads</h1>
-            <p className={styles.subtitle}>
-              Upload and process readings for this course.
-            </p>
-          </div>
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
+              type="button"
+              className={styles.backIconButton}
               onClick={() => {
-                // Navigate back to course or profile
                 if (profileId) {
                   router.push(`/courses/${courseId}/class-profiles/${profileId}/view`);
                 } else {
                   router.push(`/courses/${courseId}`);
                 }
               }}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              aria-label="Back"
+              title="Back"
               disabled={uploading}
             >
-              ← Back
+              ←
             </button>
+            <div>
+              <h1 className={styles.title}>Reading Uploads</h1>
+              <p className={styles.subtitle}>
+                Upload and process readings for this course.
+              </p>
+            </div>
+          </div>
+          <div className={styles.headerActions}>
             <button
               onClick={handleCreateSession}
-              className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+              className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
               disabled={
                 uploading || 
                 readings.length === 0
@@ -498,79 +502,102 @@ export default function ReadingUploadPage() {
               {perusallReadings.filter(r => !r.is_uploaded).length > 0 && (
                 <div style={{
                   padding: '12px 16px',
-                  backgroundColor: '#fef3c7',
-                  border: '1px solid #fbbf24',
+                  backgroundColor: '#FFF8E1',
                   borderRadius: '8px',
                   marginBottom: '16px',
-                  color: '#92400e'
+                  color: '#F57C00',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}>
-                  <strong>⚠️ Missing Uploads:</strong> {perusallReadings.filter(r => !r.is_uploaded).length} reading(s) from Perusall do not have uploaded PDFs. Please upload PDFs for all readings before proceeding.
+                  <svg xmlns="http://www.w3.org/2000/svg" width="23" height="23" viewBox="0 0 23 23" fill="none">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M11.0844 16.0724C11.5435 16.0724 11.9157 15.7002 11.9157 15.2411V3.07864L13.7786 5.25191C14.0773 5.60052 14.6022 5.64088 14.9508 5.34208C15.2994 5.04329 15.3397 4.51846 15.0409 4.16987L11.7156 0.290313C11.5577 0.106045 11.3271 0 11.0844 0C10.8418 0 10.6111 0.106045 10.4533 0.290313L7.12789 4.16987C6.82909 4.51846 6.86946 5.04329 7.21806 5.34208C7.56666 5.64088 8.09148 5.60052 8.39028 5.25191L10.2531 3.07864V15.2411C10.2531 15.7002 10.6253 16.0724 11.0844 16.0724Z" fill="#F38623"/>
+                    <path d="M15.5182 8.59033C14.7399 8.59033 14.3507 8.59033 14.0711 8.77712C13.9501 8.858 13.8461 8.96194 13.7653 9.08299C13.5784 9.36255 13.5784 9.75176 13.5784 10.5301V15.241C13.5784 16.6184 12.4619 17.735 11.0844 17.735C9.70709 17.735 8.59049 16.6184 8.59049 15.241V10.5301C8.59049 9.75176 8.59049 9.36252 8.40366 9.08292C8.3228 8.96192 8.21891 8.85802 8.0979 8.77716C7.81831 8.59033 7.42909 8.59033 6.65067 8.59033C3.51551 8.59033 1.94794 8.59033 0.973968 9.5643C0 10.5383 0 12.1057 0 15.2408V16.3492C0 19.4843 0 21.0519 0.973968 22.0259C1.94794 22.9999 3.51551 22.9999 6.65067 22.9999H15.5182C18.6533 22.9999 20.2209 22.9999 21.1949 22.0259C22.1689 21.0519 22.1689 19.4843 22.1689 16.3492V15.2408C22.1689 12.1057 22.1689 10.5383 21.1949 9.5643C20.2209 8.59033 18.6533 8.59033 15.5182 8.59033Z" fill="#F38623"/>
+                  </svg>
+                  <strong>Missing Uploads:</strong> {perusallReadings.filter(r => !r.is_uploaded).length} reading(s) from Perusall do not have uploaded PDFs. Please upload PDFs for all readings before proceeding.
                 </div>
               )}
 
               <div className={styles.uploadList}>
-                {perusallReadings.map((perusallReading) => (
+                {perusallReadings.filter(r => r.is_uploaded).length > 0 && (
+                  <h3 className={styles.listSectionTitle}>Uploaded</h3>
+                )}
+                {perusallReadings.filter(r => r.is_uploaded).map((perusallReading) => (
                   <div
                     key={perusallReading.perusall_reading_id}
                     className={styles.readingCard}
-                    style={{
-                      borderLeft: perusallReading.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
-                    }}
                   >
                     <div className={styles.readingMeta}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                          <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#E5F3E6" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path opacity="0.4" d="M12 27C12 23.2288 12 21.3432 13.1716 20.1716C14.3431 19 16.2288 19 20 19H22C25.7712 19 27.6569 19 28.8284 20.1716C30 21.3432 30 23.2288 30 27V31C30 34.7712 30 36.6569 28.8284 37.8284C27.6569 39 25.7712 39 22 39H20C16.2288 39 14.3431 39 13.1716 37.8284C12 36.6569 12 34.7712 12 31V27Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 29C16.25 28.5858 16.5858 28.25 17 28.25H25C25.4142 28.25 25.75 28.5858 25.75 29C25.75 29.4142 25.4142 29.75 25 29.75H17C16.5858 29.75 16.25 29.4142 16.25 29Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 25C16.25 24.5858 16.5858 24.25 17 24.25H25C25.4142 24.25 25.75 24.5858 25.75 25C25.75 25.4142 25.4142 25.75 25 25.75H17C16.5858 25.75 16.25 25.4142 16.25 25Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 33C16.25 32.5858 16.5858 32.25 17 32.25H22C22.4142 32.25 22.75 32.5858 22.75 33C22.75 33.4142 22.4142 33.75 22 33.75H17C16.5858 33.75 16.25 33.75 16.25 33Z" fill="#5EB161"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
                           <p className={styles.readingName}>{perusallReading.perusall_reading_name}</p>
-                          <span style={{
-                            padding: '2px 8px',
-                            backgroundColor: perusallReading.is_uploaded ? '#10b981' : '#ef4444',
-                            color: 'white',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            fontWeight: '500'
-                          }}>
-                            {perusallReading.is_uploaded ? '✓ Uploaded' : '✗ Missing'}
-                          </span>
+                          <p className={styles.readingSecondaryDetail} style={{ color: '#4CAF50', fontSize: '12px' }}>
+                            Uploaded
+                          </p>
                         </div>
-                        {perusallReading.is_uploaded && perusallReading.local_reading_title && (
-                          <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                            Local reading: {perusallReading.local_reading_title}
-                          </p>
-                        )}
-                        {!perusallReading.is_uploaded && (
-                          <p className={styles.readingSecondaryDetail} style={{ color: '#ef4444', fontSize: '12px' }}>
-                            PDF upload required
-                          </p>
-                        )}
                       </div>
                     </div>
                     <div className={styles.readingActions}>
-                      {perusallReading.is_uploaded ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (perusallReading.local_reading_id) {
+                            handleRemoveReading(perusallReading.local_reading_id);
+                          }
+                        }}
+                        className={styles.removeButton}
+                        disabled={uploading}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {perusallReadings.filter(r => !r.is_uploaded).length > 0 && (
+                  <h3 className={styles.listSectionTitle}>Pending uploads</h3>
+                )}
+                {perusallReadings.filter(r => !r.is_uploaded).map((perusallReading) => (
+                  <div
+                    key={perusallReading.perusall_reading_id}
+                    className={styles.readingCard}
+                  >
+                    <div className={styles.readingMeta}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                        <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#FDF2DD" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                        <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                        <path opacity="0.5" d="M32.1689 32.3494V31.241C32.1689 28.1059 32.1687 26.5388 31.1947 25.5648C30.2207 24.5908 28.6531 24.5908 25.518 24.5908H16.6504C13.5153 24.5908 11.9477 24.5908 10.9737 25.5648C10 26.5385 10 28.105 10 31.2386V31.241V32.3494C10 35.4846 10 37.0521 10.974 38.0261C11.9479 39.0001 13.5155 39.0001 16.6507 39.0001H25.5182C28.6533 39.0001 30.2209 39.0001 31.1949 38.0261C32.1689 37.0521 32.1689 35.4846 32.1689 32.3494Z" fill="#F38623"/>
+                        <path fillRule="evenodd" clipRule="evenodd" d="M21.0844 32.0724C21.5435 32.0724 21.9157 31.7002 21.9157 31.2411V19.0786L23.7786 21.2519C24.0773 21.6005 24.6022 21.6409 24.9508 21.3421C25.2994 21.0433 25.3397 20.5185 25.041 20.1699L21.7157 16.2903C21.5577 16.106 21.3271 16 21.0844 16C20.8418 16 20.6112 16.106 20.4533 16.2903L17.1279 20.1699C16.8291 20.5185 16.8695 21.0433 17.2181 21.3421C17.5667 21.6409 18.0915 21.6005 18.3903 21.2519L20.2531 19.0786V31.2411C20.2531 31.7002 20.6253 32.0724 21.0844 32.0724Z" fill="#F38623"/>
+                      </svg>
+                        <div style={{ flex: 1 }}>
+                          <p className={styles.readingName}>{perusallReading.perusall_reading_name}</p>
+                          <p className={styles.readingSecondaryDetail} style={{ color: '#F57C00', fontSize: '12px' }}>
+                            PDF upload required
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.readingActions}>
                         <button
-                          type="button"
-                          onClick={() => {
-                            if (perusallReading.local_reading_id) {
-                              handleRemoveReading(perusallReading.local_reading_id);
-                            }
-                          }}
-                          className={styles.removeButton}
-                          disabled={uploading}
-                        >
-                          Remove
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedPerusallReading(perusallReading.perusall_reading_id);
-                            inputRef.current?.click();
-                          }}
-                          className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                          disabled={uploading || selectedPerusallReading !== null}
-                        >
-                          Upload PDF
-                        </button>
-                      )}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPerusallReading(perusallReading.perusall_reading_id);
+                          inputRef.current?.click();
+                        }}
+                          className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
+                        disabled={uploading || selectedPerusallReading !== null}
+                      >
+                        Upload PDF
+                      </button>
                     </div>
                   </div>
                 ))}
