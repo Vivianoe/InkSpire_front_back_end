@@ -6,8 +6,7 @@ import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from '@/app/courses/[courseId]/readings/page.module.css';
 import { supabase } from '@/lib/supabase/client';
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 type ReadingListItem = {
   id: string;
@@ -77,7 +76,7 @@ export default function ReadingUploadPage() {
   // Path parameters (from route: /courses/[courseId]/readings)
   const pathParams = useParams();
   const router = useRouter();
-  // Query parameters (from URL: ?instructorId=yyy&profileId=zzz)
+  // Query parameters (from URL: ?profileId=zzz)
   const searchParams = useSearchParams();
   const courseId = pathParams.courseId as string;
   const profileIdFromQuery = searchParams.get('profileId') as string | undefined;
@@ -93,11 +92,11 @@ export default function ReadingUploadPage() {
 
   const MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-  // Get instructor_id from query params, ensure it's never null or undefined
-  const instructorIdFromParams = searchParams?.get('instructorId');
-  const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
-    ? instructorIdFromParams 
-    : MOCK_INSTRUCTOR_ID;
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
 
   const resolveProfileId = () => {
     if (profileId) return profileId;
@@ -134,9 +133,6 @@ export default function ReadingUploadPage() {
           const params = new URLSearchParams(searchParams.toString());
           if (!params.get('profileId')) {
             params.set('profileId', cachedProfileId);
-            if (!params.get('instructorId')) {
-              params.set('instructorId', resolvedInstructorId);
-            }
             router.replace(`/courses/${courseId}/readings?${params.toString()}`);
           }
         }
@@ -145,6 +141,12 @@ export default function ReadingUploadPage() {
       // ignore storage errors
     }
   }, [courseId, profileIdFromQuery, router, searchParams, resolvedInstructorId]);
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
 
   const uploadNewReadings = async (files: FileList, perusallReadingId: string | null = null) => {
     const fileArray = Array.from(files);
@@ -303,9 +305,13 @@ export default function ReadingUploadPage() {
 
   const handleCreateSession = () => {
     const activeProfileId = resolveProfileId();
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     // Navigate to session creation page
     if (activeProfileId) {
-      router.push(`/courses/${courseId}/sessions/create?profileId=${activeProfileId}&instructorId=${resolvedInstructorId}`);
+      router.push(`/courses/${courseId}/sessions/create?profileId=${activeProfileId}`);
     } else {
       // If no profileId, go to a generic session creation or course management
       router.push(`/courses/${courseId}/class-profiles`);
@@ -358,6 +364,7 @@ export default function ReadingUploadPage() {
   );
 
   const fetchReadings = useCallback(async () => {
+    if (!resolvedInstructorId) return;
     setLoadingList(true);
     setError(null);
     try {
@@ -508,6 +515,7 @@ export default function ReadingUploadPage() {
       </div>
 
       <div className={styles.content}>
+        {loadingInstructorId && <div className={styles.emptyState}>Loading user context…</div>}
         {error && <div className={styles.errorMessage}>{error}</div>}
 
         <input
