@@ -99,6 +99,7 @@ export default function SessionCreationPage() {
   const [uploadingReading, setUploadingReading] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const readingUploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const initialLoadKeyRef = useRef<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -238,6 +239,12 @@ export default function SessionCreationPage() {
 
   // Load initial data
   useEffect(() => {
+    const loadKey = `${courseId}|${resolvedInstructorId}|${urlSessionId || ''}`;
+    if (initialLoadKeyRef.current === loadKey) {
+      return;
+    }
+    initialLoadKeyRef.current = loadKey;
+
     const loadData = async () => {
       try {
         // Load readings
