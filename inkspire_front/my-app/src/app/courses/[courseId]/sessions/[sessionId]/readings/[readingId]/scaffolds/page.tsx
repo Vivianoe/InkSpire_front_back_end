@@ -1696,6 +1696,18 @@ ${scaffold.text || 'No scaffold text available'}
           </div>
         </div>
       )}
+      {generating && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Generating scaffolds</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>Generating scaffolds. This may take a few minutes. Please wait.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

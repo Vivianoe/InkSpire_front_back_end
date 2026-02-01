@@ -34,6 +34,13 @@ def get_class_profile_prompt() -> ChatPromptTemplate:
             "that downstream agents (e.g., Material Analyst, Focus Area Identifier, Scaffold Generator) can design "
             "scaffolds aligned with the epistemology, inquiry practices, and learning objectives of the discipline "
             "and course.\n\n"
+            "When class_input contains design_considerations, treat those entries as high-priority constraints. "
+            "Keep the legacy framing terms (disciplinary ways of knowing, course priorities, class/session goals), "
+            "but interpret the newer fields with these semantics:\n"
+            "- \"Teaching priorities\": what to emphasize most in learning activity and scaffold design.\n"
+            "- \"What to avoid?\": explicit anti-goals and constraints that should be avoided.\n"
+            "- \"Any other considerations for the scaffold design\": additional teacher-defined constraints.\n"
+            "If there is tension between generic assumptions and these teacher inputs, prioritize the teacher inputs.\n\n"
 
             "Detailed guidance for your analysis:\n\n"
             "1) Discipline-level characteristics (use these ideas when writing the discipline paragraph):\n"
