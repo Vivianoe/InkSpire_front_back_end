@@ -68,6 +68,7 @@ const EMPTY_PROFILE_SECTIONS: ProfileSections = {
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 const MOCK_COURSE_ID = 'fbaf501d-af97-4286-b5b0-d7b63b500b35';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 type DesignRationaleText = string | null;
 type DesignConsiderationsPayload = Record<string, unknown> | null;
@@ -1366,10 +1367,19 @@ const createDefaultProfile = (id: string): ClassProfile => ({
     
     // Get instructor_id from URL params or fallback to mock
     const instructorId = urlInstructorId || MOCK_INSTRUCTOR_ID;
+
+    // Cache active profile for pages that may lose query params after back navigation.
+    try {
+      if (typeof window !== 'undefined' && urlCourseId && formData.id) {
+        window.sessionStorage.setItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${urlCourseId}`, formData.id);
+      }
+    } catch {
+      // ignore storage errors
+    }
     
     // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
     if (urlCourseId && formData.id) {
-      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${urlInstructorId}`);
+      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${instructorId}`);
     } else {
       // Fallback to old structure with query params
       const params = new URLSearchParams({
