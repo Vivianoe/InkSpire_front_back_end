@@ -6,8 +6,7 @@ import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from '@/app/courses/[courseId]/sessions/create/page.module.css';
 import { supabase } from '@/lib/supabase/client';
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 type ReadingListItem = {
   id: string;
@@ -107,7 +106,17 @@ export default function SessionCreationPage() {
   const [originalDraft, setOriginalDraft] = useState<any>(null);
   const [currentVersion, setCurrentVersion] = useState<number>(1);
 
-  const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
 
   useEffect(() => {
     if (!courseId) return;
@@ -239,6 +248,10 @@ export default function SessionCreationPage() {
 
   // Load initial data
   useEffect(() => {
+    if (!courseId || !resolvedInstructorId) {
+      return;
+    }
+    const instructorId = resolvedInstructorId;
     const loadKey = `${courseId}|${resolvedInstructorId}|${urlSessionId || ''}`;
     if (initialLoadKeyRef.current === loadKey) {
       return;
@@ -250,7 +263,7 @@ export default function SessionCreationPage() {
         // Load readings
         const readingsQuery = new URLSearchParams({
           course_id: courseId,
-          instructor_id: resolvedInstructorId,
+          instructor_id: instructorId,
         });
         const readingsResponse = await fetch(`/api/readings?${readingsQuery.toString()}`);
         const readingsData = await readingsResponse.json().catch(() => ({}));
@@ -297,9 +310,7 @@ export default function SessionCreationPage() {
       }
     };
 
-    if (courseId) {
-      loadData();
-    }
+    loadData();
   }, [courseId, resolvedInstructorId, urlSessionId, fetchPerusallAssignments]);
 
   // Load existing session if sessionId is in URL
@@ -411,7 +422,6 @@ export default function SessionCreationPage() {
       const params = new URLSearchParams();
       params.set('sessionId', latestSession.id);
       params.set('courseId', courseId);
-      params.set('instructorId', resolvedInstructorId);
       router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
       return;
     }
@@ -421,6 +431,10 @@ export default function SessionCreationPage() {
 
   /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -566,7 +580,6 @@ export default function SessionCreationPage() {
     // Navigate to same page with session_id in URL to load and edit
     const params = new URLSearchParams();
     params.set('sessionId', selectedSessionId);
-    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
     if (resolvedProfileId) params.set('profileId', resolvedProfileId);
     
     // Use RESTful URL structure
@@ -575,6 +588,10 @@ export default function SessionCreationPage() {
   */
 
   const handleStartWorkingOnReadings = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -715,6 +732,10 @@ export default function SessionCreationPage() {
     });
 
   const handleUploadReadingForAssignment = async (perusallDocumentId: string, file: File) => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     setUploadingReading(perusallDocumentId);
     setError(null);
     try {
@@ -926,6 +947,14 @@ export default function SessionCreationPage() {
     );
   }
 
+  if (loadingInstructorId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading user context...</div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.topBar}>
@@ -945,7 +974,7 @@ export default function SessionCreationPage() {
             <button
               onClick={() => {
                 if (resolvedProfileId) {
-                  router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}&instructorId=${resolvedInstructorId}`);
+                  router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}`);
                 } else {
                   router.push(`/courses/${courseId}/readings`);
                 }
@@ -1071,7 +1100,6 @@ export default function SessionCreationPage() {
                   onClick={() => {
                     const params = new URLSearchParams();
                     params.set('courseId', courseId);
-                    params.set('instructorId', resolvedInstructorId);
                     setMode('select');
                     setSelectedSessionId('');
                     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);

@@ -138,8 +138,6 @@ const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   designConsiderations: createDefaultDesignConsiderations(),
 };
 
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
-
 const buildClassInputPayload = (data: ClassProfile) => ({
   discipline_info: {
     discipline_name: data.disciplineInfo.disciplineName,
@@ -252,7 +250,7 @@ export default function EditClassProfilePage() {
   const router = useRouter();
   // Path parameters (from route: /class-profile/[id]/edit)
   const pathParams = useParams();
-  // Query parameters (from URL: ?courseId=xxx&instructorId=yyy)
+  // Query parameters (legacy URL may include ?courseId=xxx)
   const searchParams = useSearchParams();
   const profileId = (pathParams?.id || pathParams?.profileId) as string;
   const isEdit = profileId !== 'new';
@@ -419,6 +417,7 @@ export default function EditClassProfilePage() {
       setError('Unable to identify instructor. Please try refreshing the page.');
       return;
     }
+    const instructorId = urlInstructorId || currentUserId;
 
     setGenerating(true);
     setError(null);
@@ -428,7 +427,7 @@ export default function EditClassProfilePage() {
       const courseIdForRequest = urlCourseId || 'new';
 
       const payload = {
-        instructor_id: urlInstructorId || currentUserId || MOCK_INSTRUCTOR_ID,
+        instructor_id: instructorId,
         course_id: courseIdForRequest,
         title: formData.courseInfo.courseName || 'Untitled Class',
         course_code: formData.courseInfo.courseCode || 'TBD',
@@ -505,7 +504,6 @@ export default function EditClassProfilePage() {
           // Fallback to old structure with query params
           const navParams = new URLSearchParams();
           if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
           const queryString = navParams.toString();
           router.push(`/courses/${urlCourseId || 'new'}/class-profiles/${nextId}/view${queryString ? `?${queryString}` : ''}`);
         }

@@ -253,9 +253,6 @@ export default function ScaffoldPage() {
       if (navigationData?.profileId) {
         navParams.set('profileId', navigationData.profileId);
       }
-      if (navigationData?.instructorId) {
-        navParams.set('instructorId', navigationData.instructorId);
-      }
       router.push(`/courses/${courseId}/sessions/create?${navParams.toString()}`);
       return;
     }
