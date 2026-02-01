@@ -68,6 +68,7 @@ type PersistedReadingSelection = {
 };
 
 const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 export default function SessionCreationPage() {
   const pathParams = useParams();
@@ -76,6 +77,7 @@ export default function SessionCreationPage() {
   
   const courseId = pathParams.courseId as string;
   const profileId = searchParams.get('profileId') as string | undefined;
+  const [resolvedProfileId, setResolvedProfileId] = useState<string | undefined>(profileId);
   const urlSessionId = searchParams.get('sessionId') as string | undefined;
   
   const [mode, setMode] = useState<'create' | 'edit' | 'select'>('select');
@@ -105,6 +107,32 @@ export default function SessionCreationPage() {
   const [currentVersion, setCurrentVersion] = useState<number>(1);
 
   const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
+
+  useEffect(() => {
+    if (!courseId) return;
+    const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
+    if (profileId) {
+      setResolvedProfileId(profileId);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(storageKey, profileId);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
+        if (cachedProfileId) {
+          setResolvedProfileId(cachedProfileId);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [courseId, profileId]);
 
   // Load existing session from URL session_id
   const loadExistingSession = useCallback(async (sessionId: string) => {
@@ -480,7 +508,7 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId,
+            profileId: resolvedProfileId,
             instructorId: resolvedInstructorId,
           })
         );
@@ -532,7 +560,7 @@ export default function SessionCreationPage() {
     const params = new URLSearchParams();
     params.set('sessionId', selectedSessionId);
     if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-    if (profileId) params.set('profileId', profileId);
+    if (resolvedProfileId) params.set('profileId', resolvedProfileId);
     
     // Use RESTful URL structure
     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
@@ -635,7 +663,7 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId: profileId || '',
+            profileId: resolvedProfileId || '',
             instructorId: resolvedInstructorId,
           })
         );
@@ -909,8 +937,8 @@ export default function SessionCreationPage() {
           <div className={styles.headerActions}>
             <button
               onClick={() => {
-                if (profileId) {
-                  router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+                if (resolvedProfileId) {
+                  router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}&instructorId=${resolvedInstructorId}`);
                 } else {
                   router.push(`/courses/${courseId}/readings`);
                 }

@@ -99,6 +99,18 @@ export default function ReadingUploadPage() {
     ? instructorIdFromParams 
     : MOCK_INSTRUCTOR_ID;
 
+  const resolveProfileId = () => {
+    if (profileId) return profileId;
+    try {
+      if (typeof window !== 'undefined' && courseId) {
+        return window.sessionStorage.getItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`) || undefined;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return undefined;
+  };
+
   useEffect(() => {
     if (!courseId) return;
     const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
@@ -118,12 +130,21 @@ export default function ReadingUploadPage() {
         const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
         if (cachedProfileId) {
           setProfileId(cachedProfileId);
+          // Keep URL query in sync so refresh/back-forward preserves profile context.
+          const params = new URLSearchParams(searchParams.toString());
+          if (!params.get('profileId')) {
+            params.set('profileId', cachedProfileId);
+            if (!params.get('instructorId')) {
+              params.set('instructorId', resolvedInstructorId);
+            }
+            router.replace(`/courses/${courseId}/readings?${params.toString()}`);
+          }
         }
       }
     } catch {
       // ignore storage errors
     }
-  }, [courseId, profileIdFromQuery]);
+  }, [courseId, profileIdFromQuery, router, searchParams, resolvedInstructorId]);
 
   const uploadNewReadings = async (files: FileList, perusallReadingId: string | null = null) => {
     const fileArray = Array.from(files);
@@ -281,9 +302,10 @@ export default function ReadingUploadPage() {
   };
 
   const handleCreateSession = () => {
+    const activeProfileId = resolveProfileId();
     // Navigate to session creation page
-    if (profileId) {
-      router.push(`/courses/${courseId}/sessions/create?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+    if (activeProfileId) {
+      router.push(`/courses/${courseId}/sessions/create?profileId=${activeProfileId}&instructorId=${resolvedInstructorId}`);
     } else {
       // If no profileId, go to a generic session creation or course management
       router.push(`/courses/${courseId}/class-profiles`);
@@ -452,9 +474,10 @@ export default function ReadingUploadPage() {
           <div className={styles.headerActions}>
             <button
               onClick={() => {
+                const activeProfileId = resolveProfileId();
                 // Navigate back to course or profile
-                if (profileId) {
-                  router.push(`/courses/${courseId}/class-profiles/${profileId}/view`);
+                if (activeProfileId) {
+                  router.push(`/courses/${courseId}/class-profiles/${activeProfileId}/view`);
                 } else {
                   router.push(`/courses/${courseId}`);
                 }
