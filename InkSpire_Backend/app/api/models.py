@@ -341,6 +341,7 @@ class PerusallAnnotationRequest(BaseModel):
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
     perusall_user_id: Optional[str] = None  # Optional Perusall user ID to post as
+    idempotency_key: Optional[str] = None
 
 
 class PerusallAnnotationResponse(BaseModel):

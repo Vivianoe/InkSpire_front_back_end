@@ -905,41 +905,62 @@ ${scaffold.text || 'No scaffold text available'}
     return `Unknown user (${user.role})`;
   };
 
+  const updateSelectedPerusallUser = (users: PerusallUser[], defaultUserId?: string | null) => {
+    if (!users.length) {
+      setSelectedPerusallUserId('');
+      return;
+    }
+    const hasSelected = selectedPerusallUserId && users.some((u) => String(u.id) === selectedPerusallUserId);
+    if (hasSelected) return;
+    const fallback = defaultUserId || (users[0]?.id ? String(users[0].id) : '');
+    setSelectedPerusallUserId(fallback);
+  };
+
+  const loadPerusallUsers = async (mode: 'db' | 'sync') => {
+    if (!courseId) return;
+    setPerusallUsersLoading(true);
+    setPerusallUsersError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+      const endpoint =
+        mode === 'sync'
+          ? `/api/courses/${courseId}/perusall/users/sync`
+          : `/api/courses/${courseId}/perusall/users`;
+      const response = await fetch(endpoint, {
+        method: mode === 'sync' ? 'POST' : 'GET',
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || 'Failed to load Perusall users.');
+      }
+      const users = Array.isArray(data?.users) ? data.users : [];
+      setPerusallUsers(users);
+      const defaultUserId =
+        (typeof data?.default_user_id === 'string' && data.default_user_id) || '';
+      updateSelectedPerusallUser(users, defaultUserId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load Perusall users.';
+      setPerusallUsersError(message);
+    } finally {
+      setPerusallUsersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (courseId) {
+      loadPerusallUsers('sync');
+    }
+  }, [courseId]);
+
   useEffect(() => {
     if (!showPublishModal) return;
-    const loadPerusallUsers = async () => {
-      setPerusallUsersLoading(true);
-      setPerusallUsersError(null);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers: Record<string, string> = {};
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-        const response = await fetch(`/api/courses/${courseId}/perusall/users`, { headers });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(data?.detail || data?.message || 'Failed to load Perusall users.');
-        }
-        const users = Array.isArray(data?.users) ? data.users : [];
-        setPerusallUsers(users);
-        const defaultUserId =
-          (typeof data?.default_user_id === 'string' && data.default_user_id) || '';
-        if (!selectedPerusallUserId) {
-          setSelectedPerusallUserId(
-            defaultUserId || (users[0]?.id ? String(users[0].id) : '')
-          );
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load Perusall users.';
-        setPerusallUsersError(message);
-      } finally {
-        setPerusallUsersLoading(false);
-      }
-    };
-
-    loadPerusallUsers();
-  }, [showPublishModal, courseId, selectedPerusallUserId]);
+    loadPerusallUsers('db');
+  }, [showPublishModal, courseId]);
 
   if (loading) {
     return (
@@ -1549,17 +1570,28 @@ ${scaffold.text || 'No scaffold text available'}
                     {perusallUsersError}
                   </p>
                 ) : (
-                  <select
-                    className={uiStyles.fieldControl}
-                    value={selectedPerusallUserId}
-                    onChange={(event) => setSelectedPerusallUserId(event.target.value)}
-                  >
-                    {perusallUsers.map(user => (
-                      <option key={user.id} value={user.id}>
-                        {formatPerusallUserLabel(user)}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      className={uiStyles.fieldControl}
+                      value={selectedPerusallUserId}
+                      onChange={(event) => setSelectedPerusallUserId(event.target.value)}
+                    >
+                      {perusallUsers.map(user => (
+                        <option key={user.id} value={user.id}>
+                          {formatPerusallUserLabel(user)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className={`${uiStyles.btn} ${uiStyles.btnOutline}`}
+                      style={{ marginTop: '0.75rem' }}
+                      onClick={() => loadPerusallUsers('sync')}
+                      disabled={perusallUsersLoading}
+                    >
+                      Update users
+                    </button>
+                  </>
                 )}
               </div>
               {publishError && (
@@ -1660,6 +1692,18 @@ ${scaffold.text || 'No scaffold text available'}
                   Download PDF
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {generating && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Generating scaffolds</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>Generating scaffolds. This may take a few minutes. Please wait.</p>
             </div>
           </div>
         </div>
