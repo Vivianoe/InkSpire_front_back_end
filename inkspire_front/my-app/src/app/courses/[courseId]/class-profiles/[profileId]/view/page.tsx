@@ -254,7 +254,7 @@ const PRIOR_KNOWLEDGE_LABELS: Record<string, string> = {
   developing: 'Developing – some previous experience',
   intermediate: 'Intermediate – working familiarity',
   advanced: 'Advanced – extensive experience',
-  mixed: 'Mixed proficiency cohort',
+  mixed: 'Mixed experience cohort',
 };
 
 const PRIOR_KNOWLEDGE_OPTIONS = [
@@ -564,8 +564,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setError('Please fill in Discipline Name and Department.');
       return false;
     }
-    if (!data.courseInfo.courseName || !data.courseInfo.courseCode) {
-      setError('Please fill in Course Name and Course Code.');
+    if (!data.courseInfo.courseName) {
+      setError('Please fill in Course Name.');
       return false;
     }
     if (!data.classInfo.semester || !data.classInfo.year) {

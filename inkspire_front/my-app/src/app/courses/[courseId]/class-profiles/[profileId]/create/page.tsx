@@ -3,7 +3,7 @@
 
 //export { default } from '@/app/class-profile/[id]/edit/page';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
@@ -45,6 +45,8 @@ interface ClassProfile {
     enrollment: string;
     background: string;
     priorKnowledge: string;
+    learningChallenges: string[];
+    learningChallengesOther: string;
   };
   generatedProfile?: string;
   designConsiderations: DesignConsiderations;
@@ -57,6 +59,15 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
   { value: 'intermediate', label: 'Intermediate – working familiarity' },
   { value: 'advanced', label: 'Advanced – extensive experience' },
   { value: 'mixed', label: 'Mixed proficiency cohort' },
+];
+
+const LEARNING_CHALLENGE_OPTIONS = [
+  'Difficulty getting started with open-ended tasks',
+  'Trouble connecting ideas across readings',
+  'Struggle with technical terminology',
+  'Tendency to focus on surface details rather than core ideas',
+  'Low confidence in explaining their thinking',
+  'Other',
 ];
 
 // const DEFAULT_CLASS_BACKGROUND = '';
@@ -92,38 +103,36 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
 //   designConsiderations: createDefaultDesignConsiderations(),
 // };
 
-const DEFAULT_CLASS_BACKGROUND =
-  'Cohort includes graduate students from education disciplines who are strengthening their computational research toolkit.';
+const DEFAULT_CLASS_BACKGROUND = '';
 
 const DEFAULT_PREFILL_PROFILE: Omit<ClassProfile, 'id'> = {
   disciplineInfo: {
-    disciplineName: 'Education',
-    department: 'Graduate School of Education',
-    fieldDescription:
-      'Explores educational theory, teaching and learning practices, and problem-driven inquiry within education research contexts.',
+    disciplineName: '',
+    department: '',
+    fieldDescription: '',
   },
   courseInfo: {
-    courseName: 'Learning Sciences: Past, Present, and Future',
-    courseCode: 'EDUC 6144',
-    description:
-      'This course is a survey of the kinds of theories, methods, and applications through which educational researchers understand learning and how to improve it. The course is designed to provide information about how the field of the learning sciences emerged, has evolved, and is growing to address current and future learning needs. ',
-    credits: '1',
-    prerequisites: 'None required',
-    learningObjectives:
-      'Investigating the roots of the learning sciences field and how it has evolved',
-    assessmentMethods: 'In-class participation, short writing assignments, and a final exam.',
-    deliveryMode: 'in-person',
+    courseName: '',
+    courseCode: '',
+    description: '',
+    credits: '',
+    prerequisites: '',
+    learningObjectives: '',
+    assessmentMethods: '',
+    deliveryMode: '',
   },
   classInfo: {
-    semester: 'Spring',
-    year: '2026',
-    section: 'A',
-    meetingDays: 'MW',
-    meetingTime: '10:00 AM - 11:30 AM',
-    location: 'STIT Building, Room 210',
-    enrollment: '30',
-    background: 'Cohort includes graduate students from education discipline.',
-    priorKnowledge: 'mixed',
+    semester: '',
+    year: '',
+    section: '',
+    meetingDays: '',
+    meetingTime: '',
+    location: '',
+    enrollment: '',
+    background: DEFAULT_CLASS_BACKGROUND,
+    priorKnowledge: '',
+    learningChallenges: [],
+    learningChallengesOther: '',
   },
   generatedProfile: undefined,
   designConsiderations: createDefaultDesignConsiderations(),
@@ -157,6 +166,8 @@ const buildClassInputPayload = (data: ClassProfile) => ({
     enrollment: data.classInfo.enrollment,
     background: data.classInfo.background || DEFAULT_CLASS_BACKGROUND,
     prior_knowledge: data.classInfo.priorKnowledge,
+    learning_challenges: data.classInfo.learningChallenges,
+    learning_challenges_other: data.classInfo.learningChallengesOther,
   },
   design_considerations: data.designConsiderations,
 });
@@ -258,6 +269,20 @@ export default function EditClassProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile>(createDefaultFormData(profileId || 'new'));
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const learningChallengesOtherRef = useRef<HTMLTextAreaElement>(null);
+
+  const normalizeLearningChallenges = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    }
+    if (typeof value === 'string') {
+      return value
+        .split(/[|,]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -280,6 +305,10 @@ export default function EditClassProfilePage() {
         ? {
             ...createDefaultFormData(profileId),
             ...payload,
+            classInfo: {
+              ...createDefaultFormData(profileId).classInfo,
+              ...(payload.classInfo ?? {}),
+            },
             designConsiderations: normalizeDesignConsiderations(
               payload.designConsiderations ?? parseDesignConsiderations(payload.generatedProfile)
             ),
@@ -370,8 +399,8 @@ export default function EditClassProfilePage() {
       setError('Please fill in Discipline Name and Department.');
       return false;
     }
-    if (!formData.courseInfo.courseName || !formData.courseInfo.courseCode) {
-      setError('Please fill in Course Name and Course Code.');
+    if (!formData.courseInfo.courseName) {
+      setError('Please fill in Course Name.');
       return false;
     }
     if (!formData.classInfo.semester || !formData.classInfo.year) {
@@ -568,7 +597,7 @@ export default function EditClassProfilePage() {
                   value={formData.disciplineInfo.disciplineName}
                   onChange={(e) => handleInputChange('disciplineInfo', 'disciplineName', e.target.value)}
                   className={styles.input}
-                  placeholder="e.g., Computer Science (pre-filled), Educational Psychology, Mechanical Engineering"
+                  placeholder="e.g., Computer Science, Mechanical Engineering"
                   required
                   disabled={generating}
                 />
@@ -584,26 +613,12 @@ export default function EditClassProfilePage() {
                   value={formData.disciplineInfo.department}
                   onChange={(e) => handleInputChange('disciplineInfo', 'department', e.target.value)}
                   className={styles.input}
-                  placeholder="e.g., Department of Computer and Information Science (pre-filled), School of Education"
+                  placeholder="e.g., Department of Computer and Information Science"
                   required
                   disabled={generating}
                 />
               </div>
 
-              <div className={styles.inputGroupFull}>
-                <label htmlFor="fieldDescription" className={styles.label}>
-                  Field Description
-                </label>
-                <textarea
-                  id="fieldDescription"
-                  value={formData.disciplineInfo.fieldDescription}
-                  onChange={(e) => handleInputChange('disciplineInfo', 'fieldDescription', e.target.value)}
-                  className={styles.textarea}
-                  placeholder="Summarize the discipline’s focus areas, core questions, and primary methods."
-                  rows={3}
-                  disabled={generating}
-                />
-              </div>
             </div>
           </section>
 
@@ -627,51 +642,21 @@ export default function EditClassProfilePage() {
                 />
               </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="courseCode" className={styles.label}>
-                  Course Code *
+               <div className={styles.inputGroupFull}>
+                <label htmlFor="description" className={styles.label}>
+                  Course Description
                 </label>
-                <input
-                  id="courseCode"
-                  type="text"
-                  value={formData.courseInfo.courseCode}
-                  onChange={(e) => handleInputChange('courseInfo', 'courseCode', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., EDU 101"
-                  required
+                <textarea
+                  id="description"
+                  value={formData.courseInfo.description}
+                  onChange={(e) => handleInputChange('courseInfo', 'description', e.target.value)}
+                  className={styles.textarea}
+                  placeholder="Enter a detailed description of the course..."
+                  rows={4}
                   disabled={generating}
                 />
               </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="credits" className={styles.label}>
-                  Credits
-                </label>
-                <input
-                  id="credits"
-                  type="text"
-                  value={formData.courseInfo.credits}
-                  onChange={(e) => handleInputChange('courseInfo', 'credits', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., 3"
-                  disabled={generating}
-                />
-              </div>
-
-              <div className={styles.inputGroup}>
-                <label htmlFor="prerequisites" className={styles.label}>
-                  Prerequisites
-                </label>
-                <input
-                  id="prerequisites"
-                  type="text"
-                  value={formData.courseInfo.prerequisites}
-                  onChange={(e) => handleInputChange('courseInfo', 'prerequisites', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., EDU 100 or instructor permission"
-                  disabled={generating}
-                />
-              </div>
 
               <div className={styles.inputGroupFull}>
                 <label htmlFor="learningObjectives" className={styles.label}>
@@ -721,20 +706,7 @@ export default function EditClassProfilePage() {
                 </select>
               </div>
 
-              <div className={styles.inputGroupFull}>
-                <label htmlFor="description" className={styles.label}>
-                  Course Description
-                </label>
-                <textarea
-                  id="description"
-                  value={formData.courseInfo.description}
-                  onChange={(e) => handleInputChange('courseInfo', 'description', e.target.value)}
-                  className={styles.textarea}
-                  placeholder="Enter a detailed description of the course..."
-                  rows={4}
-                  disabled={generating}
-                />
-              </div>
+             
             </div>
           </section>
 
@@ -772,26 +744,12 @@ export default function EditClassProfilePage() {
                   value={formData.classInfo.year}
                   onChange={(e) => handleInputChange('classInfo', 'year', e.target.value)}
                   className={styles.input}
-                  placeholder="e.g., 2024"
+                  placeholder="e.g., 2026"
                   required
                   disabled={generating}
                 />
               </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="section" className={styles.label}>
-                  Section
-                </label>
-                <input
-                  id="section"
-                  type="text"
-                  value={formData.classInfo.section}
-                  onChange={(e) => handleInputChange('classInfo', 'section', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., A, B, 01"
-                  disabled={generating}
-                />
-              </div>
 
               <div className={styles.inputGroup}>
                 <label htmlFor="enrollment" className={styles.label}>
@@ -808,70 +766,17 @@ export default function EditClassProfilePage() {
                 />
               </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="meetingDays" className={styles.label}>
-                  Meeting Days
-                </label>
-                <input
-                  id="meetingDays"
-                  type="text"
-                  value={formData.classInfo.meetingDays}
-                  onChange={(e) => handleInputChange('classInfo', 'meetingDays', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., MWF, TTh"
-                  disabled={generating}
-                />
-              </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="meetingTime" className={styles.label}>
-                  Meeting Time
-                </label>
-                <input
-                  id="meetingTime"
-                  type="text"
-                  value={formData.classInfo.meetingTime}
-                  onChange={(e) => handleInputChange('classInfo', 'meetingTime', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., 10:00 AM - 11:30 AM"
-                  disabled={generating}
-                />
-              </div>
 
-              <div className={styles.inputGroup}>
-                <label htmlFor="location" className={styles.label}>
-                  Location
-                </label>
-                <input
-                  id="location"
-                  type="text"
-                  value={formData.classInfo.location}
-                  onChange={(e) => handleInputChange('classInfo', 'location', e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g., Building A, Room 201"
-                  disabled={generating}
-                />
-              </div>
+            
 
               <div className={styles.inputGroupFull}>
-                <label htmlFor="background" className={styles.label}>
-                  Background
-                </label>
-                <textarea
-                  id="background"
-                  value={formData.classInfo.background}
-                  onChange={(e) => handleInputChange('classInfo', 'background', e.target.value)}
-                  className={styles.textarea}
-                  placeholder="Provide background information about this class and its learners."
-                  rows={3}
-                  disabled={generating}
-                />
-              </div>
-
-              <div className={styles.inputGroup}>
                 <label htmlFor="priorKnowledge" className={styles.label}>
                   Prior Knowledge
                 </label>
+                <p className={styles.fieldHint}>
+                  How familiar are your students with the core concepts in this course?
+                </p>
                 <select
                   id="priorKnowledge"
                   value={formData.classInfo.priorKnowledge}
@@ -886,44 +791,128 @@ export default function EditClassProfilePage() {
                   ))}
                 </select>
               </div>
+              {(() => {
+                const selected = normalizeLearningChallenges(formData.classInfo.learningChallenges);
+                return (
+                  <div className={styles.inputGroupFull}>
+                    <label className={styles.label}>Major Learning Challenges</label>
+                    <p className={styles.fieldHint}>
+                      Which challenges do students in this class commonly experience?
+                    </p>
+                    <div className={styles.checkboxGroup}>
+                  {LEARNING_CHALLENGE_OPTIONS.map(option => {
+                    const isChecked = selected.includes(option);
+                    return (
+                      <label key={option} className={styles.checkboxOption}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const nextValues = e.target.checked
+                              ? [...selected, option]
+                              : selected.filter(item => item !== option);
+                            setFormData(prev => ({
+                              ...prev,
+                              classInfo: {
+                                ...prev.classInfo,
+                                learningChallenges: nextValues,
+                              },
+                            }));
+                            if (option === 'Other' && e.target.checked) {
+                              window.setTimeout(() => learningChallengesOtherRef.current?.focus(), 0);
+                            }
+                          }}
+                          disabled={generating}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    );
+                  })}
+                    </div>
+                  </div>
+              );
+              })()}
+              {normalizeLearningChallenges(formData.classInfo.learningChallenges).includes('Other') && (
+                <div className={styles.inputGroupFull}>
+                  <label htmlFor="learningChallengesOther" className={styles.label}>
+                    Other
+                  </label>
+                  <textarea
+                    id="learningChallengesOther"
+                    ref={learningChallengesOtherRef}
+                    value={formData.classInfo.learningChallengesOther}
+                    onChange={(e) =>
+                      handleInputChange('classInfo', 'learningChallengesOther', e.target.value)
+                    }
+                    className={styles.textarea}
+                    placeholder="Describe other learning challenges..."
+                    rows={2}
+                    disabled={generating}
+                  />
+                </div>
+              )}
             </div>
           </section>
 
           {/* Design Considerations */}
           <section className={styles.section}>
-            <h2 className={styles.sectionTitle}>Design Considerations</h2>
+            <h2 className={`${styles.sectionTitle} ${styles.sectionTitleNoDivider}`}>Design Considerations</h2>
+            <p className={styles.fieldHint}>
+              These considerations help Inkspire align its scaffolds with your teaching intentions. There are no right or wrong answers.
+            </p>
+            <div className={styles.sectionDivider} />
             <div className={styles.formGrid}>
               {DESIGN_CONSIDERATION_FIELDS.map(field => {
                 const value = formData.designConsiderations[field.key] || '';
                 if ('options' in field && field.options.length > 0) {
                   const normalizedValue = value.trim().replace(/_/g, ' ');
-                  let selectedValues: string[] = [];
-                  if (
-                    normalizedValue &&
-                    field.options.includes(normalizedValue as (typeof field.options)[number])
-                  ) {
-                    selectedValues = [normalizedValue];
-                  } else if (normalizedValue.includes('||')) {
-                    selectedValues = normalizedValue
-                      .split('||')
-                      .map(item => item.trim())
-                      .filter(Boolean);
-                  } else if (normalizedValue.includes(',')) {
-                    selectedValues = normalizedValue
-                      .split(',')
-                      .map(item => item.trim())
-                      .filter(Boolean);
-                  } else if (normalizedValue) {
-                    selectedValues = [normalizedValue];
-                  }
+                  const parts = normalizedValue
+                    ? (normalizedValue.includes('||')
+                        ? normalizedValue.split('||')
+                        : normalizedValue.split(',')
+                      ).map(item => item.trim()).filter(Boolean)
+                    : [];
+                  const otherOption = field.options.find(option => option.toLowerCase().startsWith('other'));
+                  const rawOtherPart = parts.find(part => /^other\s*:/i.test(part) || part.toLowerCase() === 'other');
+                  const otherText = rawOtherPart && rawOtherPart.includes(':')
+                    ? rawOtherPart.split(':').slice(1).join(':').trim()
+                    : '';
+                  const normalizedSelected = parts
+                    .map(part => {
+                      if (/^other\s*:/i.test(part) && otherOption) return otherOption;
+                      return part;
+                    })
+                    .filter(part => field.options.some(option => option === part));
+                  const selectedValues = normalizedSelected.length
+                    ? normalizedSelected
+                    : (normalizedValue && field.options.some(option => option === normalizedValue)
+                        ? [normalizedValue]
+                        : []);
+
+                  const buildDesignValue = (nextValues: string[], nextOtherText: string) => {
+                    const hasOther = otherOption ? nextValues.includes(otherOption) : false;
+                    const valuesWithoutOther = otherOption
+                      ? nextValues.filter(item => item !== otherOption)
+                      : nextValues;
+                    if (!hasOther || !otherOption) {
+                      return valuesWithoutOther.join(' || ');
+                    }
+                    const otherSegment = nextOtherText.trim() ? `Other: ${nextOtherText.trim()}` : 'Other';
+                    return [...valuesWithoutOther, otherSegment].join(' || ');
+                  };
+
                   return (
                     <div className={styles.inputGroup} key={field.key}>
                       <label className={styles.label}>{field.label}</label>
+                      <p className={styles.fieldHint}>{field.placeholder}</p>
                       <div className={styles.checkboxGroup}>
                         {field.options.map(option => {
                           const isChecked = selectedValues.includes(option);
                           return (
-                            <label key={option} className={styles.checkboxOption}>
+                            <label
+                              key={option}
+                              className={`${styles.checkboxOption} ${styles.checkboxOptionWrap}`}
+                            >
                               <input
                                 type="checkbox"
                                 checked={isChecked}
@@ -933,7 +922,7 @@ export default function EditClassProfilePage() {
                                     : selectedValues.filter(item => item !== option);
                                   handleDesignConsiderationChange(
                                     field.key,
-                                    nextValues.join(' || ')
+                                    buildDesignValue(nextValues, otherText)
                                   );
                                 }}
                                 disabled={generating}
@@ -942,23 +931,25 @@ export default function EditClassProfilePage() {
                             </label>
                           );
                         })}
-      </div>
-      {generating && (
-        <div className={uiStyles.publishOverlay}>
-          <div className={uiStyles.publishModal}>
-            <div className={uiStyles.publishModalHeader}>
-              <h3>Generating class profile</h3>
-            </div>
-            <div className={uiStyles.publishModalBody}>
-              <p>Generating the class profile. This may take a few minutes. Please wait.</p>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+                      </div>
+                      {otherOption && selectedValues.includes(otherOption) && (
+                        <textarea
+                          className={styles.textarea}
+                          rows={2}
+                          value={otherText}
+                          onChange={(e) =>
+                            handleDesignConsiderationChange(
+                              field.key,
+                              buildDesignValue(selectedValues, e.target.value)
+                            )
+                          }
+                          placeholder="Please specify..."
+                          disabled={generating}
+                        />
+                      )}
+                    </div>
+                  );
+                }
                 return (
                   <div className={styles.inputGroupFull} key={field.key}>
                     <label className={styles.label}>{field.label}</label>
@@ -975,11 +966,20 @@ export default function EditClassProfilePage() {
               })}
             </div>
           </section>
-
-
         </form>
       </div>
-
+      {generating && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Generating class profile</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>Generating the class profile. This may take a few minutes. Please wait.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
