@@ -47,6 +47,7 @@ type PersistedReadingSelection = {
 };
 
 const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 const fileToBase64 = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -79,7 +80,8 @@ export default function ReadingUploadPage() {
   // Query parameters (from URL: ?instructorId=yyy&profileId=zzz)
   const searchParams = useSearchParams();
   const courseId = pathParams.courseId as string;
-  const profileId = searchParams.get('profileId') as string | undefined;
+  const profileIdFromQuery = searchParams.get('profileId') as string | undefined;
+  const [profileId, setProfileId] = useState<string | undefined>(profileIdFromQuery);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [readings, setReadings] = useState<ReadingListItem[]>([]);
   const [perusallReadings, setPerusallReadings] = useState<PerusallReadingStatus[]>([]);
@@ -96,6 +98,53 @@ export default function ReadingUploadPage() {
   const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
     ? instructorIdFromParams 
     : MOCK_INSTRUCTOR_ID;
+
+  const resolveProfileId = () => {
+    if (profileId) return profileId;
+    try {
+      if (typeof window !== 'undefined' && courseId) {
+        return window.sessionStorage.getItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`) || undefined;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return undefined;
+  };
+
+  useEffect(() => {
+    if (!courseId) return;
+    const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
+    if (profileIdFromQuery) {
+      setProfileId(profileIdFromQuery);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(storageKey, profileIdFromQuery);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
+        if (cachedProfileId) {
+          setProfileId(cachedProfileId);
+          // Keep URL query in sync so refresh/back-forward preserves profile context.
+          const params = new URLSearchParams(searchParams.toString());
+          if (!params.get('profileId')) {
+            params.set('profileId', cachedProfileId);
+            if (!params.get('instructorId')) {
+              params.set('instructorId', resolvedInstructorId);
+            }
+            router.replace(`/courses/${courseId}/readings?${params.toString()}`);
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [courseId, profileIdFromQuery, router, searchParams, resolvedInstructorId]);
 
   const uploadNewReadings = async (files: FileList, perusallReadingId: string | null = null) => {
     const fileArray = Array.from(files);
@@ -253,9 +302,10 @@ export default function ReadingUploadPage() {
   };
 
   const handleCreateSession = () => {
+    const activeProfileId = resolveProfileId();
     // Navigate to session creation page
-    if (profileId) {
-      router.push(`/courses/${courseId}/sessions/create?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+    if (activeProfileId) {
+      router.push(`/courses/${courseId}/sessions/create?profileId=${activeProfileId}&instructorId=${resolvedInstructorId}`);
     } else {
       // If no profileId, go to a generic session creation or course management
       router.push(`/courses/${courseId}/class-profiles`);
@@ -424,9 +474,10 @@ export default function ReadingUploadPage() {
           <div className={styles.headerActions}>
             <button
               onClick={() => {
+                const activeProfileId = resolveProfileId();
                 // Navigate back to course or profile
-                if (profileId) {
-                  router.push(`/courses/${courseId}/class-profiles/${profileId}/view`);
+                if (activeProfileId) {
+                  router.push(`/courses/${courseId}/class-profiles/${activeProfileId}/view`);
                 } else {
                   router.push(`/courses/${courseId}`);
                 }
