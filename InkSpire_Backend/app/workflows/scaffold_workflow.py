@@ -743,6 +743,8 @@ def node_focus(state: WorkflowState) -> dict:
             "reading_info": state["reading_info"],
             "reading_chunks": state["reading_chunks"],
             "material_report_text": state["material_report_text"],
+            # Ask for a buffer so downstream scaffold filtering can still hit target count.
+            "scaffold_count": _resolve_generation_count(state.get("scaffold_count", "unspecified"), extra=4),
         },
         context="node_focus",
     )

@@ -69,12 +69,14 @@ def get_focus_prompt():
             "Reading info:\n{reading_info}\n\n"
             "Reading chunks:\n{reading_chunks}\n\n"
             "Material report (from the Material Analyst Agent):\n{material_report_text}\n\n"
+            "Focus fragment count target:\n{scaffold_count}\n\n"
             "Task:\n"
             "- Apply the scaffold-worthy rules above.\n"
             "- Identify and prioritize segments that need scaffolding for this specific class.\n"
             "- For each, provide a fragment, rationales (referencing the rules), a priority_level, and\n"
             "  concrete suggested_activities.\n\n"
             "- Order focus_areas by where the fragment appears in the reading (earlier-to-later).\n\n"
+            "- If a numeric focus fragment count target is provided, return exactly that many focus_areas.\n\n"
             "Return ONLY valid JSON in the specified \"focus_areas\" schema."
         ),
     ])
