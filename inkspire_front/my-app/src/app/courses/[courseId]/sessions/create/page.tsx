@@ -6,8 +6,7 @@ import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from '@/app/courses/[courseId]/sessions/create/page.module.css';
 import { supabase } from '@/lib/supabase/client';
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 type ReadingListItem = {
   id: string;
@@ -68,6 +67,7 @@ type PersistedReadingSelection = {
 };
 
 const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 export default function SessionCreationPage() {
   const pathParams = useParams();
@@ -76,6 +76,7 @@ export default function SessionCreationPage() {
   
   const courseId = pathParams.courseId as string;
   const profileId = searchParams.get('profileId') as string | undefined;
+  const [resolvedProfileId, setResolvedProfileId] = useState<string | undefined>(profileId);
   const urlSessionId = searchParams.get('sessionId') as string | undefined;
   
   const [mode, setMode] = useState<'create' | 'edit' | 'select'>('select');
@@ -97,6 +98,7 @@ export default function SessionCreationPage() {
   const [uploadingReading, setUploadingReading] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const readingUploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const initialLoadKeyRef = useRef<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -104,7 +106,43 @@ export default function SessionCreationPage() {
   const [originalDraft, setOriginalDraft] = useState<any>(null);
   const [currentVersion, setCurrentVersion] = useState<number>(1);
 
-  const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
+
+  useEffect(() => {
+    if (!courseId) return;
+    const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
+    if (profileId) {
+      setResolvedProfileId(profileId);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(storageKey, profileId);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
+        if (cachedProfileId) {
+          setResolvedProfileId(cachedProfileId);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [courseId, profileId]);
 
   // Load existing session from URL session_id
   const loadExistingSession = useCallback(async (sessionId: string) => {
@@ -210,12 +248,22 @@ export default function SessionCreationPage() {
 
   // Load initial data
   useEffect(() => {
+    if (!courseId || !resolvedInstructorId) {
+      return;
+    }
+    const instructorId = resolvedInstructorId;
+    const loadKey = `${courseId}|${resolvedInstructorId}|${urlSessionId || ''}`;
+    if (initialLoadKeyRef.current === loadKey) {
+      return;
+    }
+    initialLoadKeyRef.current = loadKey;
+
     const loadData = async () => {
       try {
         // Load readings
         const readingsQuery = new URLSearchParams({
           course_id: courseId,
-          instructor_id: resolvedInstructorId,
+          instructor_id: instructorId,
         });
         const readingsResponse = await fetch(`/api/readings?${readingsQuery.toString()}`);
         const readingsData = await readingsResponse.json().catch(() => ({}));
@@ -262,9 +310,7 @@ export default function SessionCreationPage() {
       }
     };
 
-    if (courseId) {
-      loadData();
-    }
+    loadData();
   }, [courseId, resolvedInstructorId, urlSessionId, fetchPerusallAssignments]);
 
   // Load existing session if sessionId is in URL
@@ -376,7 +422,6 @@ export default function SessionCreationPage() {
       const params = new URLSearchParams();
       params.set('sessionId', latestSession.id);
       params.set('courseId', courseId);
-      params.set('instructorId', resolvedInstructorId);
       router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
       return;
     }
@@ -386,6 +431,10 @@ export default function SessionCreationPage() {
 
   /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -480,7 +529,7 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId,
+            profileId: resolvedProfileId,
             instructorId: resolvedInstructorId,
           })
         );
@@ -531,8 +580,7 @@ export default function SessionCreationPage() {
     // Navigate to same page with session_id in URL to load and edit
     const params = new URLSearchParams();
     params.set('sessionId', selectedSessionId);
-    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-    if (profileId) params.set('profileId', profileId);
+    if (resolvedProfileId) params.set('profileId', resolvedProfileId);
     
     // Use RESTful URL structure
     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
@@ -540,6 +588,10 @@ export default function SessionCreationPage() {
   */
 
   const handleStartWorkingOnReadings = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -635,7 +687,7 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId: profileId || '',
+            profileId: resolvedProfileId || '',
             instructorId: resolvedInstructorId,
           })
         );
@@ -680,6 +732,10 @@ export default function SessionCreationPage() {
     });
 
   const handleUploadReadingForAssignment = async (perusallDocumentId: string, file: File) => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     setUploadingReading(perusallDocumentId);
     setError(null);
     try {
@@ -891,6 +947,14 @@ export default function SessionCreationPage() {
     );
   }
 
+  if (loadingInstructorId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading user context...</div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.topBar}>
@@ -903,8 +967,8 @@ export default function SessionCreationPage() {
               type="button"
               className={styles.backIconButton}
               onClick={() => {
-                if (profileId) {
-                  router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+                if (resolvedProfileId) {
+                  router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}`);
                 } else {
                   router.push(`/courses/${courseId}/readings`);
                 }
@@ -1025,7 +1089,6 @@ export default function SessionCreationPage() {
                   onClick={() => {
                     const params = new URLSearchParams();
                     params.set('courseId', courseId);
-                    params.set('instructorId', resolvedInstructorId);
                     setMode('select');
                     setSelectedSessionId('');
                     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);

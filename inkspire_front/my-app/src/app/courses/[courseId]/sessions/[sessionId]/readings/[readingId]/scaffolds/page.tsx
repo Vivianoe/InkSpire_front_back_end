@@ -57,6 +57,11 @@ interface PerusallUser {
   display?: string | null;
 }
 
+interface AnnotationPostStatusItem {
+  annotation_id: string;
+  status: 'pending' | 'posted';
+}
+
 export default function ScaffoldPage() {
   const router = useRouter();
   const params = useParams();
@@ -77,6 +82,7 @@ export default function ScaffoldPage() {
   const [currentReviewIndex, setCurrentReviewIndex] = useState<number>(-1);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+  const [llmRefining, setLlmRefining] = useState(false);
   
   // Form data for session info
   const [sessionInfo, setSessionInfo] = useState('');
@@ -98,6 +104,8 @@ export default function ScaffoldPage() {
   const [perusallUsersLoading, setPerusallUsersLoading] = useState(false);
   const [perusallUsersError, setPerusallUsersError] = useState<string | null>(null);
   const [selectedPerusallUserId, setSelectedPerusallUserId] = useState<string>('');
+  const [annotationPostStatusMap, setAnnotationPostStatusMap] = useState<Record<string, 'pending' | 'posted'>>({});
+  const [annotationStatusLoading, setAnnotationStatusLoading] = useState(false);
 
   const courseId = params.courseId as string;
   const sessionId = params.sessionId as string;
@@ -254,9 +262,6 @@ export default function ScaffoldPage() {
       if (navigationData?.profileId) {
         navParams.set('profileId', navigationData.profileId);
       }
-      if (navigationData?.instructorId) {
-        navParams.set('instructorId', navigationData.instructorId);
-      }
       router.push(`/courses/${courseId}/sessions/create?${navParams.toString()}`);
       return;
     }
@@ -277,6 +282,7 @@ export default function ScaffoldPage() {
 
   // Helper functions for processing review response
   const keyForId = (value: number | string) => String(value);
+  const scaffoldCardDomId = (scaffoldId: number | string) => `scaffold-card-${keyForId(scaffoldId)}`;
 
   const getScaffoldTextValue = (scaffold: ScaffoldData) => {
     if (typeof scaffold.text === 'string') {
@@ -394,6 +400,21 @@ export default function ScaffoldPage() {
     );
   };
 
+  const focusRefinedScaffold = (scaffold: ScaffoldData, scaffoldIndex: number) => {
+    setCurrentReviewIndex(scaffoldIndex);
+    if (scaffold.fragment) {
+      setActiveFragment(scaffold.fragment);
+    }
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        document.getElementById(scaffoldCardDomId(scaffold.id))?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      });
+    }
+  };
+
   const handleManualEditInputChange = (key: string, value: string) => {
     setManualEditMap((prev) => ({
       ...prev,
@@ -470,28 +491,34 @@ export default function ScaffoldPage() {
 
         const scaffoldKey = keyForId(scaffold.id);
         setManualEditSubmittingId(scaffoldKey);
+        setLlmRefining(true);
 
-        const llmRefineUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffold.id}/llm-refine`;
-        const res = await fetch(llmRefineUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: message,
-          }),
-        });
+        try {
+          const llmRefineUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${scaffold.id}/llm-refine`;
+          const res = await fetch(llmRefineUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: message,
+            }),
+          });
 
-        if (!res.ok) {
-          throw new Error(`LLM refine API failed: ${res.status}`);
+          if (!res.ok) {
+            throw new Error(`LLM refine API failed: ${res.status}`);
+          }
+
+          const json = await res.json();
+          const responseData = {
+            action_result: json.scaffold,
+            __interrupt__: null,
+          };
+          processReviewResponse(scaffold.id, responseData);
+          focusRefinedScaffold(scaffold, scaffoldIndex);
+          setModificationRequest('');
+          showToast(`Refine scaffold #${scaffoldIndex + 1} succeeded.`);
+        } finally {
+          setLlmRefining(false);
         }
-
-        const json = await res.json();
-        const responseData = {
-          action_result: json.scaffold,
-          __interrupt__: null,
-        };
-        processReviewResponse(scaffold.id, responseData);
-        setModificationRequest('');
-        showToast('Refine with LLM succeeded.');
         return;
       }
 
@@ -555,7 +582,7 @@ export default function ScaffoldPage() {
   // Handle modification request
   const handleSendModificationRequest = async () => {
     const message = modificationRequest.trim();
-    if (!message) {
+    if (!message || llmRefining) {
       return;
     }
 
@@ -565,6 +592,7 @@ export default function ScaffoldPage() {
     }
 
     try {
+      setLlmRefining(true);
       const llmRefineUrl = `/api/courses/${courseId}/sessions/${sessionId}/readings/${readingId}/scaffolds/${currentCard.id}/llm-refine`;
       const res = await fetch(llmRefineUrl, {
         method: 'POST',
@@ -585,11 +613,14 @@ export default function ScaffoldPage() {
       };
 
       processReviewResponse(currentCard.id, responseData);
+      focusRefinedScaffold(currentCard, currentReviewIndex);
       setModificationRequest('');
-      showToast('Refine with LLM succeeded.');
+      showToast(`Refine scaffold #${currentReviewIndex + 1} succeeded.`);
     } catch (err) {
       console.error('Modification request failed:', err);
       alert('Failed to send modification request. Please try again.');
+    } finally {
+      setLlmRefining(false);
     }
   };
 
@@ -740,6 +771,14 @@ export default function ScaffoldPage() {
   });
 
   const reviewedCount = processedScaffolds.filter(s => s.status === 'ACCEPTED' || s.status === 'REJECTED').length;
+  const acceptedScaffoldsForPublish = processedScaffolds.filter((s) => s.status === 'ACCEPTED');
+  const pendingAcceptedScaffoldsForPublish = acceptedScaffoldsForPublish.filter(
+    (scaffold) => annotationPostStatusMap[String(scaffold.id)] !== 'posted'
+  );
+  const acceptedAnnotationIdsForPublish = acceptedScaffoldsForPublish
+    .map((scaffold) => String(scaffold.id))
+    .filter(Boolean);
+  const acceptedAnnotationIdsForPublishKey = acceptedAnnotationIdsForPublish.join('|');
 
   // Helper functions for publish and download
   const generateMarkdown = (acceptedScaffolds: any[]) => {
@@ -813,11 +852,12 @@ ${scaffold.text || 'No scaffold text available'}
     }
 
     const annotationIds = acceptedScaffolds
+      .filter((scaffold) => annotationPostStatusMap[String(scaffold.id)] !== 'posted')
       .map((scaffold) => scaffold.id)
       .filter((id) => id); // Filter out any undefined/null IDs
 
     if (annotationIds.length === 0) {
-      setPublishError('No valid annotation IDs found in accepted scaffolds.');
+      setPublishError('All accepted scaffolds are already posted.');
       return;
     }
 
@@ -907,6 +947,52 @@ ${scaffold.text || 'No scaffold text available'}
     return `Unknown user (${user.role})`;
   };
 
+  const loadAnnotationPostStatus = async (annotationIds: string[], perusallUserId: string) => {
+    if (!annotationIds.length || !perusallUserId) {
+      setAnnotationPostStatusMap({});
+      return;
+    }
+    setAnnotationStatusLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(
+        `/api/courses/${courseId}/readings/${readingId}/perusall/annotation-status`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            session_id: sessionId,
+            annotation_ids: annotationIds,
+            perusall_user_id: perusallUserId,
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.message || 'Failed to load annotation post status.');
+      }
+
+      const items: AnnotationPostStatusItem[] = Array.isArray(data?.items) ? data.items : [];
+      const nextMap: Record<string, 'pending' | 'posted'> = {};
+      items.forEach((item) => {
+        if (item?.annotation_id && (item.status === 'pending' || item.status === 'posted')) {
+          nextMap[String(item.annotation_id)] = item.status;
+        }
+      });
+      setAnnotationPostStatusMap(nextMap);
+    } catch (err) {
+      console.error('Failed to load annotation post status:', err);
+      setAnnotationPostStatusMap({});
+    } finally {
+      setAnnotationStatusLoading(false);
+    }
+  };
+
   const updateSelectedPerusallUser = (users: PerusallUser[], defaultUserId?: string | null) => {
     if (!users.length) {
       setSelectedPerusallUserId('');
@@ -963,6 +1049,18 @@ ${scaffold.text || 'No scaffold text available'}
     if (!showPublishModal) return;
     loadPerusallUsers('db');
   }, [showPublishModal, courseId]);
+
+  useEffect(() => {
+    if (!showPublishModal) return;
+    loadAnnotationPostStatus(acceptedAnnotationIdsForPublish, selectedPerusallUserId);
+  }, [
+    showPublishModal,
+    selectedPerusallUserId,
+    courseId,
+    readingId,
+    sessionId,
+    acceptedAnnotationIdsForPublishKey,
+  ]);
 
   if (loading) {
     return (
@@ -1024,6 +1122,20 @@ ${scaffold.text || 'No scaffold text available'}
           aria-live="polite"
         >
           {toastMessage}
+        </div>
+      ) : null}
+      {llmRefining ? (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal} style={{ maxWidth: '28rem' }}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Refining scaffolds...</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p className={uiStyles.fieldHint} style={{ margin: 0 }}>
+                Please wait. This may take a moment.
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1276,6 +1388,7 @@ ${scaffold.text || 'No scaffold text available'}
                   return (
                     <div
                       key={scaffold.id}
+                      id={scaffoldCardDomId(scaffold.id)}
                       className={`${styles.scaffoldCard} ${
                         scaffold.status === 'ACCEPTED'
                           ? styles.accepted
@@ -1446,7 +1559,7 @@ ${scaffold.text || 'No scaffold text available'}
                             e.stopPropagation();
                             handleScaffoldAction(scaffold.id, 'llm-edit');
                           }}
-                          disabled={manualEditSubmittingId === scaffoldKey}
+                          disabled={manualEditSubmittingId === scaffoldKey || llmRefining}
                         >
                           Refine with LLM
                         </button>
@@ -1484,8 +1597,9 @@ ${scaffold.text || 'No scaffold text available'}
                         className={`${uiStyles.btn} ${uiStyles.btnOutline}`}
                         type="button"
                         onClick={handleSendModificationRequest}
+                        disabled={llmRefining || !modificationRequest.trim()}
                       >
-                        Send
+                        {llmRefining ? 'Refining...' : 'Send'}
                       </button>
                     </div>
                   </div>
@@ -1603,19 +1717,44 @@ ${scaffold.text || 'No scaffold text available'}
               {publishError && (
                 <p style={{ color: 'var(--red-600)', marginTop: 0, fontSize: '0.875rem' }}>{publishError}</p>
               )}
-              {processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0 ? (
+              {acceptedScaffoldsForPublish.length === 0 ? (
                 <p>No scaffolds have been accepted yet.</p>
               ) : (
-                <ul className={uiStyles.publishList}>
-                  {processedScaffolds.filter(s => s.status === 'ACCEPTED').map((scaffold) => (
-                    <li key={scaffold.id} className={uiStyles.publishListItem}>
-                      <span className={uiStyles.publishListNumber}>#{scaffold.number}</span>
-                      <span className={uiStyles.publishListContent}>
-                        {scaffold.text || 'No scaffold text available'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <p className={uiStyles.fieldHint} style={{ marginTop: 0 }}>
+                    {annotationStatusLoading
+                      ? 'Checking post status...'
+                      : `${pendingAcceptedScaffoldsForPublish.length} pending, ${acceptedScaffoldsForPublish.length - pendingAcceptedScaffoldsForPublish.length} posted`}
+                  </p>
+                  <ul className={uiStyles.publishList}>
+                    {acceptedScaffoldsForPublish.map((scaffold) => {
+                      const postStatus = annotationPostStatusMap[String(scaffold.id)] || 'pending';
+                      return (
+                        <li key={scaffold.id} className={uiStyles.publishListItem}>
+                          <span className={uiStyles.publishListNumber}>#{scaffold.number}</span>
+                          <span className={uiStyles.publishListContent}>
+                            {scaffold.text || 'No scaffold text available'}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.02em',
+                              borderRadius: '9999px',
+                              padding: '0.15rem 0.5rem',
+                              color: postStatus === 'posted' ? '#065f46' : '#92400e',
+                              background: postStatus === 'posted' ? '#d1fae5' : '#fef3c7',
+                              border: `1px solid ${postStatus === 'posted' ? '#6ee7b7' : '#fcd34d'}`,
+                            }}
+                          >
+                            {postStatus}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               )}
             </div>
             <div className={uiStyles.publishModalActions}>
@@ -1634,13 +1773,21 @@ ${scaffold.text || 'No scaffold text available'}
                 className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
                 onClick={handleConfirmPublish}
                 disabled={
-                  processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0 ||
+                  acceptedScaffoldsForPublish.length === 0 ||
+                  pendingAcceptedScaffoldsForPublish.length === 0 ||
                   publishLoading ||
                   perusallUsersLoading ||
+                  annotationStatusLoading ||
                   !selectedPerusallUserId
                 }
               >
-                {publishLoading ? 'Publishing…' : 'Confirm & Publish'}
+                {publishLoading
+                  ? 'Publishing...'
+                  : annotationStatusLoading
+                    ? 'Checking status...'
+                    : pendingAcceptedScaffoldsForPublish.length === 0
+                      ? 'All Posted'
+                      : `Confirm & Publish (${pendingAcceptedScaffoldsForPublish.length})`}
               </button>
             </div>
           </div>
@@ -1698,6 +1845,18 @@ ${scaffold.text || 'No scaffold text available'}
                   Download PDF
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {generating && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>Generating scaffolds</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>Generating scaffolds. This may take a few minutes. Please wait.</p>
             </div>
           </div>
         </div>

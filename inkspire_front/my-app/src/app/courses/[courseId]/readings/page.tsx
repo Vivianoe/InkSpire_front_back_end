@@ -6,8 +6,7 @@ import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from '@/app/courses/[courseId]/readings/page.module.css';
 import { supabase } from '@/lib/supabase/client';
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 type ReadingListItem = {
   id: string;
@@ -47,6 +46,7 @@ type PersistedReadingSelection = {
 };
 
 const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 const fileToBase64 = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -76,10 +76,11 @@ export default function ReadingUploadPage() {
   // Path parameters (from route: /courses/[courseId]/readings)
   const pathParams = useParams();
   const router = useRouter();
-  // Query parameters (from URL: ?instructorId=yyy&profileId=zzz)
+  // Query parameters (from URL: ?profileId=zzz)
   const searchParams = useSearchParams();
   const courseId = pathParams.courseId as string;
-  const profileId = searchParams.get('profileId') as string | undefined;
+  const profileIdFromQuery = searchParams.get('profileId') as string | undefined;
+  const [profileId, setProfileId] = useState<string | undefined>(profileIdFromQuery);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [readings, setReadings] = useState<ReadingListItem[]>([]);
   const [perusallReadings, setPerusallReadings] = useState<PerusallReadingStatus[]>([]);
@@ -91,11 +92,61 @@ export default function ReadingUploadPage() {
 
   const MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-  // Get instructor_id from query params, ensure it's never null or undefined
-  const instructorIdFromParams = searchParams?.get('instructorId');
-  const resolvedInstructorId = (instructorIdFromParams && instructorIdFromParams !== 'null' && instructorIdFromParams !== 'undefined') 
-    ? instructorIdFromParams 
-    : MOCK_INSTRUCTOR_ID;
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
+
+  const resolveProfileId = () => {
+    if (profileId) return profileId;
+    try {
+      if (typeof window !== 'undefined' && courseId) {
+        return window.sessionStorage.getItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`) || undefined;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return undefined;
+  };
+
+  useEffect(() => {
+    if (!courseId) return;
+    const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
+    if (profileIdFromQuery) {
+      setProfileId(profileIdFromQuery);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(storageKey, profileIdFromQuery);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
+        if (cachedProfileId) {
+          setProfileId(cachedProfileId);
+          // Keep URL query in sync so refresh/back-forward preserves profile context.
+          const params = new URLSearchParams(searchParams.toString());
+          if (!params.get('profileId')) {
+            params.set('profileId', cachedProfileId);
+            router.replace(`/courses/${courseId}/readings?${params.toString()}`);
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [courseId, profileIdFromQuery, router, searchParams, resolvedInstructorId]);
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
 
   const uploadNewReadings = async (files: FileList, perusallReadingId: string | null = null) => {
     const fileArray = Array.from(files);
@@ -253,9 +304,14 @@ export default function ReadingUploadPage() {
   };
 
   const handleCreateSession = () => {
+    const activeProfileId = resolveProfileId();
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     // Navigate to session creation page
-    if (profileId) {
-      router.push(`/courses/${courseId}/sessions/create?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+    if (activeProfileId) {
+      router.push(`/courses/${courseId}/sessions/create?profileId=${activeProfileId}`);
     } else {
       // If no profileId, go to a generic session creation or course management
       router.push(`/courses/${courseId}/class-profiles`);
@@ -308,6 +364,7 @@ export default function ReadingUploadPage() {
   );
 
   const fetchReadings = useCallback(async () => {
+    if (!resolvedInstructorId) return;
     setLoadingList(true);
     setError(null);
     try {
@@ -420,8 +477,10 @@ export default function ReadingUploadPage() {
               type="button"
               className={styles.backIconButton}
               onClick={() => {
-                if (profileId) {
-                  router.push(`/courses/${courseId}/class-profiles/${profileId}/view`);
+                const activeProfileId = resolveProfileId();
+                // Navigate back to course or profile
+                if (activeProfileId) {
+                  router.push(`/courses/${courseId}/class-profiles/${activeProfileId}/view`);
                 } else {
                   router.push(`/courses/${courseId}`);
                 }
@@ -461,6 +520,7 @@ export default function ReadingUploadPage() {
       </div>
 
       <div className={styles.content}>
+        {loadingInstructorId && <div className={styles.emptyState}>Loading user context…</div>}
         {error && <div className={styles.errorMessage}>{error}</div>}
 
         <input

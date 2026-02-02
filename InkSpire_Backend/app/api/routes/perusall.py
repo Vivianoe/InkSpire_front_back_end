@@ -4,6 +4,8 @@ Perusall integration endpoints
 import os
 import uuid
 import requests
+from typing import List, Dict, Any, Optional, Tuple
+from fastapi import APIRouter, HTTPException, Depends
 import hashlib
 import json
 from typing import List, Dict, Any
@@ -38,11 +40,15 @@ from app.services.perusall_assignment_service import (
     get_perusall_assignments_by_course,
     get_perusall_assignment_by_id,
 )
+from app.services.reading_chunk_service import get_reading_chunks_by_reading_id
 from app.models.models import Session
 from auth.dependencies import get_current_user
 from app.api.models import (
     PerusallAnnotationRequest,
     PerusallAnnotationResponse,
+    PerusallAnnotationStatusRequest,
+    PerusallAnnotationStatusResponse,
+    PerusallAnnotationStatusItem,
     PerusallAnnotationItem,
     PerusallMappingRequest,
     PerusallMappingResponse,
@@ -71,6 +77,130 @@ X_INSTITUTION = os.getenv("PERUSALL_INSTITUTION")
 X_API_TOKEN = os.getenv("PERUSALL_API_TOKEN")
 #USER_ID = os.getenv("PERUSALL_USER_ID")
 PERUSALL_POST_USER_ID = os.getenv("PERUSALL_POST_USER_ID")
+
+
+def _build_norm_index(text: str) -> Tuple[str, List[int]]:
+    """
+    Normalize text and return (normalized_text, norm_to_orig_index).
+    This is a lightweight version tuned to PDF extraction quirks.
+    """
+    if not text:
+        return "", []
+    norm_chars: List[str] = []
+    norm_to_orig: List[int] = []
+    prev_space = False
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            if not prev_space:
+                norm_chars.append(" ")
+                norm_to_orig.append(i)
+            prev_space = True
+            continue
+        prev_space = False
+        if ch == "\u00ad":
+            continue
+        if ch == "-" and i > 0 and i + 1 < len(text):
+            if text[i - 1].isalpha() and text[i + 1].isalpha():
+                # skip hyphenation between letters
+                continue
+        if ch in "“”«»„":
+            ch = '"'
+        elif ch in "‘’‚":
+            ch = "'"
+        elif ch in "–—":
+            ch = "-"
+        # keep alnum, turn other punctuation into space
+        if ch.isalnum() or ch in "-'":
+            norm_chars.append(ch.lower())
+            norm_to_orig.append(i)
+        else:
+            if norm_chars and norm_chars[-1] != " ":
+                norm_chars.append(" ")
+                norm_to_orig.append(i)
+    # trim trailing space
+    if norm_chars and norm_chars[-1] == " ":
+        norm_chars.pop()
+        norm_to_orig.pop()
+    return "".join(norm_chars), norm_to_orig
+
+
+def _find_fragment_range(
+    page_text: str,
+    fragment: str,
+    hint_start: Optional[int] = None,
+    hint_end: Optional[int] = None,
+    hint_pos_ratio: Optional[float] = None,
+) -> Optional[Tuple[int, int]]:
+    if not page_text or not fragment:
+        return None
+    norm_page, map_page = _build_norm_index(page_text)
+    norm_frag, _ = _build_norm_index(fragment)
+    if not norm_frag:
+        return None
+
+    def _range_from_norm_idx(idx: int) -> Tuple[int, int]:
+        start_orig = map_page[idx]
+        end_norm = min(idx + len(norm_frag) - 1, len(map_page) - 1)
+        end_orig = map_page[end_norm] + 1
+        return start_orig, end_orig
+
+    def _score_range(start_orig: int, end_orig: int) -> int:
+        score = 0
+        if hint_pos_ratio is not None:
+            try:
+                target_orig = int(max(0.0, min(0.999, hint_pos_ratio)) * max(1, len(page_text)))
+                score += abs(start_orig - target_orig)
+            except Exception:
+                pass
+        if hint_start is not None:
+            score += abs(start_orig - hint_start)
+        if hint_end is not None:
+            score += abs(end_orig - hint_end)
+        # If no hints, prefer shorter spans to avoid overly broad matches.
+        if hint_start is None and hint_end is None and hint_pos_ratio is None:
+            score += (end_orig - start_orig)
+        return score
+
+    # 1) Exact normalized match (may have multiple occurrences)
+    matches: List[Tuple[int, int]] = []
+    idx = norm_page.find(norm_frag)
+    while idx >= 0:
+        start_orig, end_orig = _range_from_norm_idx(idx)
+        matches.append((start_orig, end_orig))
+        idx = norm_page.find(norm_frag, idx + 1)
+    if matches:
+        best = min(matches, key=lambda r: _score_range(r[0], r[1]))
+        return best
+
+    # 2) Fallback: anchor by prefix/suffix to tolerate minor extraction drift
+    if len(norm_frag) < 20:
+        return None
+    lens = [120, 80, 60, 40, 30, 20]
+    anchor_matches: List[Tuple[int, int]] = []
+    for L in lens:
+        if len(norm_frag) < L * 2:
+            continue
+        prefix = norm_frag[:L]
+        suffix = norm_frag[-L:]
+        start_idx = 0
+        while True:
+            p_idx = norm_page.find(prefix, start_idx)
+            if p_idx < 0:
+                break
+            s_idx = norm_page.find(suffix, p_idx + L)
+            if s_idx >= 0:
+                start_orig = map_page[p_idx]
+                end_norm = min(s_idx + L - 1, len(map_page) - 1)
+                end_orig = map_page[end_norm] + 1
+                anchor_matches.append((start_orig, end_orig))
+            start_idx = p_idx + 1
+        if anchor_matches:
+            break
+    if anchor_matches:
+        best = min(anchor_matches, key=lambda r: _score_range(r[0], r[1]))
+        return best
+
+    return None
 
 
 def normalize_name(name: str) -> str:
@@ -176,6 +306,7 @@ def _build_perusall_idempotency_source(
     session_id: str,
     perusall_user_id: str,
     req: PerusallAnnotationRequest,
+    annotation_version_pairs: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     payload: Dict[str, Any] = {
         "course_id": course_id,
@@ -185,6 +316,11 @@ def _build_perusall_idempotency_source(
     }
     if req.annotation_ids:
         payload["annotation_ids"] = sorted(req.annotation_ids)
+        if annotation_version_pairs:
+            payload["annotation_version_pairs"] = sorted(
+                annotation_version_pairs,
+                key=lambda item: (item.get("annotation_id", ""), item.get("annotation_version_id", "")),
+            )
     elif req.annotations:
         payload["annotations"] = [item.model_dump() for item in req.annotations]
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -261,7 +397,7 @@ def sync_session_assignment_to_db(
             None,
         )
         if not assignment_data:
-            raise HTTPException(status_code=404, detail=f"Assignment {perusall_assignment_id} not found in Perusall")
+            raise HTTPException(status_code=404, detail=f"Assignment {perusall_assignment_id_str} not found in Perusall")
         library_readings = get_mock_library_for_course(perusall_course_id)
     else:
         assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
@@ -477,6 +613,7 @@ def post_annotations_to_perusall(
     # If annotation_ids provided, fetch highlight_coords from database
     annotations_to_post = []
     first_annotation = None  # Store first annotation to verify it belongs to the course/reading
+    annotation_version_map: Dict[str, str] = {}
     if req.annotation_ids:
         print(f"[post_annotations_to_perusall] Fetching highlight_coords for {len(req.annotation_ids)} annotation(s)")
         for annotation_id_str in req.annotation_ids:
@@ -544,6 +681,32 @@ def post_annotations_to_perusall(
                     print(f"[post_annotations_to_perusall] No highlight_coords found for annotation {annotation_id_str}")
                     continue
 
+                # Deduplicate: PDF highlighting may save multiple coord rows over time (re-open PDF, re-highlight, code changes).
+                # Perusall expects one range per annotation; pick the most reliable coord.
+                def _coord_score(c: AnnotationHighlightCoords):
+                    try:
+                        span = int(getattr(c, "range_end", 0)) - int(getattr(c, "range_start", 0))
+                    except Exception:
+                        span = 0
+                    frag_len = len(getattr(c, "fragment", "") or "")
+                    created = getattr(c, "created_at", None)
+                    return (span, frag_len, created)
+
+                if len(coords_list) > 1:
+                    coords_list_sorted = sorted(coords_list, key=_coord_score, reverse=True)
+                    best = coords_list_sorted[0]
+                    print(
+                        f"[post_annotations_to_perusall] Dedup coords for annotation {annotation_id_str}: "
+                        f"{len(coords_list)} -> 1 (picked page={best.range_page}, range=[{best.range_start},{best.range_end}], "
+                        f"frag_len={len(best.fragment or '')})"
+                    )
+                    coords_list = [best]
+
+                if coords_list and coords_list[0].annotation_version_id:
+                    annotation_version_map[str(annotation_id_str)] = str(coords_list[0].annotation_version_id)
+                elif annotation.current_version_id:
+                    annotation_version_map[str(annotation_id_str)] = str(annotation.current_version_id)
+
                 version_ids = list({coord.annotation_version_id for coord in coords_list if coord.annotation_version_id})
                 version_content_by_id: Dict[str, str] = {}
                 if version_ids:
@@ -575,7 +738,7 @@ def post_annotations_to_perusall(
                         text=scaffold_text,
                     ))
                 
-                print(f"[post_annotations_to_perusall] Found {len(coords_list)} highlight_coords for annotation {annotation_id_str}")
+                print(f"[post_annotations_to_perusall] Using {len(coords_list)} highlight_coords for annotation {annotation_id_str}")
             except ValueError as e:
                 print(f"[post_annotations_to_perusall] Invalid annotation_id format: {annotation_id_str}, error: {e}")
                 continue
@@ -673,6 +836,15 @@ def post_annotations_to_perusall(
     
     print(f"[post_annotations_to_perusall] Posting {len(annotations_to_post)} annotation(s) to Perusall")
 
+    # Preload page text (PyPDF2 extraction) for better range alignment with Perusall.
+    page_text_by_num: Dict[int, str] = {}
+    try:
+        chunks = get_reading_chunks_by_reading_id(db, reading_uuid)
+        for chunk in chunks or []:
+            page_text_by_num[int(chunk.chunk_index) + 1] = chunk.content or ""
+    except Exception as e:
+        print(f"[post_annotations_to_perusall] Warning: failed to load reading chunks for range match: {e}")
+
     created_ids = []
     errors = []
     try:
@@ -699,6 +871,13 @@ def post_annotations_to_perusall(
                         session_id=str(session_uuid),
                         perusall_user_id=str(post_user_id),
                         req=req,
+                        annotation_version_pairs=[
+                            {
+                                "annotation_id": annotation_id,
+                                "annotation_version_id": version_id,
+                            }
+                            for annotation_id, version_id in annotation_version_map.items()
+                        ],
                     ).encode("utf-8")
                 ).hexdigest()
             )
@@ -727,6 +906,7 @@ def post_annotations_to_perusall(
                 status="pending",
                 request_payload={
                     "annotation_ids": req.annotation_ids,
+                    "annotation_version_map": annotation_version_map or None,
                     "annotations": [item.model_dump() for item in req.annotations] if req.annotations else None,
                 },
             )
@@ -739,6 +919,67 @@ def post_annotations_to_perusall(
                         status_code=500,
                         detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
                     )
+                page_num = int(item.rangePage or 1)
+                frag = (item.fragment or "")
+                # Prefer Perusall-like range from PyPDF2 page text when possible.
+                hint_start = None
+                hint_end = None
+                hint_pos_ratio = None
+                try:
+                    hint_start = int(item.rangeStart)
+                    hint_end = int(item.rangeEnd)
+                except Exception:
+                    hint_start = None
+                    hint_end = None
+                try:
+                    if item.positionStartY is not None:
+                        hint_pos_ratio = float(item.positionStartY) - float(page_num)
+                except Exception:
+                    hint_pos_ratio = None
+                matched_range = _find_fragment_range(
+                    page_text_by_num.get(page_num, ""),
+                    frag,
+                    hint_start=hint_start,
+                    hint_end=hint_end,
+                    hint_pos_ratio=hint_pos_ratio,
+                )
+                if matched_range:
+                    range_start, range_end = matched_range
+                    if hint_start is not None and hint_end is not None and hint_end > hint_start:
+                        hint_len = hint_end - hint_start
+                        # If matched start is close to hint, keep it; otherwise fall back to hint start.
+                        if abs(range_start - hint_start) > 5:
+                            range_start = hint_start
+                        # Clamp end to hint length to avoid extra trailing words.
+                        range_end = range_start + hint_len
+                        # Ensure we don't exceed page text length when available.
+                        page_text = page_text_by_num.get(page_num, "") or ""
+                        if page_text:
+                            range_end = min(range_end, len(page_text))
+                    print(
+                        f"[post_annotations_to_perusall] Matched fragment for page {page_num}: "
+                        f"range=[{range_start},{range_end}] (hint=[{hint_start},{hint_end}], "
+                        f"pos_ratio={hint_pos_ratio})"
+                    )
+                else:
+                    range_start = int(item.rangeStart)
+                    range_end = int(item.rangeEnd)
+                    print(
+                        f"[post_annotations_to_perusall] Using frontend range for page {page_num}: "
+                        f"range=[{range_start},{range_end}]"
+                    )
+
+                # Micro-adjustments for Perusall indexing drift.
+                try:
+                    start_offset = int(os.getenv("PERUSALL_RANGE_START_OFFSET", "11"))
+                    end_offset = int(os.getenv("PERUSALL_RANGE_END_OFFSET", "11"))
+                except Exception:
+                    start_offset = 11
+                    end_offset = 11
+                if start_offset or end_offset:
+                    range_start = max(0, range_start + start_offset)
+                    range_end = max(range_start, range_end + end_offset)
+
                 payload = {
                     "documentId": perusall_document_id,
                     "userId": post_user_id,
@@ -747,9 +988,9 @@ def post_annotations_to_perusall(
                     "positionEndX": item.positionEndX,
                     "positionEndY": item.positionEndY,
                     "rangeType": item.rangeType,
-                    "rangePage": item.rangePage,
-                    "rangeStart": item.rangeStart,
-                    "rangeEnd": item.rangeEnd,
+                    "rangePage": page_num,
+                    "rangeStart": range_start,
+                    "rangeEnd": range_end,
                     "fragment": item.fragment,
                     "text": f"<p>{(item.text or item.fragment)}</p>"
                 }
@@ -765,7 +1006,7 @@ def post_annotations_to_perusall(
                         url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments/{perusall_assignment_id}/annotations"
 
                         print(f"[post_annotations_to_perusall] Posting annotation {idx + 1}/{len(annotations_to_post)} to: {url}")
-                        print(f"[post_annotations_to_perusall] Payload: {payload}")
+                        print(f"[post_annotations_to_perusall] Payload (position Y converted): {payload}")
 
                         # Try form-encoded first (as Perusall API typically expects this)
                         response = session.post(url, data=payload, headers=headers, timeout=30)
@@ -867,6 +1108,116 @@ def post_annotations_to_perusall(
             status_code=500,
             detail=f"Failed to post annotations to Perusall: {str(e)}"
         )
+
+
+@router.post(
+    "/courses/{course_id}/readings/{reading_id}/perusall/annotation-status",
+    response_model=PerusallAnnotationStatusResponse,
+)
+def get_perusall_annotation_status(
+    course_id: str,
+    reading_id: str,
+    req: PerusallAnnotationStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return posting status for each annotation ID:
+    - posted: already posted successfully with matching idempotent record
+    - pending: no successful post record found yet
+    """
+    try:
+        course_uuid = uuid.UUID(course_id)
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id or reading_id format: course_id={course_id}, reading_id={reading_id}",
+        )
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(status_code=404, detail=f"Course {course_id} not found")
+
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+    if reading.course_id != course_uuid:
+        raise HTTPException(status_code=400, detail=f"Reading {reading_id} does not belong to course {course_id}")
+
+    post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
+    if not post_user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+        )
+
+    records = db.query(PerusallAnnotationPost).filter(
+        PerusallAnnotationPost.course_id == course_uuid,
+        PerusallAnnotationPost.reading_id == reading_uuid,
+        PerusallAnnotationPost.perusall_user_id == str(post_user_id),
+    ).all()
+
+    target_version_map: Dict[str, str] = {}
+    for annotation_id in req.annotation_ids:
+        annotation_id_str = str(annotation_id)
+        try:
+            annotation_uuid = uuid.UUID(annotation_id_str)
+        except ValueError:
+            continue
+        annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == annotation_uuid).first()
+        if not annotation or annotation.reading_id != reading_uuid or not annotation.current_version_id:
+            continue
+        target_version_map[annotation_id_str] = str(annotation.current_version_id)
+
+    posted_ids = set()
+    pending_ids = set()
+    target_ids = {str(annotation_id) for annotation_id in req.annotation_ids}
+
+    for record in records:
+        payload = record.request_payload if isinstance(record.request_payload, dict) else {}
+        payload_annotation_ids = payload.get("annotation_ids")
+        if not isinstance(payload_annotation_ids, list):
+            continue
+        payload_version_map = payload.get("annotation_version_map")
+        record_version_map = payload_version_map if isinstance(payload_version_map, dict) else {}
+
+        matching_ids = set()
+        for raw_id in payload_annotation_ids:
+            annotation_id = str(raw_id)
+            if annotation_id not in target_ids:
+                continue
+            target_version_id = target_version_map.get(annotation_id)
+            record_version_id = (
+                str(record_version_map.get(annotation_id))
+                if annotation_id in record_version_map and record_version_map.get(annotation_id)
+                else None
+            )
+
+            if target_version_id:
+                # If target version is known, only treat as duplicate when versions match.
+                if record_version_id and record_version_id == target_version_id:
+                    matching_ids.add(annotation_id)
+            else:
+                # Fallback for annotations without version info.
+                matching_ids.add(annotation_id)
+        if not matching_ids:
+            continue
+        if record.status == "succeeded":
+            posted_ids.update(matching_ids)
+        elif record.status == "pending":
+            pending_ids.update(matching_ids)
+
+    items: List[PerusallAnnotationStatusItem] = []
+    for annotation_id in req.annotation_ids:
+        annotation_id_str = str(annotation_id)
+        status = "posted" if annotation_id_str in posted_ids else "pending"
+        # Explicitly keep pending if currently in a pending job and not posted.
+        if status != "posted" and annotation_id_str in pending_ids:
+            status = "pending"
+        items.append(PerusallAnnotationStatusItem(annotation_id=annotation_id_str, status=status))
+
+    return PerusallAnnotationStatusResponse(items=items)
 
 
 @router.post("/courses/{course_id}/perusall/users/sync", response_model=PerusallUsersResponse)

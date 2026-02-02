@@ -12,6 +12,7 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 // const DEFAULT_CLASS_BACKGROUND = '';
 
@@ -68,6 +69,7 @@ const EMPTY_PROFILE_SECTIONS: ProfileSections = {
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 const MOCK_COURSE_ID = 'fbaf501d-af97-4286-b5b0-d7b63b500b35';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 type DesignRationaleText = string | null;
 type DesignConsiderationsPayload = Record<string, unknown> | null;
@@ -254,7 +256,7 @@ const PRIOR_KNOWLEDGE_LABELS: Record<string, string> = {
   developing: 'Developing – some previous experience',
   intermediate: 'Intermediate – working familiarity',
   advanced: 'Advanced – extensive experience',
-  mixed: 'Mixed proficiency cohort',
+  mixed: 'Mixed experience cohort',
 };
 
 const PRIOR_KNOWLEDGE_OPTIONS = [
@@ -317,15 +319,19 @@ export default function ViewClassProfilePage() {
   const router = useRouter();
   // Path parameters (from route: /class-profile/[id]/view or /courses/[courseId]/class-profiles/[profileId]/view)
   const pathParams = useParams();
-  // Query parameters (from URL: ?instructorId=yyy - courseId and profileId are now in path)
+  // Query parameters (from URL: ?courseId=xxx for legacy paths)
   const searchParams = useSearchParams();
   const profileId = pathParams?.profileId || pathParams?.id as string; // Support both old and new routes
   const courseId = pathParams?.courseId as string | undefined; // New RESTful route
   const isCreateMode = !profileId || profileId === 'new';
   
-  // Get course_id from path (new) or query params (old), and instructor_id from query params
+  // Get course_id from path (new) or query params (old)
   const urlCourseId = courseId || searchParams?.get('courseId'); // Path param takes priority
-  const urlInstructorId = searchParams?.get('instructorId');
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile | null>(null);
@@ -353,6 +359,12 @@ export default function ViewClassProfilePage() {
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [designConsiderationMetadataText, setDesignConsiderationMetadataText] = useState<string>('');
   const [designConsiderationMetadataDraft, setDesignConsiderationMetadataDraft] = useState<string>('');
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
 
   const isDirty = useMemo(() => {
     if (!formData || !initialData) return false;
@@ -564,8 +576,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setError('Please fill in Discipline Name and Department.');
       return false;
     }
-    if (!data.courseInfo.courseName || !data.courseInfo.courseCode) {
-      setError('Please fill in Course Name and Course Code.');
+    if (!data.courseInfo.courseName) {
+      setError('Please fill in Course Name.');
       return false;
     }
     if (!data.classInfo.semester || !data.classInfo.year) {
@@ -599,17 +611,13 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         setFormData(cloneProfile(loadedProfile));
         setInitialData(cloneProfile(loadedProfile));
         
-        // Update URL with course_id and instructor_id from API if not already in URL
-        if ((data.course_id || data.instructor_id) && typeof window !== 'undefined') {
+        // Update URL with course_id from API if not already in URL
+        if (data.course_id && typeof window !== 'undefined') {
           const currentParams = new URLSearchParams(window.location.search);
           let needsUpdate = false;
           
           if (data.course_id && !currentParams.has('courseId')) {
             currentParams.set('courseId', data.course_id);
-            needsUpdate = true;
-          }
-          if (data.instructor_id && !currentParams.has('instructorId')) {
-            currentParams.set('instructorId', data.instructor_id);
             needsUpdate = true;
           }
           
@@ -1062,7 +1070,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           // Fallback to old structure with query params
           const navParams = new URLSearchParams();
           if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
           const queryString = navParams.toString();
           router.replace(`/class-profile/${updatedFormData.id}/view${queryString ? `?${queryString}` : ''}`);
         }
@@ -1173,6 +1180,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         ? getUserDesignConsiderationsForPayload()
         : null;
 
+      if (!hasExistingId && !resolvedInstructorId) {
+        throw new Error('Unable to identify instructor. Please sign in again.');
+      }
+
       const payload = hasExistingId
         ? {
             // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
@@ -1184,8 +1195,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           }
         : {
             // For create endpoint - matches existing structure
-            // Get instructor_id from URL params instead of using mock
-            instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+            instructor_id: resolvedInstructorId,
             title: saveData.courseInfo.courseName || 'Untitled Class',
             course_code: saveData.courseInfo.courseCode || 'TBD',
             description: saveData.courseInfo.description || 'Draft class profile',
@@ -1234,7 +1244,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           // Fallback to old structure with query params
           const navParams = new URLSearchParams();
           if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
           const queryString = navParams.toString();
           router.replace(`/class-profile/${savedId}/view${queryString ? `?${queryString}` : ''}`);
         }
@@ -1364,17 +1373,28 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         : undefined) || 
       MOCK_COURSE_ID;
     
-    // Get instructor_id from URL params or fallback to mock
-    const instructorId = urlInstructorId || MOCK_INSTRUCTOR_ID;
+    // Resolve instructor_id from authenticated backend user
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
+
+    // Cache active profile for pages that may lose query params after back navigation.
+    try {
+      if (typeof window !== 'undefined' && urlCourseId && formData.id) {
+        window.sessionStorage.setItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${urlCourseId}`, formData.id);
+      }
+    } catch {
+      // ignore storage errors
+    }
     
     // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
     if (urlCourseId && formData.id) {
-      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${urlInstructorId}`);
+      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}`);
     } else {
       // Fallback to old structure with query params
       const params = new URLSearchParams({
         courseId: courseId || '',
-        instructorId,
       });
       router.push(`/class-profile/${formData.id}/reading?${params.toString()}`);
     }
@@ -1400,6 +1420,18 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         <div className={styles.loadingContainer}>
           <div className={styles.loadingSpinner}></div>
           <p>Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadingInstructorId) {
+    return (
+      <div className={styles.container}>
+        <Navigation />
+        <div className={styles.loadingContainer}>
+          <div className={styles.loadingSpinner}></div>
+          <p>Loading user context...</p>
         </div>
       </div>
     );
@@ -2013,6 +2045,22 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         </div>
 
       </div>
+      {(generating || busyRegenerating) && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>{busyRegenerating ? 'Regenerating class profile' : 'Generating class profile'}</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>
+                {busyRegenerating
+                  ? 'Regenerating the class profile. This may take a few seconds. Please wait.'
+                  : 'Generating the class profile. This may take a few minutes. Please wait.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

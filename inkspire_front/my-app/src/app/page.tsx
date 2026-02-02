@@ -179,11 +179,7 @@ export default function DashboardPage() {
   };
 
   const handleNewClass = () => {
-    const params = new URLSearchParams();
-    if (instructorId) {
-      params.set('instructorId', instructorId);
-    }
-    router.push(`/courses/new/class-profiles/new/create${params.toString() ? `?${params.toString()}` : ''}`);
+    router.push('/courses/new/class-profiles/new/create');
   };
 
   return (

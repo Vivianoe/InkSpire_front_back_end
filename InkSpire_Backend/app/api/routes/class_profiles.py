@@ -222,6 +222,15 @@ def _build_frontend_profile(
                     }
 
                 if isinstance(cl, dict):
+                    learning_challenges = cl.get("learning_challenges", [])
+                    if isinstance(learning_challenges, str):
+                        learning_challenges = [
+                            item.strip()
+                            for item in learning_challenges.replace("||", ",").split(",")
+                            if item.strip()
+                        ]
+                    if not isinstance(learning_challenges, list):
+                        learning_challenges = []
                     result["classInfo"] = {
                         "semester": cl.get("semester", "") or "",
                         "year": cl.get("year", "") or "",
@@ -232,6 +241,8 @@ def _build_frontend_profile(
                         "enrollment": cl.get("enrollment", "") or "",
                         "background": cl.get("background", "") or "",
                         "priorKnowledge": cl.get("prior_knowledge", "") or "",
+                        "learningChallenges": learning_challenges,
+                        "learningChallengesOther": cl.get("learning_challenges_other", "") or "",
                     }
 
                 # Also check class_input for design_considerations if not already set
