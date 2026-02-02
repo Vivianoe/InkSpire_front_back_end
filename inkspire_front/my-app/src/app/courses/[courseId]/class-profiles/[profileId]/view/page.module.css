@@ -426,6 +426,42 @@
   color: var(--gray-600);
 }
 
+.fieldHint {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--gray-500);
+  padding-left: 0.75rem;
+  border-left: 3px solid rgba(31, 41, 55, 0.2);
+}
+
+.checkboxGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checkboxOption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: var(--gray-700);
+}
+
+.checkboxOption input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.checkboxOptionWrap {
+  align-items: flex-start;
+}
+
+.checkboxOptionWrap span {
+  display: block;
+  line-height: 1.35;
+}
+
 .editInput,
 .editSelect,
 .editTextarea {
@@ -937,4 +973,3 @@
     padding: 1rem;
   }
 }
-

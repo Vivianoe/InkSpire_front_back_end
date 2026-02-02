@@ -62,11 +62,11 @@ const PRIOR_KNOWLEDGE_OPTIONS = [
 ];
 
 const LEARNING_CHALLENGE_OPTIONS = [
-  'Difficulty getting started with open-ended tasks',
-  'Trouble connecting ideas across readings',
   'Struggle with technical terminology',
   'Tendency to focus on surface details rather than core ideas',
+  'Trouble connecting core ideas in readings',
   'Low confidence in explaining their thinking',
+  'Difficulty getting started with open-ended tasks',
   'Other',
 ];
 
