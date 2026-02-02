@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
+import { generateScaffoldPDF } from '@/utils/generateScaffoldPDF';
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
@@ -794,9 +795,10 @@ ${scaffold.text || 'No scaffold text available'}
         month: 'long',
         day: 'numeric'
       });
-
-      // For now, just show an alert. In a full implementation, this would generate a PDF
-      alert(`PDF Download Feature\n\nSession: ${sessionName}\nDate: ${date}\nAccepted Scaffolds: ${acceptedScaffolds.length}\n\nIn a full implementation, this would generate a PDF file with all accepted scaffolds.`);
+      await generateScaffoldPDF(acceptedScaffolds, {
+        sessionName,
+        date,
+      });
     } catch (error) {
       console.error('Failed to generate PDF:', error);
       alert('Failed to generate PDF. Please try again.');
