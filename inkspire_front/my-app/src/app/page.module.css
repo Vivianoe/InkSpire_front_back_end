@@ -24,6 +24,14 @@
   margin: 0;
 }
 
+.welcomeSubtitle {
+  margin: 0.65rem 0 0;
+  font-size: 1rem;
+  color: var(--gray-600);
+  max-width: 70rem;
+  line-height: 1.5;
+}
+
 .classCardsGrid {
   display: grid;
   grid-template-columns: 1fr;

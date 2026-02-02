@@ -186,11 +186,14 @@ export default function DashboardPage() {
     <AuthGuard>
       <div className={styles.container}>
         <Navigation />
-        <div className={styles.dashboard}>
+          <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
             <h1 className={styles.welcomeTitle}>
               {user ? `Welcome Back, ${getUserFirstName()}` : 'Welcome to InkSpire!'}
             </h1>
+            <p className={styles.welcomeSubtitle}>
+               Informed by the disciplinary literacy theory, Inkspire's here to help engage your students in ways that reflect how experts in the discipline develop, confirm, and communicate knowledge.
+            </p>
             {/* 
             {process.env.NODE_ENV === 'development' && !loading && (
               <div style={{
