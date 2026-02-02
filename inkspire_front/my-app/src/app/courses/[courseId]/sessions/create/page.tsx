@@ -6,8 +6,7 @@ import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from '@/app/courses/[courseId]/sessions/create/page.module.css';
 import { supabase } from '@/lib/supabase/client';
-
-const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 type ReadingListItem = {
   id: string;
@@ -54,6 +53,15 @@ type AssignmentReadingStatus = {
   end_page?: number | null;
 };
 
+type SessionUpdateResponse = {
+  success: boolean;
+  assignments?: PerusallAssignment[];
+  assignment_id?: string | null;
+  assignment_name?: string | null;
+  readings?: AssignmentReadingStatus[] | null;
+  message?: string | null;
+};
+
 type PersistedReadingSelection = {
   id: string;
   title: string;
@@ -68,6 +76,7 @@ type PersistedReadingSelection = {
 };
 
 const SELECTED_READING_STORAGE_KEY = 'inkspire:selectedReadings';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 export default function SessionCreationPage() {
   const pathParams = useParams();
@@ -76,6 +85,7 @@ export default function SessionCreationPage() {
   
   const courseId = pathParams.courseId as string;
   const profileId = searchParams.get('profileId') as string | undefined;
+  const [resolvedProfileId, setResolvedProfileId] = useState<string | undefined>(profileId);
   const urlSessionId = searchParams.get('sessionId') as string | undefined;
   
   const [mode, setMode] = useState<'create' | 'edit' | 'select'>('select');
@@ -97,6 +107,7 @@ export default function SessionCreationPage() {
   const [uploadingReading, setUploadingReading] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const readingUploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const initialLoadKeyRef = useRef<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -104,7 +115,43 @@ export default function SessionCreationPage() {
   const [originalDraft, setOriginalDraft] = useState<any>(null);
   const [currentVersion, setCurrentVersion] = useState<number>(1);
 
-  const resolvedInstructorId = searchParams?.get('instructorId') || MOCK_INSTRUCTOR_ID;
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
+
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
+
+  useEffect(() => {
+    if (!courseId) return;
+    const storageKey = `${ACTIVE_PROFILE_STORAGE_PREFIX}${courseId}`;
+    if (profileId) {
+      setResolvedProfileId(profileId);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(storageKey, profileId);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        const cachedProfileId = window.sessionStorage.getItem(storageKey) || undefined;
+        if (cachedProfileId) {
+          setResolvedProfileId(cachedProfileId);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [courseId, profileId]);
 
   // Load existing session from URL session_id
   const loadExistingSession = useCallback(async (sessionId: string) => {
@@ -210,12 +257,22 @@ export default function SessionCreationPage() {
 
   // Load initial data
   useEffect(() => {
+    if (!courseId || !resolvedInstructorId) {
+      return;
+    }
+    const instructorId = resolvedInstructorId;
+    const loadKey = `${courseId}|${resolvedInstructorId}|${urlSessionId || ''}`;
+    if (initialLoadKeyRef.current === loadKey) {
+      return;
+    }
+    initialLoadKeyRef.current = loadKey;
+
     const loadData = async () => {
       try {
         // Load readings
         const readingsQuery = new URLSearchParams({
           course_id: courseId,
-          instructor_id: resolvedInstructorId,
+          instructor_id: instructorId,
         });
         const readingsResponse = await fetch(`/api/readings?${readingsQuery.toString()}`);
         const readingsData = await readingsResponse.json().catch(() => ({}));
@@ -262,9 +319,7 @@ export default function SessionCreationPage() {
       }
     };
 
-    if (courseId) {
-      loadData();
-    }
+    loadData();
   }, [courseId, resolvedInstructorId, urlSessionId, fetchPerusallAssignments]);
 
   // Load existing session if sessionId is in URL
@@ -284,7 +339,8 @@ export default function SessionCreationPage() {
       sessionDescription !== originalDraft.sessionDescription ||
       assignmentDescription !== originalDraft.assignmentDescription ||
       assignmentGoal !== originalDraft.assignmentGoal ||
-      JSON.stringify(selectedReadingIds.sort()) !== JSON.stringify(originalDraft.selectedReadingIds.sort())
+      JSON.stringify([...selectedReadingIds].sort()) !==
+        JSON.stringify([...(originalDraft.selectedReadingIds || [])].sort())
     );
   }, [originalDraft, sessionTitle, weekNumber, sessionDescription, assignmentDescription, assignmentGoal, selectedReadingIds]);
 
@@ -354,12 +410,63 @@ export default function SessionCreationPage() {
     }
   }, [selectedPerusallAssignmentId, fetchAssignmentReadings]);
 
-  const handleSelectAssignment = async (assignmentId: string) => {
+  const handleSessionUpdate = async () => {
+    try {
+      setLoadingPerusallAssignments(true);
+      setLoadingAssignmentReadings(Boolean(selectedPerusallAssignmentId));
+      setError(null);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/perusall/session-update`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          assignment_id: selectedPerusallAssignmentId || undefined,
+        }),
+      });
+      const data: SessionUpdateResponse = await response.json().catch(() => ({ success: false }));
+      if (!response.ok || !data?.success) {
+        throw new Error((data as any)?.detail || data?.message || 'Failed to refresh session selection data.');
+      }
+
+      const assignmentsRaw = Array.isArray(data?.assignments) ? data.assignments : [];
+      const normalizedAssignments = assignmentsRaw
+        .map((a: any) => ({
+          ...a,
+          id: a?.id ?? a?._id,
+        }))
+        .filter((a: any) => typeof a?.id === 'string' && a.id.length > 0);
+      setPerusallAssignments(normalizedAssignments);
+
+      if (selectedPerusallAssignmentId) {
+        if (data.assignment_id && Array.isArray(data.readings)) {
+          setAssignmentReadings(data.readings);
+          setSelectedAssignmentName(data.assignment_name || '');
+        } else {
+          setAssignmentReadings([]);
+          setSelectedAssignmentName('');
+        }
+      }
+      if (data.message) {
+        setSuccess(data.message);
+      }
+    } catch (err) {
+      console.error('Session update failed:', err);
+      setError(err instanceof Error ? err.message : 'Session update failed.');
+    } finally {
+      setLoadingPerusallAssignments(false);
+      setLoadingAssignmentReadings(false);
+    }
+  };
+
+  const handleSelectAssignment = (assignmentId: string) => {
     setSelectedPerusallAssignmentId(assignmentId);
     setSelectedReadingIds([]);
-
-    // Fetch assignment readings status
-    await fetchAssignmentReadings(assignmentId);
 
     const matchingSessions = sessions.filter(s => s.perusall_assignment_id === assignmentId);
     if (matchingSessions.length > 0) {
@@ -371,12 +478,10 @@ export default function SessionCreationPage() {
 
       setSelectedSessionId(latestSession.id);
       setMode('edit');
-      loadExistingSession(latestSession.id);
 
       const params = new URLSearchParams();
       params.set('sessionId', latestSession.id);
       params.set('courseId', courseId);
-      params.set('instructorId', resolvedInstructorId);
       router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
       return;
     }
@@ -384,8 +489,40 @@ export default function SessionCreationPage() {
     handleCreateNew(assignmentId);
   };
 
+  const orderedSelectedReadingIds = useMemo(() => {
+    if (!selectedPerusallAssignmentId || assignmentReadings.length === 0) {
+      return selectedReadingIds;
+    }
+    const positionMap = new Map<string, number>();
+    assignmentReadings.forEach((reading, idx) => {
+      const localId = String(reading.local_reading_id || '');
+      if (localId) positionMap.set(localId, idx);
+    });
+    return [...selectedReadingIds].sort((a, b) => {
+      const pa = positionMap.get(String(a));
+      const pb = positionMap.get(String(b));
+      if (pa === undefined && pb === undefined) return 0;
+      if (pa === undefined) return 1;
+      if (pb === undefined) return -1;
+      return pa - pb;
+    });
+  }, [selectedReadingIds, selectedPerusallAssignmentId, assignmentReadings]);
+
+  useEffect(() => {
+    // Keep selected IDs aligned with Perusall reading order for session/scaffold navigation.
+    if (orderedSelectedReadingIds.length !== selectedReadingIds.length) return;
+    const changed = orderedSelectedReadingIds.some((id, idx) => id !== selectedReadingIds[idx]);
+    if (changed) {
+      setSelectedReadingIds(orderedSelectedReadingIds);
+    }
+  }, [orderedSelectedReadingIds, selectedReadingIds]);
+
   /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -480,7 +617,7 @@ export default function SessionCreationPage() {
             readingIds: selectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId,
+            profileId: resolvedProfileId,
             instructorId: resolvedInstructorId,
           })
         );
@@ -531,8 +668,7 @@ export default function SessionCreationPage() {
     // Navigate to same page with session_id in URL to load and edit
     const params = new URLSearchParams();
     params.set('sessionId', selectedSessionId);
-    if (resolvedInstructorId) params.set('instructorId', resolvedInstructorId);
-    if (profileId) params.set('profileId', profileId);
+    if (resolvedProfileId) params.set('profileId', resolvedProfileId);
     
     // Use RESTful URL structure
     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
@@ -540,6 +676,10 @@ export default function SessionCreationPage() {
   */
 
   const handleStartWorkingOnReadings = async () => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     if (!selectedReadingIds.length) {
       setError('Please select at least one reading.');
       return;
@@ -566,7 +706,7 @@ export default function SessionCreationPage() {
           assignment_goals_json: {
             goal: assignmentGoal || undefined,
           },
-          reading_ids: selectedReadingIds,
+          reading_ids: orderedSelectedReadingIds,
         };
 
         const response = await fetch(`/api/courses/${courseId}/sessions/${existingSessionId}/versions`, {
@@ -590,7 +730,7 @@ export default function SessionCreationPage() {
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
-          reading_ids: selectedReadingIds,
+          reading_ids: orderedSelectedReadingIds,
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
@@ -616,7 +756,7 @@ export default function SessionCreationPage() {
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
-      const firstReadingId = selectedReadingIds[0];
+      const firstReadingId = orderedSelectedReadingIds[0];
       const firstReadingStartPage = selectedPerusallAssignmentId
         ? assignmentReadings.find((ar) => String(ar.local_reading_id || '') === String(firstReadingId))?.start_page
         : undefined;
@@ -632,10 +772,10 @@ export default function SessionCreationPage() {
           'inkspire:sessionReadingNavigation',
           JSON.stringify({
             sessionId,
-            readingIds: selectedReadingIds,
+            readingIds: orderedSelectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
-            profileId: profileId || '',
+            profileId: resolvedProfileId || '',
             instructorId: resolvedInstructorId,
           })
         );
@@ -680,6 +820,10 @@ export default function SessionCreationPage() {
     });
 
   const handleUploadReadingForAssignment = async (perusallDocumentId: string, file: File) => {
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
     setUploadingReading(perusallDocumentId);
     setError(null);
     try {
@@ -891,6 +1035,14 @@ export default function SessionCreationPage() {
     );
   }
 
+  if (loadingInstructorId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading user context...</div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.topBar}>
@@ -898,28 +1050,32 @@ export default function SessionCreationPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-      
-          <div>
-            <h1 className={styles.title}>Session Setup</h1>
-            <p className={styles.subtitle}>
-              Create a new session or continue working on an existing session.
-            </p>
-          </div>
-    
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
+              type="button"
+              className={styles.backIconButton}
               onClick={() => {
-                if (profileId) {
-                  router.push(`/courses/${courseId}/readings?profileId=${profileId}&instructorId=${resolvedInstructorId}`);
+                if (resolvedProfileId) {
+                  router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}`);
                 } else {
                   router.push(`/courses/${courseId}/readings`);
                 }
               }}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              aria-label="Back to readings"
+              title="Back to readings"
               disabled={creating}
             >
-              ← Back to Readings
+              ←
             </button>
+            <div>
+              <h1 className={styles.title}>Session Setup</h1>
+              <p className={styles.subtitle}>
+                Create a new session or continue working on an existing session.
+              </p>
+            </div>
+          </div>
+
+          <div className={styles.headerActions}>
             {/*
             <button
               onClick={handleCreateSession}
@@ -942,10 +1098,11 @@ export default function SessionCreationPage() {
       <div className={styles.content}>
         {error && <div className={styles.errorMessage}>{error}</div>}
         {success && <div style={{ 
-          backgroundColor: '#d1fae5', 
-          color: '#065f46', 
+          backgroundColor: '#E8F5E9',
+          color: '#4CAF50',
           padding: '1rem', 
           borderRadius: '0.5rem', 
+          borderLeft: '4px solid #66BB6A',
           marginBottom: '1.5rem' 
         }}>{success}</div>}
 
@@ -962,6 +1119,14 @@ export default function SessionCreationPage() {
                 Choose a Perusall assignment to create or open a session.
               </p>
             </div>
+            <button
+              type="button"
+              className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.compactActionButton}`}
+              onClick={handleSessionUpdate}
+              disabled={loadingPerusallAssignments || loadingAssignmentReadings}
+            >
+              Session Update
+            </button>
           </div>
 
           <div className={styles.readingList}>
@@ -983,28 +1148,10 @@ export default function SessionCreationPage() {
                     style={{ cursor: 'pointer' }}
                   >
                     <div className={styles.readingMeta}>
-                      <div>
-                        <p className={styles.readingName}>
-                          {assignment.name}
-                          {existingSession && (
-                            <span style={{
-                              marginLeft: '8px',
-                              padding: '2px 8px',
-                              backgroundColor: '#10b981',
-                              color: 'white',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '500'
-                            }}>
-                              ✓ Session Exists
-                            </span>
-                          )}
-                        </p>
-                        <p className={styles.readingDetails}>
-                          {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
-                          {existingSession && (
-                            <> · {existingSession.readingIds?.length || 0} reading{(existingSession.readingIds?.length || 0) !== 1 ? 's' : ''}</>
-                          )}
+                      <div style={{ flex: 1 }}>
+                        <p className={styles.readingName}>{assignment.name}</p>
+                        <p className={styles.readingSecondaryDetail} style={{ color: '#1976D2', fontSize: '12px' }}>
+                          {existingSession ? 'Session exists' : 'Ready for session'}
                         </p>
                       </div>
                     </div>
@@ -1015,7 +1162,9 @@ export default function SessionCreationPage() {
                           e.stopPropagation();
                           handleSelectAssignment(assignment.id);
                         }}
-                        className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
+                        className={`${uiStyles.btn} ${styles.compactActionButton} ${
+                          existingSession ? uiStyles.btnPrimary : styles.neutralActionButton
+                        }`}
                       >
                         {existingSession ? 'Open Session' : 'Create Session'}
                       </button>
@@ -1036,7 +1185,6 @@ export default function SessionCreationPage() {
                   onClick={() => {
                     const params = new URLSearchParams();
                     params.set('courseId', courseId);
-                    params.set('instructorId', resolvedInstructorId);
                     setMode('select');
                     setSelectedSessionId('');
                     router.push(`/courses/${courseId}/sessions/create?${params.toString()}`);
@@ -1049,11 +1197,10 @@ export default function SessionCreationPage() {
                 {urlSessionId && isDraftDirty && (
                   <div style={{ 
                     padding: '0.5rem 1rem', 
-                    backgroundColor: '#fef3c7', 
-                    border: '1px solid #fbbf24',
+                    backgroundColor: '#FFF8E1',
                     borderRadius: '0.375rem',
                     fontSize: '0.875rem',
-                    color: '#92400e'
+                    color: '#F57C00'
                   }}>
                     ⚠️ You have unsaved changes
                   </div>
@@ -1061,11 +1208,10 @@ export default function SessionCreationPage() {
                 {urlSessionId && currentVersion && !isDraftDirty && (
                   <div style={{ 
                     padding: '0.5rem 1rem', 
-                    backgroundColor: '#d1fae5', 
-                    border: '1px solid #10b981',
+                    backgroundColor: '#E3F2FD',
                     borderRadius: '0.375rem',
                     fontSize: '0.875rem',
-                    color: '#065f46'
+                    color: '#1976D2'
                   }}>
                     ✓ Using version {currentVersion}
                   </div>
@@ -1182,7 +1328,7 @@ export default function SessionCreationPage() {
               */}
               <button
                 onClick={handleStartWorkingOnReadings}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
                 disabled={
                   creating || 
                   !selectedReadingIds.length
@@ -1199,14 +1345,20 @@ export default function SessionCreationPage() {
 
           <div className={styles.readingList}>
             {selectedPerusallAssignmentId ? (
-              loadingAssignmentReadings ? (
+              loadingAssignmentReadings && assignmentReadings.length === 0 ? (
                 <div className={styles.emptyState}>Loading assignment readings…</div>
               ) : assignmentReadings.length === 0 ? (
                 <div className={styles.emptyState}>
                   No readings found for this assignment.
                 </div>
               ) : (
-                assignmentReadings.map((ar) => {
+                <>
+                  {loadingAssignmentReadings ? (
+                    <div className={styles.selectionCount} style={{ marginBottom: '0.5rem' }}>
+                      Refreshing readings...
+                    </div>
+                  ) : null}
+                  {assignmentReadings.map((ar) => {
                     const localId = ar.local_reading_id || '';
                     const canSelect = Boolean(ar.is_uploaded && localId);
                     const isSelected = canSelect && selectedReadingIds.includes(localId);
@@ -1215,40 +1367,40 @@ export default function SessionCreationPage() {
                       <div
                         key={ar.perusall_document_id}
                         className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                        style={{
-                          borderLeft: ar.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
-                        }}
                       >
                         <div className={styles.readingMeta}>
-                          <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        {ar.is_uploaded ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                            <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#E5F3E6" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                            <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                            <path opacity="0.4" d="M12 27C12 23.2288 12 21.3432 13.1716 20.1716C14.3431 19 16.2288 19 20 19H22C25.7712 19 27.6569 19 28.8284 20.1716C30 21.3432 30 23.2288 30 27V31C30 34.7712 30 36.6569 28.8284 37.8284C27.6569 39 25.7712 39 22 39H20C16.2288 39 14.3431 39 13.1716 37.8284C12 36.6569 12 34.7712 12 31V27Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 29C16.25 28.5858 16.5858 28.25 17 28.25H25C25.4142 28.25 25.75 28.5858 25.75 29C25.75 29.4142 25.4142 29.75 25 29.75H17C16.5858 29.75 16.25 29.4142 16.25 29Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 25C16.25 24.5858 16.5858 24.25 17 24.25H25C25.4142 24.25 25.75 24.5858 25.75 25C25.75 25.4142 25.4142 25.75 25 25.75H17C16.5858 25.75 16.25 25.4142 16.25 25Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 33C16.25 32.5858 16.5858 32.25 17 32.25H22C22.4142 32.25 22.75 32.5858 22.75 33C22.75 33.4142 22.4142 33.75 22 33.75H17C16.5858 33.75 16.25 33.75 16.25 33Z" fill="#5EB161"/>
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                            <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#FDF2DD" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                            <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                            <path opacity="0.5" d="M32.1689 32.3494V31.241C32.1689 28.1059 32.1687 26.5388 31.1947 25.5648C30.2207 24.5908 28.6531 24.5908 25.518 24.5908H16.6504C13.5153 24.5908 11.9477 24.5908 10.9737 25.5648C10 26.5385 10 28.105 10 31.2386V31.241V32.3494C10 35.4846 10 37.0521 10.974 38.0261C11.9479 39.0001 13.5155 39.0001 16.6507 39.0001H25.5182C28.6533 39.0001 30.2209 39.0001 31.1949 38.0261C32.1689 37.0521 32.1689 35.4846 32.1689 32.3494Z" fill="#F38623"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M21.0844 32.0724C21.5435 32.0724 21.9157 31.7002 21.9157 31.2411V19.0786L23.7786 21.2519C24.0773 21.6005 24.6022 21.6409 24.9508 21.3421C25.2994 21.0433 25.3397 20.5185 25.041 20.1699L21.7157 16.2903C21.5577 16.106 21.3271 16 21.0844 16C20.8418 16 20.6112 16.106 20.4533 16.2903L17.1279 20.1699C16.8291 20.5185 16.8695 21.0433 17.2181 21.3421C17.5667 21.6409 18.0915 21.6005 18.3903 21.2519L20.2531 19.0786V31.2411C20.2531 31.7002 20.6253 32.0724 21.0844 32.0724Z" fill="#F38623"/>
+                          </svg>
+                        )}
+                        <div style={{ flex: 1 }}>
                             <p className={styles.readingName}>
                               {ar.perusall_document_name || `Document ${ar.perusall_document_id}`}
                             </p>
-                            <p className={styles.readingDetails}>
-                              <span style={{
-                                padding: '2px 6px',
-                                backgroundColor: ar.is_uploaded ? '#10b981' : '#ef4444',
-                                color: 'white',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                fontWeight: '500',
-                                marginRight: '8px'
-                              }}>
-                                {ar.is_uploaded ? '✓ Uploaded' : '✗ Missing PDF'}
-                              </span>
-                              {ar.start_page && ar.end_page ? `Pages ${ar.start_page}-${ar.end_page}` : ''}
-                            </p>
-                            {ar.is_uploaded && ar.local_reading_title && (
-                              <p className={styles.readingSecondaryDetail}>
-                                Local reading: {ar.local_reading_title}
-                              </p>
-                            )}
+                          <p className={styles.readingSecondaryDetail} style={{ color: ar.is_uploaded ? '#4CAF50' : '#F57C00', fontSize: '12px' }}>
+                            {ar.is_uploaded ? 'Uploaded' : 'PDF upload required'}
+                          </p>
+                        </div>
                           </div>
                         </div>
                         <div className={styles.readingActions}>
                           {!ar.is_uploaded && (
                             <label
-                              className={styles.selectionButton}
+                          className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                               style={{
                                 cursor: uploadingReading === ar.perusall_document_id ? 'not-allowed' : 'pointer',
                                 opacity: uploadingReading === ar.perusall_document_id ? 0.6 : 1,
@@ -1271,7 +1423,7 @@ export default function SessionCreationPage() {
                               if (!canSelect) return;
                               handleReadingSelect(localId, !isSelected);
                             }}
-                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                        className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                             disabled={creating || !canSelect}
                             title={!ar.is_uploaded ? 'Upload PDF before selecting' : !localId ? 'Missing local reading mapping' : undefined}
                           >
@@ -1280,7 +1432,8 @@ export default function SessionCreationPage() {
                         </div>
                       </div>
                     );
-                  })
+                  })}
+                </>
               )
             ) : readings.length === 0 ? (
               <div className={styles.emptyState}>
@@ -1295,40 +1448,28 @@ export default function SessionCreationPage() {
                         className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
                       >
                         <div className={styles.readingMeta}>
-                          <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                          <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#E5F3E6" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path opacity="0.4" d="M12 27C12 23.2288 12 21.3432 13.1716 20.1716C14.3431 19 16.2288 19 20 19H22C25.7712 19 27.6569 19 28.8284 20.1716C30 21.3432 30 23.2288 30 27V31C30 34.7712 30 36.6569 28.8284 37.8284C27.6569 39 25.7712 39 22 39H20C16.2288 39 14.3431 39 13.1716 37.8284C12 36.6569 12 34.7712 12 31V27Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 29C16.25 28.5858 16.5858 28.25 17 28.25H25C25.4142 28.25 25.75 28.5858 25.75 29C25.75 29.4142 25.4142 29.75 25 29.75H17C16.5858 29.75 16.25 29.4142 16.25 29Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 25C16.25 24.5858 16.5858 24.25 17 24.25H25C25.4142 24.25 25.75 24.5858 25.75 25C25.75 25.4142 25.4142 25.75 25 25.75H17C16.5858 25.75 16.25 25.4142 16.25 25Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 33C16.25 32.5858 16.5858 32.25 17 32.25H22C22.4142 32.25 22.75 32.5858 22.75 33C22.75 33.4142 22.4142 33.75 22 33.75H17C16.5858 33.75 16.25 33.75 16.25 33Z" fill="#5EB161"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
                             <p className={styles.readingName}>{reading.title}</p>
-                            <p className={styles.readingDetails}>
-                              {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
-                              {reading.displayDate ? `· ${reading.displayDate}` : ''}
-                              {reading.hasChunks && (
-                                <span style={{
-                                  marginLeft: '8px',
-                                  padding: '2px 6px',
-                                  backgroundColor: '#10b981',
-                                  color: 'white',
-                                  borderRadius: '4px',
-                                  fontSize: '11px',
-                                  fontWeight: '500'
-                                }}>
-                                  Processed
-                                </span>
-                              )}
-                            </p>
-                            {reading.filePath && (
-                              <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
-                            )}
-                            {reading.hasChunks && reading.readingChunks && (
-                              <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                                {reading.readingChunks.length} chunks available
-                              </p>
-                            )}
+                          <p className={styles.readingSecondaryDetail} style={{ color: '#4CAF50', fontSize: '12px' }}>
+                            {reading.hasChunks ? 'Processed' : 'Uploaded'}
+                          </p>
+                        </div>
                           </div>
                         </div>
                         <div className={styles.readingActions}>
                           <button
                             type="button"
                             onClick={() => handleReadingSelect(reading.id, !isSelected)}
-                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                        className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                             disabled={creating}
                           >
                             {isSelected ? 'Selected' : 'Select'}

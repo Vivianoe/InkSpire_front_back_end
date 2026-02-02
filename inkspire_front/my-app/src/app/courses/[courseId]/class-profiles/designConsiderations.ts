@@ -7,40 +7,53 @@ export const DESIGN_CONSIDERATION_FIELDS = [
   {
     key: 'theoryFocus',
     label: 'Theory focus',
-    placeholder: 'Describe the primary learning theory or pedagogical stance guiding this course.',
+    placeholder: 'Describe the aspects of the disciplinary literacy theory you\'d like to emphasize in this course.',
     options: [
-      'Epistemology',
-      'Overarching concepts, themes, and frameworks',
-      'Inquiry practices and strategies',
-      'Representational forms',
-      'Discourse and language structures',
-      'Other',
+      'Epistemology of science (emphasize the tentative and iterative nature of efforts to explain phenomena that occur in the natural world)',
+      'Overarching concepts, themes, and frameworks (frameworks, key concepts, and themes that reflect unifying or general concepts and themes in science)',
+      'Inquiry practices and strategies (build scientific knowledge by developing coherent, logical explanations, models or arguments from evidence)',
+      'Representational forms (a variety of prototypical ways of structuring and presenting scientific information)',
+      'Discourse and language structures (Prototypical language structures in science)',
     ],
     aliases: ['Theory Focus', 'Theoretical focus'],
   },
   {
     key: 'disciplinaryWaysOfKnowing',
-    label: 'Disciplinary ways of knowing',
-    placeholder: 'Summarize how this field gathers evidence, validates knowledge, and reasons about problems.',
-    aliases: ['Disciplinary ways of knowing', 'Ways of knowing'],
+    label: 'Teaching priorities',
+    placeholder: 'What do you want to prioritize most when designing learning activities or scaffolds for this course?',
+    options: [
+      'Conceptual understanding over coverage',
+      'Process and reasoning over final answers',
+      'Multiple perspectives rather than a single "correct" view',
+      'Student explanation over instructor explanation',
+      'Depth over speed',
+      'Other',
+    ],
+    aliases: ['Teaching priorities', 'Disciplinary ways of knowing', 'Ways of knowing'],
   },
   {
     key: 'coursePriorities',
-    label: 'Course priorities',
-    placeholder: 'List the instructional moves, scaffolds, or rituals that should stay front and center.',
-    aliases: ['Course priorities'],
-  },
-  {
-    key: 'classSpecificGoals',
-    label: 'Class-specific learning goals',
-    placeholder: 'Capture the signature outcomes or mindsets this teaching team wants to emphasize.',
-    aliases: ['Class-specific learning goals', 'Class learning goals'],
+    label: 'What to avoid?',
+    placeholder: 'Are there things you actively want to avoid in this course?',
+    options: [
+      'Over-scaffolding',
+      'Giving away answers too early',
+      'Overly technical language',
+      'Overemphasis on correctness',
+      'Excessive cognitive load',
+      'Other',
+    ],
+    aliases: ['What to avoid?', 'Course priorities'],
   },
   {
     key: 'userDefined',
-    label: 'User-defined considerations',
+    label: 'Any other considerations for the design',
     placeholder: 'Add any additional constraints, rituals, accessibility needs, or collaboration norms.',
-    aliases: ['User-defined considerations', 'User defined considerations'],
+    aliases: [
+      'Any other considerations for the design',
+      'User-defined considerations',
+      'User defined considerations',
+    ],
   },
 ] as const;
 
@@ -151,7 +164,7 @@ export const formatDesignConsiderations = (data: DesignConsiderations): string =
     .join('\n\n');
 
 /**
- * Compare two design considerations objects for exact equality across all 5 fields.
+ * Compare two design considerations objects for exact equality across all fields.
  * Normalizes values before comparison (trims whitespace, treats empty string/null/undefined as equivalent).
  */
 export const areDesignConsiderationsEqual = (
@@ -166,7 +179,7 @@ export const areDesignConsiderationsEqual = (
   const normalizedA = normalizeDesignConsiderations(a);
   const normalizedB = normalizeDesignConsiderations(b);
 
-  // Compare all 5 fields
+  // Compare all configured fields
   return DESIGN_CONSIDERATION_FIELDS.every(field => {
     const valueA = (normalizedA[field.key] || '').trim();
     const valueB = (normalizedB[field.key] || '').trim();

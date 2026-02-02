@@ -12,6 +12,7 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
+import { useInstructorId } from '@/hooks/useInstructorId';
 
 // const DEFAULT_CLASS_BACKGROUND = '';
 
@@ -68,6 +69,7 @@ const EMPTY_PROFILE_SECTIONS: ProfileSections = {
 
 const MOCK_INSTRUCTOR_ID = '550e8400-e29b-41d4-a716-446655440000';
 const MOCK_COURSE_ID = 'fbaf501d-af97-4286-b5b0-d7b63b500b35';
+const ACTIVE_PROFILE_STORAGE_PREFIX = 'inkspire:activeProfileId:';
 
 type DesignRationaleText = string | null;
 type DesignConsiderationsPayload = Record<string, unknown> | null;
@@ -101,6 +103,8 @@ const buildClassInputPayload = (
     enrollment: data.classInfo.enrollment,
     background: data.classInfo.background || DEFAULT_CLASS_BACKGROUND,
     prior_knowledge: data.classInfo.priorKnowledge,
+    learning_challenges: data.classInfo.learningChallenges,
+    learning_challenges_other: data.classInfo.learningChallengesOther,
   },
   design_considerations: designConsiderationsPayload ?? null,
 });
@@ -271,8 +275,78 @@ const DELIVERY_MODE_OPTIONS = [
 
 const SEMESTER_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];
 
+const LEARNING_CHALLENGE_OPTIONS = [
+  'Struggle with technical terminology',
+  'Tendency to focus on surface details rather than core ideas',
+  'Trouble connecting core ideas in readings',
+  'Low confidence in explaining their thinking',
+  'Difficulty getting started with open-ended tasks',
+  'Other',
+];
+
+const normalizeLearningChallenges = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[|,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
 const cloneProfile = (profile: ClassProfile): ClassProfile =>
   JSON.parse(JSON.stringify(profile));
+
+const buildProfileTextFromStructuredProfile = (
+  profileObj: Record<string, unknown>,
+  designText?: string
+): string => {
+  const parts: string[] = [];
+  const overall = typeof profileObj.overall_profile === 'string' ? profileObj.overall_profile : '';
+  const discipline = typeof profileObj.discipline_paragraph === 'string' ? profileObj.discipline_paragraph : '';
+  const course = typeof profileObj.course_paragraph === 'string' ? profileObj.course_paragraph : '';
+  const classText = typeof profileObj.class_paragraph === 'string' ? profileObj.class_paragraph : '';
+
+  if (overall) parts.push(overall);
+  if (discipline) parts.push('Discipline level:', discipline);
+  if (course) parts.push('Course level:', course);
+  if (classText) parts.push('Class level:', classText);
+  if (designText && designText.trim()) {
+    parts.push('Design Considerations:', designText.trim());
+  }
+
+  return parts.join('\n\n').trim();
+};
+
+const parsePossiblyInvalidJson = (raw: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Attempt a minimal fix for trailing commas in objects/arrays.
+    const sanitized = raw.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return JSON.parse(sanitized) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+};
+
+const readString = (
+  obj: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+};
 
 const BASIC_SECTION_KEYS = ['disciplineInfo', 'courseInfo', 'classInfo'] as const;
 type BasicSectionKey = (typeof BASIC_SECTION_KEYS)[number];
@@ -309,6 +383,8 @@ interface ClassProfile {
     enrollment: string;
     background: string;
     priorKnowledge: string;
+    learningChallenges: string[];
+    learningChallengesOther: string;
   };
   generatedProfile?: string;
 }
@@ -317,15 +393,19 @@ export default function ViewClassProfilePage() {
   const router = useRouter();
   // Path parameters (from route: /class-profile/[id]/view or /courses/[courseId]/class-profiles/[profileId]/view)
   const pathParams = useParams();
-  // Query parameters (from URL: ?instructorId=yyy - courseId and profileId are now in path)
+  // Query parameters (from URL: ?courseId=xxx for legacy paths)
   const searchParams = useSearchParams();
   const profileId = pathParams?.profileId || pathParams?.id as string; // Support both old and new routes
   const courseId = pathParams?.courseId as string | undefined; // New RESTful route
   const isCreateMode = !profileId || profileId === 'new';
   
-  // Get course_id from path (new) or query params (old), and instructor_id from query params
+  // Get course_id from path (new) or query params (old)
   const urlCourseId = courseId || searchParams?.get('courseId'); // Path param takes priority
-  const urlInstructorId = searchParams?.get('instructorId');
+  const {
+    instructorId: resolvedInstructorId,
+    loading: loadingInstructorId,
+    error: instructorIdError,
+  } = useInstructorId();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ClassProfile | null>(null);
@@ -354,10 +434,21 @@ export default function ViewClassProfilePage() {
   const [designConsiderationMetadataText, setDesignConsiderationMetadataText] = useState<string>('');
   const [designConsiderationMetadataDraft, setDesignConsiderationMetadataDraft] = useState<string>('');
 
+  useEffect(() => {
+    if (instructorIdError) {
+      setError(instructorIdError);
+    }
+  }, [instructorIdError]);
+
   const isDirty = useMemo(() => {
     if (!formData || !initialData) return false;
     return JSON.stringify(formData) !== JSON.stringify(initialData);
   }, [formData, initialData]);
+
+  const selectedLearningChallenges = useMemo(
+    () => normalizeLearningChallenges(formData?.classInfo.learningChallenges),
+    [formData?.classInfo.learningChallenges]
+  );
 
   const hasDesignConsiderationsChanged = useMemo(() => {
     // If no initial version found, allow button (edge case: profile created before versioning)
@@ -492,7 +583,7 @@ export default function ViewClassProfilePage() {
     setProfileSections(parseProfileSections(baseText));
   }, [formData?.generatedProfile, isCreateMode]);
 
-const createDefaultProfile = (id: string): ClassProfile => ({
+  const createDefaultProfile = (id: string): ClassProfile => ({
     id,
     disciplineInfo: {
       disciplineName: '',
@@ -519,38 +610,162 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       enrollment: '',
       background: DEFAULT_CLASS_BACKGROUND,
       priorKnowledge: '',
+      learningChallenges: [],
+      learningChallengesOther: '',
     },
-  generatedProfile: '',
+    generatedProfile: '',
   });
 
-  const normalizeProfile = (data: ClassProfile): ClassProfile => {
-    const defaults = createDefaultProfile(data.id);
-    const loadedDisciplineInfo = data.disciplineInfo || {};
-    const loadedCourseInfo = data.courseInfo || {};
-    const loadedClassInfo = data.classInfo || {};
+  const normalizeProfile = (data: Record<string, unknown> | ClassProfile): ClassProfile => {
+    const dataRecord = data as Record<string, unknown>;
+    const profileIdValue =
+      (dataRecord?.id as string | undefined) ||
+      (dataRecord?.profile_id as string | undefined) ||
+      (profileId as string | undefined) ||
+      'new';
+    const defaults = createDefaultProfile(profileIdValue);
+
+    let parsedText: Record<string, unknown> | null = null;
+    if (typeof dataRecord?.text === 'string') {
+      parsedText = parsePossiblyInvalidJson(dataRecord.text);
+    }
+
+    const classInput =
+      (dataRecord?.class_input as Record<string, unknown> | undefined) ||
+      (dataRecord?.classInput as Record<string, unknown> | undefined) ||
+      (parsedText?.class_input as Record<string, unknown> | undefined) ||
+      (parsedText?.classInput as Record<string, unknown> | undefined) ||
+      undefined;
+
+    const disciplineInput =
+      ((dataRecord?.disciplineInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.disciplineInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const courseInput =
+      ((dataRecord?.courseInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.courseInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const classInputObj =
+      ((dataRecord?.classInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.classInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const directStructuredProfile =
+      dataRecord?.profile && typeof dataRecord.profile === 'object'
+        ? (dataRecord.profile as Record<string, unknown>)
+        : null;
+    const structuredProfile =
+      directStructuredProfile ??
+      (parsedText?.profile && typeof parsedText.profile === 'object'
+        ? (parsedText.profile as Record<string, unknown>)
+        : null);
+
+    let parsedGeneratedText: Record<string, unknown> | null = null;
+    if (typeof dataRecord?.generatedProfile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generatedProfile);
+    }
+    if (!parsedGeneratedText && typeof dataRecord?.generated_profile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generated_profile);
+    }
+    const generatedStructuredProfile =
+      parsedGeneratedText?.profile && typeof parsedGeneratedText.profile === 'object'
+        ? (parsedGeneratedText.profile as Record<string, unknown>)
+        : null;
+    const parsedDesignText =
+      (typeof parsedGeneratedText?.design_consideration === 'string'
+        ? parsedGeneratedText.design_consideration
+        : undefined) ||
+      (typeof parsedGeneratedText?.design_rationale === 'string'
+        ? parsedGeneratedText.design_rationale
+        : undefined) ||
+      (typeof parsedText?.design_consideration === 'string'
+        ? parsedText.design_consideration
+        : undefined) ||
+      (typeof parsedText?.design_rationale === 'string'
+        ? parsedText.design_rationale
+        : undefined) ||
+      (typeof dataRecord?.design_consideration === 'string'
+        ? dataRecord.design_consideration
+        : undefined);
+
+    const generatedProfile =
+      (dataRecord?.generatedProfile as string | undefined) ||
+      (dataRecord?.generated_profile as string | undefined) ||
+      (typeof dataRecord?.profile === 'string' ? dataRecord.profile : undefined) ||
+      (typeof parsedText?.profile === 'string' ? parsedText.profile : undefined) ||
+      (typeof parsedText?.text === 'string' ? parsedText.text : undefined) ||
+      (structuredProfile
+        ? buildProfileTextFromStructuredProfile(structuredProfile, parsedDesignText)
+        : undefined) ||
+      (generatedStructuredProfile
+        ? buildProfileTextFromStructuredProfile(generatedStructuredProfile, parsedDesignText)
+        : undefined) ||
+      DEFAULT_CLASS_PROFILE_TEXT;
 
     return {
       ...defaults,
-      ...data,
+      id: profileIdValue,
       disciplineInfo: {
         ...defaults.disciplineInfo,
-        ...loadedDisciplineInfo,
+        ...disciplineInput,
         disciplineName:
-          loadedDisciplineInfo.disciplineName ??
-          // @ts-expect-error legacy field name
-          loadedDisciplineInfo.field ??
+          readString(disciplineInput, 'disciplineName', 'discipline_name', 'field') ??
           defaults.disciplineInfo.disciplineName,
+        department:
+          readString(disciplineInput, 'department') ?? defaults.disciplineInfo.department,
+        fieldDescription:
+          readString(disciplineInput, 'fieldDescription', 'field_description') ??
+          defaults.disciplineInfo.fieldDescription,
       },
       courseInfo: {
         ...defaults.courseInfo,
-        ...loadedCourseInfo,
+        ...courseInput,
+        courseName:
+          readString(courseInput, 'courseName', 'course_name') ??
+          defaults.courseInfo.courseName,
+        courseCode:
+          readString(courseInput, 'courseCode', 'course_code') ??
+          defaults.courseInfo.courseCode,
+        learningObjectives:
+          readString(courseInput, 'learningObjectives', 'learning_objectives') ??
+          defaults.courseInfo.learningObjectives,
+        assessmentMethods:
+          readString(courseInput, 'assessmentMethods', 'assessment_methods') ??
+          defaults.courseInfo.assessmentMethods,
+        deliveryMode:
+          readString(courseInput, 'deliveryMode', 'delivery_mode') ??
+          defaults.courseInfo.deliveryMode,
       },
       classInfo: {
         ...defaults.classInfo,
-        ...loadedClassInfo,
-        background: loadedClassInfo.background || DEFAULT_CLASS_BACKGROUND,
+        ...classInputObj,
+        meetingDays:
+          readString(classInputObj, 'meetingDays', 'meeting_days') ??
+          defaults.classInfo.meetingDays,
+        meetingTime:
+          readString(classInputObj, 'meetingTime', 'meeting_time') ??
+          defaults.classInfo.meetingTime,
+        priorKnowledge:
+          readString(classInputObj, 'priorKnowledge', 'prior_knowledge') ??
+          defaults.classInfo.priorKnowledge,
+        background:
+          readString(classInputObj, 'background') ?? DEFAULT_CLASS_BACKGROUND,
+        learningChallenges: normalizeLearningChallenges(
+          classInputObj.learningChallenges ?? classInputObj.learning_challenges
+        ),
+        learningChallengesOther:
+          readString(classInputObj, 'learningChallengesOther', 'learning_challenges_other') ??
+          defaults.classInfo.learningChallengesOther,
       },
-      generatedProfile: data.generatedProfile || DEFAULT_CLASS_PROFILE_TEXT,
+      generatedProfile,
     };
   };
 
@@ -564,8 +779,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       setError('Please fill in Discipline Name and Department.');
       return false;
     }
-    if (!data.courseInfo.courseName || !data.courseInfo.courseCode) {
-      setError('Please fill in Course Name and Course Code.');
+    if (!data.courseInfo.courseName) {
+      setError('Please fill in Course Name.');
       return false;
     }
     if (!data.classInfo.semester || !data.classInfo.year) {
@@ -593,23 +808,27 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
       const profilePayload =
         data.profile ?? data.class_profile ?? data.review ?? null;
-      const loadedProfile = profilePayload ? normalizeProfile(profilePayload) : null;
+      const combinedPayload =
+        profilePayload && typeof profilePayload === 'object'
+          ? {
+              ...data,
+              ...profilePayload,
+              profile: data.profile ?? profilePayload,
+            }
+          : data;
+      const loadedProfile = combinedPayload ? normalizeProfile(combinedPayload) : null;
 
       if (loadedProfile) {
         setFormData(cloneProfile(loadedProfile));
         setInitialData(cloneProfile(loadedProfile));
         
-        // Update URL with course_id and instructor_id from API if not already in URL
-        if ((data.course_id || data.instructor_id) && typeof window !== 'undefined') {
+        // Update URL with course_id from API if not already in URL
+        if (data.course_id && typeof window !== 'undefined') {
           const currentParams = new URLSearchParams(window.location.search);
           let needsUpdate = false;
           
           if (data.course_id && !currentParams.has('courseId')) {
             currentParams.set('courseId', data.course_id);
-            needsUpdate = true;
-          }
-          if (data.instructor_id && !currentParams.has('instructorId')) {
-            currentParams.set('instructorId', data.instructor_id);
             needsUpdate = true;
           }
           
@@ -1062,7 +1281,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           // Fallback to old structure with query params
           const navParams = new URLSearchParams();
           if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
           const queryString = navParams.toString();
           router.replace(`/class-profile/${updatedFormData.id}/view${queryString ? `?${queryString}` : ''}`);
         }
@@ -1173,6 +1391,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         ? getUserDesignConsiderationsForPayload()
         : null;
 
+      if (!hasExistingId && !resolvedInstructorId) {
+        throw new Error('Unable to identify instructor. Please sign in again.');
+      }
+
       const payload = hasExistingId
         ? {
             // For edit endpoint - matches EditProfileRequest (backend expects 'text' field)
@@ -1184,8 +1406,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           }
         : {
             // For create endpoint - matches existing structure
-            // Get instructor_id from URL params instead of using mock
-            instructor_id: urlInstructorId || MOCK_INSTRUCTOR_ID,
+            instructor_id: resolvedInstructorId,
             title: saveData.courseInfo.courseName || 'Untitled Class',
             course_code: saveData.courseInfo.courseCode || 'TBD',
             description: saveData.courseInfo.description || 'Draft class profile',
@@ -1234,7 +1455,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
           // Fallback to old structure with query params
           const navParams = new URLSearchParams();
           if (urlCourseId) navParams.set('courseId', urlCourseId);
-          if (urlInstructorId) navParams.set('instructorId', urlInstructorId);
           const queryString = navParams.toString();
           router.replace(`/class-profile/${savedId}/view${queryString ? `?${queryString}` : ''}`);
         }
@@ -1327,6 +1547,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             enrollment: formData.classInfo.enrollment,
             background: formData.classInfo.background || DEFAULT_CLASS_BACKGROUND,
             prior_knowledge: formData.classInfo.priorKnowledge,
+            learning_challenges: formData.classInfo.learningChallenges,
+            learning_challenges_other: formData.classInfo.learningChallengesOther,
           },
         }),
       });
@@ -1364,17 +1586,28 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         : undefined) || 
       MOCK_COURSE_ID;
     
-    // Get instructor_id from URL params or fallback to mock
-    const instructorId = urlInstructorId || MOCK_INSTRUCTOR_ID;
+    // Resolve instructor_id from authenticated backend user
+    if (!resolvedInstructorId) {
+      setError('Unable to identify instructor. Please sign in again.');
+      return;
+    }
+
+    // Cache active profile for pages that may lose query params after back navigation.
+    try {
+      if (typeof window !== 'undefined' && urlCourseId && formData.id) {
+        window.sessionStorage.setItem(`${ACTIVE_PROFILE_STORAGE_PREFIX}${urlCourseId}`, formData.id);
+      }
+    } catch {
+      // ignore storage errors
+    }
     
     // Use RESTful URL structure if courseId is available in path, otherwise fallback to old structure
     if (urlCourseId && formData.id) {
-      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}&instructorId=${urlInstructorId}`);
+      router.push(`/courses/${urlCourseId}/readings?profileId=${formData.id}`);
     } else {
       // Fallback to old structure with query params
       const params = new URLSearchParams({
         courseId: courseId || '',
-        instructorId,
       });
       router.push(`/class-profile/${formData.id}/reading?${params.toString()}`);
     }
@@ -1400,6 +1633,18 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         <div className={styles.loadingContainer}>
           <div className={styles.loadingSpinner}></div>
           <p>Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadingInstructorId) {
+    return (
+      <div className={styles.container}>
+        <Navigation />
+        <div className={styles.loadingContainer}>
+          <div className={styles.loadingSpinner}></div>
+          <p>Loading user context...</p>
         </div>
       </div>
     );
@@ -1494,10 +1739,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         )}
         <div className={styles.layoutGrid}>
           <div className={styles.leftColumn}>
-            <section className={styles.contextCard}>
+            <section className={`${styles.contextCard} ${styles.designRationaleCard}`}>
               <div className={styles.sectionHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>LLM Design Rationale</h3>
+                  <h2 className={styles.cardTitle}>LLM Design Rationale</h2>
                 </div>
                 <div className={styles.cardActions}>
                   {editingDesign ? (
@@ -1655,19 +1900,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                         disabled={!isBasicInfoEditing}
                       />
                     </div>
-                    <div className={styles.editField}>
-                      <label className={styles.editLabel}>Field Description</label>
-                      <textarea
-                        className={styles.editTextarea}
-                        rows={3}
-                        value={formData.disciplineInfo.fieldDescription}
-                        onChange={(e) =>
-                          handleFieldChange('disciplineInfo', 'fieldDescription', e.target.value)
-                        }
-                        placeholder="Summarize the discipline’s focus areas, core questions, and methods."
-                        disabled={!isBasicInfoEditing}
-                      />
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1707,34 +1939,15 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     />
                   </div>
                   <div className={styles.editField}>
-                    <label className={styles.editLabel}>Course Code *</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.courseCode}
-                      onChange={(e) => handleFieldChange('courseInfo', 'courseCode', e.target.value)}
-                      placeholder="e.g., EDU 101"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Credits</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.credits}
-                      onChange={(e) => handleFieldChange('courseInfo', 'credits', e.target.value)}
-                      placeholder="e.g., 3"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Prerequisites</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.prerequisites}
+                    <label className={styles.editLabel}>Course Description</label>
+                    <textarea
+                      className={styles.editTextarea}
+                      rows={4}
+                      value={formData.courseInfo.description}
                       onChange={(e) =>
-                        handleFieldChange('courseInfo', 'prerequisites', e.target.value)
+                        handleFieldChange('courseInfo', 'description', e.target.value)
                       }
-                      placeholder="e.g., EDU 100 or instructor permission"
+                      placeholder="Enter a detailed description of the course..."
                       disabled={!isBasicInfoEditing}
                     />
                   </div>
@@ -1781,19 +1994,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                       ))}
                     </select>
                   </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Course Description</label>
-                    <textarea
-                      className={styles.editTextarea}
-                      rows={4}
-                      value={formData.courseInfo.description}
-                      onChange={(e) =>
-                        handleFieldChange('courseInfo', 'description', e.target.value)
-                      }
-                      placeholder="Enter a detailed description of the course..."
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
+                  
                 </div>
               </div>
               </div>
@@ -1849,67 +2050,12 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     />
                   </div>
                   <div className={styles.editField}>
-                    <label className={styles.editLabel}>Section</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.section}
-                      onChange={(e) => handleFieldChange('classInfo', 'section', e.target.value)}
-                      placeholder="e.g., A, B, 01"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Enrollment</label>
+                    <label className={styles.editLabel}>Enrollment (Number of Students)</label>
                     <input
                       className={styles.editInput}
                       value={formData.classInfo.enrollment}
                       onChange={(e) => handleFieldChange('classInfo', 'enrollment', e.target.value)}
                       placeholder="e.g., 25"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Meeting Days</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.meetingDays}
-                      onChange={(e) =>
-                        handleFieldChange('classInfo', 'meetingDays', e.target.value)
-                      }
-                      placeholder="e.g., MWF, TTh"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Meeting Time</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.meetingTime}
-                      onChange={(e) =>
-                        handleFieldChange('classInfo', 'meetingTime', e.target.value)
-                      }
-                      placeholder="e.g., 10:00 AM - 11:30 AM"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Location</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.location}
-                      onChange={(e) => handleFieldChange('classInfo', 'location', e.target.value)}
-                      placeholder="e.g., Building A, Room 201"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Background</label>
-                    <textarea
-                      className={styles.editTextarea}
-                      rows={3}
-                      value={formData.classInfo.background}
-                      onChange={(e) => handleFieldChange('classInfo', 'background', e.target.value)}
-                      placeholder="Provide background information about this class and its learners."
                       disabled={!isBasicInfoEditing}
                     />
                   </div>
@@ -1930,6 +2076,60 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                       ))}
                     </select>
                   </div>
+                  <div className={styles.editField}>
+                    <label className={styles.editLabel}>Major Learning Challenges</label>
+                    <p className={styles.fieldHint}>
+                      Which challenges do students in this class commonly experience?
+                    </p>
+                    <div className={styles.checkboxGroup}>
+                      {LEARNING_CHALLENGE_OPTIONS.map(option => {
+                        const isChecked = selectedLearningChallenges.includes(option);
+                        return (
+                          <label
+                            key={option}
+                            className={`${styles.checkboxOption} ${styles.checkboxOptionWrap}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const nextValues = e.target.checked
+                                  ? [...selectedLearningChallenges, option]
+                                  : selectedLearningChallenges.filter(item => item !== option);
+                                setFormData(prev => {
+                                  if (!prev) return prev;
+                                  return {
+                                    ...prev,
+                                    classInfo: {
+                                      ...prev.classInfo,
+                                      learningChallenges: nextValues,
+                                    },
+                                  };
+                                });
+                              }}
+                              disabled={!isBasicInfoEditing}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {selectedLearningChallenges.includes('Other') && (
+                    <div className={styles.editField}>
+                      <label className={styles.editLabel}>Other</label>
+                      <textarea
+                        className={styles.editTextarea}
+                        rows={2}
+                        value={formData.classInfo.learningChallengesOther}
+                        onChange={(e) =>
+                          handleFieldChange('classInfo', 'learningChallengesOther', e.target.value)
+                        }
+                        placeholder="Describe other learning challenges..."
+                        disabled={!isBasicInfoEditing}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2013,6 +2213,22 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         </div>
 
       </div>
+      {(generating || busyRegenerating) && (
+        <div className={uiStyles.publishOverlay}>
+          <div className={uiStyles.publishModal}>
+            <div className={uiStyles.publishModalHeader}>
+              <h3>{busyRegenerating ? 'Regenerating class profile' : 'Generating class profile'}</h3>
+            </div>
+            <div className={uiStyles.publishModalBody}>
+              <p>
+                {busyRegenerating
+                  ? 'Regenerating the class profile. This may take a few seconds. Please wait.'
+                  : 'Generating the class profile. This may take a few minutes. Please wait.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -341,12 +341,28 @@ class PerusallAnnotationRequest(BaseModel):
     annotation_ids: Optional[List[str]] = None  # If provided, fetch highlight_coords from database
     annotations: Optional[List[PerusallAnnotationItem]] = None  # If annotation_ids not provided, use these directly
     perusall_user_id: Optional[str] = None  # Optional Perusall user ID to post as
+    idempotency_key: Optional[str] = None
 
 
 class PerusallAnnotationResponse(BaseModel):
     success: bool
     created_ids: List[str]
     errors: List[Dict[str, Any]]
+
+
+class PerusallAnnotationStatusRequest(BaseModel):
+    session_id: Optional[str] = None
+    annotation_ids: List[str]
+    perusall_user_id: Optional[str] = None
+
+
+class PerusallAnnotationStatusItem(BaseModel):
+    annotation_id: str
+    status: str  # pending | posted
+
+
+class PerusallAnnotationStatusResponse(BaseModel):
+    items: List[PerusallAnnotationStatusItem]
 
 
 class PerusallMappingRequest(BaseModel):
@@ -519,4 +535,18 @@ class AssignmentReadingsResponse(BaseModel):
     assignment_id: str
     assignment_name: str
     readings: List[AssignmentReadingStatus]
+    message: Optional[str] = None
+
+
+class PerusallSessionUpdateRequest(BaseModel):
+    assignment_id: Optional[str] = None
+
+
+class PerusallSessionUpdateResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    assignments: List[PerusallAssignmentItem]
+    assignment_id: Optional[str] = None
+    assignment_name: Optional[str] = None
+    readings: Optional[List[AssignmentReadingStatus]] = None
     message: Optional[str] = None

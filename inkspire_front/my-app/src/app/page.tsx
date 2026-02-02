@@ -179,22 +179,21 @@ export default function DashboardPage() {
   };
 
   const handleNewClass = () => {
-    const params = new URLSearchParams();
-    if (instructorId) {
-      params.set('instructorId', instructorId);
-    }
-    router.push(`/courses/new/class-profiles/new/create${params.toString() ? `?${params.toString()}` : ''}`);
+    router.push('/courses/new/class-profiles/new/create');
   };
 
   return (
     <AuthGuard>
       <div className={styles.container}>
         <Navigation />
-        <div className={styles.dashboard}>
+          <div className={styles.dashboard}>
           <div className={styles.dashboardHeader}>
             <h1 className={styles.welcomeTitle}>
               {user ? `Welcome Back, ${getUserFirstName()}` : 'Welcome to InkSpire!'}
             </h1>
+            <p className={styles.welcomeSubtitle}>
+               Informed by the disciplinary literacy theory, Inkspire's here to help engage your students in ways that reflect how experts in the discipline develop, confirm, and communicate knowledge.
+            </p>
             {/* 
             {process.env.NODE_ENV === 'development' && !loading && (
               <div style={{
@@ -208,10 +207,10 @@ export default function DashboardPage() {
                   <span style={{ color: '#666' }}>Checking...</span>
                 )}
                 {backendStatus === 'connected' && (
-                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Connected</span>
+                  <span style={{ color: '#5ba8e0', fontWeight: 'bold' }}>✓ Connected</span>
                 )}
                 {backendStatus === 'disconnected' && (
-                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗ Disconnected</span>
+                  <span style={{ color: '#d48a67', fontWeight: 'bold' }}>✗ Disconnected</span>
                 )}
                 <button
                   onClick={testBackendConnection}
@@ -254,7 +253,7 @@ export default function DashboardPage() {
                     style={{
                       marginTop: '1rem',
                       padding: '0.5rem 1rem',
-                      backgroundColor: '#dc2626',
+                      backgroundColor: '#d48a67',
                       color: 'white',
                       border: 'none',
                       borderRadius: '0.375rem',

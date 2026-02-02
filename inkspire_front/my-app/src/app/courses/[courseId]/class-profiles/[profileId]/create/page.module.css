@@ -67,6 +67,8 @@
   font-size: 1rem;
   color: var(--gray-600);
   margin: 0;
+  max-width: 36rem;
+  line-height: 1.5;
 }
 
 .loadingContainer {
@@ -125,6 +127,18 @@
   border-bottom: 2px solid var(--gray-200);
 }
 
+.sectionTitleNoDivider {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.sectionDivider {
+  height: 2px;
+  background: var(--gray-200);
+  margin: 0 0 1.5rem 0;
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: 1fr;
@@ -163,10 +177,27 @@
   height: 1rem;
 }
 
+.checkboxOptionWrap {
+  align-items: flex-start;
+}
+
+.checkboxOptionWrap span {
+  display: block;
+  line-height: 1.35;
+}
+
 .label {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--gray-700);
+}
+
+.fieldHint {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--gray-500);
+  padding-left: 0.75rem;
+  border-left: 3px solid rgba(31, 41, 55, 0.2);
 }
 
 .input,

@@ -17,6 +17,7 @@ def upsert_perusall_assignment(
     name: str,
     document_ids: Optional[List[str]] = None,
     parts: Optional[List[Dict[str, Any]]] = None,
+    order_index: Optional[int] = None,
 ) -> PerusallAssignment:
     """
     Upsert a Perusall assignment.
@@ -37,6 +38,10 @@ def upsert_perusall_assignment(
         
         if existing.name != name:
             existing.name = name
+            needs_update = True
+
+        if order_index is not None and existing.order_index != order_index:
+            existing.order_index = order_index
             needs_update = True
         
         # Compare document_ids
@@ -82,6 +87,7 @@ def upsert_perusall_assignment(
             name=name,
             document_ids=document_ids if document_ids else [],
             parts=parts if parts else [],
+            order_index=order_index,
         )
         
         db.add(assignment)
@@ -128,4 +134,7 @@ def get_perusall_assignments_by_course(
     """
     return db.query(PerusallAssignment).filter(
         PerusallAssignment.perusall_course_id == perusall_course_id
+    ).order_by(
+        PerusallAssignment.order_index.asc(),
+        PerusallAssignment.created_at.asc(),
     ).all()

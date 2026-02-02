@@ -352,6 +352,40 @@ CREATE TRIGGER update_perusall_mappings_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+-- Create perusall_assignments table
+CREATE TABLE IF NOT EXISTS perusall_assignments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    perusall_course_id TEXT NOT NULL,  -- Perusall course ID
+    perusall_assignment_id TEXT NOT NULL,  -- Perusall assignment ID
+    name TEXT NOT NULL,  -- Assignment title
+    document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,  -- Array of Perusall document IDs
+    parts JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{documentId, startPage, endPage, documentName?}]
+    order_index INTEGER,  -- Preserve Perusall assignment order per course
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_perusall_course_assignment UNIQUE (perusall_course_id, perusall_assignment_id),
+    CONSTRAINT check_perusall_assignments_document_ids_array CHECK (jsonb_typeof(document_ids) = 'array'),
+    CONSTRAINT check_perusall_assignments_parts_array CHECK (jsonb_typeof(parts) = 'array')
+);
+
+-- Ensure sessions can link to cached perusall_assignments
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS perusall_assignment_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_sessions_perusall_assignment'
+    ) THEN
+        ALTER TABLE sessions
+        ADD CONSTRAINT fk_sessions_perusall_assignment
+        FOREIGN KEY (perusall_assignment_id)
+        REFERENCES perusall_assignments(id)
+        ON DELETE SET NULL;
+    END IF;
+END $$;
+
 -- Create user_perusall_credentials table
 CREATE TABLE IF NOT EXISTS user_perusall_credentials (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -364,14 +398,83 @@ CREATE TABLE IF NOT EXISTS user_perusall_credentials (
     CONSTRAINT unique_user_perusall UNIQUE (user_id)
 );
 
+-- Create perusall_course_users table
+CREATE TABLE IF NOT EXISTS perusall_course_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    perusall_user_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    first_name TEXT,
+    last_name TEXT,
+    display TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_course_perusall_user UNIQUE (course_id, perusall_user_id)
+);
+
+-- Create perusall_annotation_posts table
+CREATE TABLE IF NOT EXISTS perusall_annotation_posts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    idempotency_key TEXT NOT NULL,
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    reading_id UUID NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
+    session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    perusall_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    request_payload JSONB,
+    response_payload JSONB,
+    created_ids JSONB,
+    errors JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_perusall_annotation_idempotency UNIQUE (idempotency_key)
+);
+
 -- Create indexes for user_perusall_credentials
 CREATE INDEX IF NOT EXISTS idx_user_perusall_credentials_user_id ON user_perusall_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_perusall_credentials_validated ON user_perusall_credentials(is_validated);
+
+-- Create indexes for perusall_assignments
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_id ON perusall_assignments(perusall_course_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_assignment_id ON perusall_assignments(perusall_assignment_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_order ON perusall_assignments(perusall_course_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_id ON sessions(perusall_assignment_id);
+
+-- Create indexes for perusall_course_users
+CREATE INDEX IF NOT EXISTS idx_perusall_course_users_course_id ON perusall_course_users(course_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_course_users_user_id ON perusall_course_users(perusall_user_id);
+
+-- Create indexes for perusall_annotation_posts
+CREATE INDEX IF NOT EXISTS idx_perusall_annotation_posts_course_id ON perusall_annotation_posts(course_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_annotation_posts_reading_id ON perusall_annotation_posts(reading_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_annotation_posts_session_id ON perusall_annotation_posts(session_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_annotation_posts_status ON perusall_annotation_posts(status);
 
 -- Create trigger for user_perusall_credentials table
 DROP TRIGGER IF EXISTS update_user_perusall_credentials_updated_at ON user_perusall_credentials;
 CREATE TRIGGER update_user_perusall_credentials_updated_at
     BEFORE UPDATE ON user_perusall_credentials
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create trigger for perusall_course_users table
+DROP TRIGGER IF EXISTS update_perusall_course_users_updated_at ON perusall_course_users;
+CREATE TRIGGER update_perusall_course_users_updated_at
+    BEFORE UPDATE ON perusall_course_users
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create trigger for perusall_annotation_posts table
+DROP TRIGGER IF EXISTS update_perusall_annotation_posts_updated_at ON perusall_annotation_posts;
+CREATE TRIGGER update_perusall_annotation_posts_updated_at
+    BEFORE UPDATE ON perusall_annotation_posts
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create trigger for perusall_assignments table
+DROP TRIGGER IF EXISTS update_perusall_assignments_updated_at ON perusall_assignments;
+CREATE TRIGGER update_perusall_assignments_updated_at
+    BEFORE UPDATE ON perusall_assignments
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
@@ -390,4 +493,7 @@ COMMENT ON TABLE session_readings IS 'Many-to-Many relationship between sessions
 COMMENT ON TABLE session_items IS 'Independent content for each reading within a session';
 COMMENT ON TABLE annotation_highlight_coords IS 'Stores coordinate information for annotation highlights, one record per annotation version';
 COMMENT ON TABLE perusall_mappings IS 'Maps courses and readings to Perusall course_id, assignment_id, and document_id';
+COMMENT ON TABLE perusall_assignments IS 'Cached Perusall assignments plus assignment-reading metadata (document_ids + parts).';
 COMMENT ON TABLE user_perusall_credentials IS 'Stores per-user Perusall API credentials for integration';
+COMMENT ON TABLE perusall_course_users IS 'Cached Perusall users for a course';
+COMMENT ON TABLE perusall_annotation_posts IS 'Idempotency and status records for Perusall annotation uploads';

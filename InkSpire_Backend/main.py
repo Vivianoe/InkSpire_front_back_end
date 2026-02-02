@@ -1738,20 +1738,58 @@ def generate_scaffolds_with_session(
             status_code=404,
             detail=f"No chunks found for reading {reading_uuid}. Please upload and process the reading first.",
         )
+    chunks = sorted(
+        chunks,
+        key=lambda c: (c.chunk_index if isinstance(getattr(c, "chunk_index", None), int) else 10**12),
+    )
     
-    # Convert to workflow format: {"chunks": [...]}
-    reading_chunks_data = {
-        "chunks": [
+    # Convert to workflow format with computed start/end offsets and page numbers.
+    current_offset = 0
+    chunk_items = []
+    for chunk in chunks:
+        content = chunk.content or ""
+        meta = chunk.chunk_metadata or {}
+
+        def _coerce_int(v):
+            try:
+                if v is None:
+                    return None
+                return int(v)
+            except Exception:
+                return None
+
+        start_offset = _coerce_int(meta.get("start_offset"))
+        end_offset = _coerce_int(meta.get("end_offset"))
+        if start_offset is None:
+            if end_offset is not None:
+                start_offset = max(0, end_offset - len(content))
+            else:
+                start_offset = current_offset
+        if end_offset is None:
+            end_offset = start_offset + len(content)
+
+        current_offset = end_offset + 1
+
+        page_number = _coerce_int(meta.get("page_number"))
+        if page_number is None:
+            page_number = _coerce_int(meta.get("page"))
+        if page_number is None and meta.get("page_index") is not None:
+            page_index = _coerce_int(meta.get("page_index"))
+            page_number = (page_index + 1) if page_index is not None else None
+
+        chunk_items.append(
             {
-                "document_id": chunk.chunk_metadata.get("document_id") if chunk.chunk_metadata else None,
+                "document_id": meta.get("document_id") if isinstance(meta, dict) else None,
                 "chunk_index": chunk.chunk_index,
-                "text": chunk.content,  # Use "text" field for workflow compatibility
-                "content": chunk.content,  # Also include "content" for compatibility
-                "token_count": chunk.chunk_metadata.get("token_count") if chunk.chunk_metadata else None,
+                "text": content,  # Use "text" field for workflow compatibility
+                "content": content,  # Also include "content" for compatibility
+                "token_count": meta.get("token_count") if isinstance(meta, dict) else None,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "page_number": page_number,
             }
-            for chunk in chunks
-        ]
-    }
+        )
+    reading_chunks_data = {"chunks": chunk_items}
     
     # Build reading_info from reading and session_item
     reading_info = {
