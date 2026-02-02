@@ -188,12 +188,12 @@
 
 .readingCard:hover {
   background: #FAFAFA;
-  border-color: #2196F3;
+  border-color: #e5e7eb;
 }
 
 .readingCardSelected {
-  border: 2px solid #2196F3;
-  background-color: #F3F8FF;
+  border: 2px solid #d1d5db;
+  background-color: #f9fafb;
 }
 
 .readingMeta {
@@ -285,4 +285,3 @@
   color: #6b7280;
   font-size: 0.875rem;
 }
-

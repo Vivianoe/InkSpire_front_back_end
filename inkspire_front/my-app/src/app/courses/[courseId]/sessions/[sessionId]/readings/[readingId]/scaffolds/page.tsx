@@ -1153,7 +1153,7 @@ ${scaffold.text || 'No scaffold text available'}
             >
               ←
             </button>
-            <h2 className={styles.leftPanelTitle}>Reading Scaffolds</h2>
+            {/*<h2 className={styles.leftPanelTitle}>Reading Scaffolds</h2>*/}
           </div>
           <div className={styles.formCard}>
             {/* <div className={styles.formHeader}>
@@ -1350,7 +1350,7 @@ ${scaffold.text || 'No scaffold text available'}
           <div className={styles.container}>
             <div className={styles.scaffoldsContainer}>
               <div className={styles.scaffoldsHeader}>
-                <h3>Scaffolds Progress</h3>
+                <h3>Review Progress</h3>
                 <div className={styles.progressBadge}>
                   {reviewedCount}/{processedScaffolds.length} reviewed
                 </div>
@@ -1612,6 +1612,12 @@ ${scaffold.text || 'No scaffold text available'}
 
       <div className={styles.bottomActionBar}>
         <div className={styles.bottomActionGroup}>
+          <button
+            onClick={handleBackToSession}
+            className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+          >
+            ← Back to Session
+          </button>
           {enableNavigation && navigationData ? (
             <>
               <button

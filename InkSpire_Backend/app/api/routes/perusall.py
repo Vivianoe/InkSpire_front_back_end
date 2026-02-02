@@ -19,6 +19,7 @@ from app.models.models import (
     ScaffoldAnnotationVersion,
     PerusallMapping,
     PerusallCourseUser,
+    PerusallAssignment,
     PerusallAnnotationPost,
     Reading,
     User,
@@ -64,6 +65,8 @@ from app.api.models import (
     PerusallAssignmentItem,
     AssignmentReadingsResponse,
     AssignmentReadingStatus,
+    PerusallSessionUpdateRequest,
+    PerusallSessionUpdateResponse,
     PerusallUsersResponse,
     PerusallUserItem,
 )
@@ -1837,11 +1840,11 @@ def get_perusall_course_library(
 # Perusall Assignments Integration Endpoints
 # ======================================================
 
-@router.get("/courses/{course_id}/perusall/assignments", response_model=PerusallAssignmentsResponse)
-def get_perusall_course_assignments(
+def _get_perusall_course_assignments_impl(
     course_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    sync: bool = False,
 ):
     """
     Get Perusall course assignments for a course.
@@ -1875,7 +1878,61 @@ def get_perusall_course_assignments(
         
         perusall_course_id = course.perusall_course_id
 
-        # Resolve Perusall credentials
+        # Query assignments that are linked to sessions for this course
+        assignments_with_sessions = set()
+        cache_available = True
+        try:
+            assignments_with_sessions_query = db.query(PerusallAssignment.id).join(
+                Session, Session.perusall_assignment_id == PerusallAssignment.id
+            ).filter(
+                PerusallAssignment.perusall_course_id == perusall_course_id,
+                Session.course_id == course_uuid
+            ).all()
+            for (assignment_id,) in assignments_with_sessions_query:
+                assignments_with_sessions.add(assignment_id)
+        except ProgrammingError as e:
+            if "perusall_assignments" in str(e) or "perusall_assignment_id" in str(e):
+                cache_available = False
+                db.rollback()
+            else:
+                raise
+
+        # Fast path: read cached assignments from DB unless caller explicitly requests sync.
+        if not sync and cache_available:
+            cached_assignments = get_perusall_assignments_by_course(db, perusall_course_id)
+            if cached_assignments:
+                cached_items: List[PerusallAssignmentItem] = []
+                for cached in cached_assignments:
+                    cached_doc_ids = [str(d) for d in (cached.document_ids or []) if d is not None]
+                    cached_parts = cached.parts if isinstance(cached.parts, list) else []
+                    response_parts = [
+                        {
+                            "documentId": part.get("documentId") or "",
+                            "startPage": part.get("startPage"),
+                            "endPage": part.get("endPage"),
+                        }
+                        for part in cached_parts
+                        if isinstance(part, dict)
+                    ]
+                    cached_items.append(
+                        PerusallAssignmentItem(
+                            id=str(cached.perusall_assignment_id),
+                            name=cached.name or "Untitled",
+                            documentIds=cached_doc_ids or None,
+                            parts=response_parts or None,
+                            deadline=None,
+                            assignTo=None,
+                            documents=None,
+                            has_session=cached.id in assignments_with_sessions,
+                        )
+                    )
+                return PerusallAssignmentsResponse(
+                    success=True,
+                    perusall_course_id=perusall_course_id,
+                    assignments=cached_items,
+                )
+
+        # Resolve Perusall credentials only when syncing from external API.
         env_institution = os.getenv("PERUSALL_INSTITUTION")
         env_api_token = os.getenv("PERUSALL_API_TOKEN")
 
@@ -1898,11 +1955,8 @@ def get_perusall_course_assignments(
                 )
             institution_id = credentials.institution_id
             api_token = credentials.api_token
-        
-        # Check for mock mode
+
         mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
-        
-        # Fetch assignments from Perusall API
         if mock_mode:
             from app.mocks.perusall_mock_data import get_mock_assignments_for_course
             perusall_assignments = get_mock_assignments_for_course(perusall_course_id)
@@ -1914,7 +1968,7 @@ def get_perusall_course_assignments(
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
-            
+
             assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
             try:
                 assignments_response.raise_for_status()
@@ -1949,7 +2003,7 @@ def get_perusall_course_assignments(
                         f"Response: {response_text}"
                     ),
                 )
-            
+
             try:
                 perusall_assignments = assignments_response.json()
             except ValueError:
@@ -1958,36 +2012,45 @@ def get_perusall_course_assignments(
                     status_code=500,
                     detail=f"Perusall assignments API returned invalid JSON. Status: {assignments_response.status_code}. Response: {response_text}"
                 )
-            
+
             if not isinstance(perusall_assignments, list):
                 raise HTTPException(
                     status_code=500,
                     detail=f"Unexpected response format from Perusall assignments API: {type(perusall_assignments)}. Expected list, got {type(perusall_assignments)}"
                 )
-        
-        # Upsert assignments to database and get which ones have sessions
-        # Query sessions that are linked to assignments for this course
-        # Use outerjoin to get all assignments and check which have sessions
-        from app.models.models import PerusallAssignment
-        assignments_with_sessions = set()
-        
-        # Get all assignments for this course that have sessions
-        assignments_with_sessions_query = db.query(PerusallAssignment.id).join(
-            Session, Session.perusall_assignment_id == PerusallAssignment.id
-        ).filter(
-            PerusallAssignment.perusall_course_id == perusall_course_id,
-            Session.course_id == course_uuid
-        ).all()
-        
-        for (assignment_id,) in assignments_with_sessions_query:
-            assignments_with_sessions.add(assignment_id)
-        
-        # Convert to response format and upsert each assignment
-        assignment_items = []
+
+        # Refresh assignment->reading cache together by also loading library names once.
+        document_name_by_id: Dict[str, str] = {}
+        if mock_mode:
+            from app.mocks.perusall_mock_data import get_mock_library_for_course
+            library_readings = get_mock_library_for_course(perusall_course_id)
+        else:
+            library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
+            headers = {
+                "X-Institution": institution_id,
+                "X-API-Token": api_token,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+            library_response = requests.get(library_url, headers=headers, timeout=30)
+            library_response.raise_for_status()
+            library_readings = library_response.json()
+            if not isinstance(library_readings, list):
+                library_readings = []
+
+        for reading in library_readings:
+            if not isinstance(reading, dict):
+                continue
+            doc_id = reading.get("_id") or reading.get("id")
+            doc_name = reading.get("name") or reading.get("title")
+            if doc_id and doc_name:
+                document_name_by_id[str(doc_id)] = str(doc_name)
+
+        assignment_items: List[PerusallAssignmentItem] = []
         for assignment in perusall_assignments:
             if not isinstance(assignment, dict):
                 continue
-            
+
             assignment_id = assignment.get("_id") or assignment.get("id")
             assignment_name = assignment.get("name") or assignment.get("title") or "Untitled"
             documents = assignment.get("documents") or []
@@ -1995,11 +2058,10 @@ def get_perusall_course_assignments(
             parts = assignment.get("parts") or []
             deadline = assignment.get("deadline")
             assign_to = assignment.get("assignTo")
-            
+
             if not assignment_id:
                 continue
-            
-            # Extract document_ids from parts if not in documentIds
+
             if not document_ids and parts:
                 doc_ids_from_parts = []
                 for part in parts:
@@ -2009,31 +2071,45 @@ def get_perusall_course_assignments(
                             doc_ids_from_parts.append(str(doc_id))
                 if doc_ids_from_parts:
                     document_ids = doc_ids_from_parts
-            
-            # Convert parts to format for storage
+
             parts_list = []
             for part in parts:
                 if isinstance(part, dict):
+                    part_doc_id = str(part.get("documentId") or "")
                     parts_list.append({
-                        "documentId": part.get("documentId") or "",
+                        "documentId": part_doc_id,
                         "startPage": part.get("startPage"),
                         "endPage": part.get("endPage"),
+                        "documentName": document_name_by_id.get(part_doc_id),
                     })
-            
-            # Upsert assignment to database
-            db_assignment = upsert_perusall_assignment(
-                db=db,
-                perusall_course_id=perusall_course_id,
-                perusall_assignment_id=str(assignment_id),
-                name=assignment_name,
-                document_ids=[str(d) for d in document_ids] if document_ids else None,
-                parts=parts_list if parts_list else None,
-            )
-            
-            # Check if this assignment has a session
-            has_session = db_assignment.id in assignments_with_sessions
-            
-            # Convert parts to PerusallAssignmentPart format for response
+            if not parts_list and document_ids:
+                for doc_id in [str(d) for d in document_ids if d is not None]:
+                    parts_list.append({
+                        "documentId": doc_id,
+                        "startPage": None,
+                        "endPage": None,
+                        "documentName": document_name_by_id.get(doc_id),
+                    })
+
+            db_assignment = None
+            if cache_available:
+                try:
+                    db_assignment = upsert_perusall_assignment(
+                        db=db,
+                        perusall_course_id=perusall_course_id,
+                        perusall_assignment_id=str(assignment_id),
+                        name=assignment_name,
+                        document_ids=[str(d) for d in document_ids] if document_ids else None,
+                        parts=parts_list if parts_list else None,
+                    )
+                except ProgrammingError as e:
+                    if "perusall_assignments" in str(e):
+                        cache_available = False
+                        db.rollback()
+                    else:
+                        raise
+
+            has_session = bool(db_assignment and db_assignment.id in assignments_with_sessions)
             response_parts = []
             for part in parts_list:
                 response_parts.append({
@@ -2041,7 +2117,7 @@ def get_perusall_course_assignments(
                     "startPage": part.get("startPage"),
                     "endPage": part.get("endPage"),
                 })
-            
+
             assignment_items.append(PerusallAssignmentItem(
                 id=str(assignment_id),
                 name=assignment_name,
@@ -2049,7 +2125,7 @@ def get_perusall_course_assignments(
                 parts=response_parts if response_parts else None,
                 deadline=deadline,
                 assignTo=assign_to,
-                documents=documents,  # Legacy field for backward compatibility
+                documents=documents,
                 has_session=has_session,
             ))
         
@@ -2071,18 +2147,31 @@ def get_perusall_course_assignments(
         )
 
 
-@router.get("/courses/{course_id}/perusall/assignments/{assignment_id}/readings", response_model=AssignmentReadingsResponse)
-def get_assignment_readings_status(
+@router.get("/courses/{course_id}/perusall/assignments", response_model=PerusallAssignmentsResponse)
+def get_perusall_course_assignments(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _get_perusall_course_assignments_impl(
+        course_id=course_id,
+        current_user=current_user,
+        db=db,
+        sync=False,
+    )
+
+
+def _get_assignment_readings_status_impl(
     course_id: str,
     assignment_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    sync: bool = False,
 ):
     """
     Get readings status for a specific Perusall assignment.
     Fetches assignment details from Perusall API, extracts documentIds from parts,
     and checks upload status for each reading.
-    TODO: can be updated; same as the reading upload page?
     """
     try:
         # Validate course_id
@@ -2111,123 +2200,181 @@ def get_assignment_readings_status(
         
         perusall_course_id = course.perusall_course_id
 
-        # Resolve Perusall credentials
-        env_institution = os.getenv("PERUSALL_INSTITUTION")
-        env_api_token = os.getenv("PERUSALL_API_TOKEN")
+        cache_available = True
+        try:
+            cached_assignment = (
+                db.query(PerusallAssignment)
+                .filter(
+                    PerusallAssignment.perusall_course_id == perusall_course_id,
+                    PerusallAssignment.perusall_assignment_id == str(assignment_id),
+                )
+                .first()
+            )
+        except ProgrammingError as e:
+            if "perusall_assignments" in str(e):
+                cache_available = False
+                cached_assignment = None
+                db.rollback()
+            else:
+                raise
 
-        institution_id = None
-        api_token = None
+        assignment_name = cached_assignment.name if cached_assignment and cached_assignment.name else "Untitled"
+        document_ids: List[str] = []
+        document_pages: Dict[str, Dict[str, Any]] = {}
+        document_names: Dict[str, str] = {}
 
-        if env_institution and env_api_token:
-            institution_id = env_institution
-            api_token = env_api_token
-        else:
-            credentials = get_user_perusall_credentials(db, current_user.id)
-            if not credentials or not credentials.is_validated:
-                raise HTTPException(
-                    status_code=401,
-                    detail=(
-                        "Perusall credentials not found or not validated. "
-                        "Please authenticate first at /api/perusall/authenticate, "
-                        "or set PERUSALL_INSTITUTION and PERUSALL_API_TOKEN in environment variables."
-                    )
-                )
-            institution_id = credentials.institution_id
-            api_token = credentials.api_token
-        
-        # Check for mock mode
-        mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
-        
-        # Fetch assignment details from Perusall API
-        if mock_mode:
-            from app.mocks.perusall_mock_data import get_mock_assignments_for_course
-            all_assignments = get_mock_assignments_for_course(perusall_course_id)
-            assignment_data = next((a for a in all_assignments if (a.get("_id") or a.get("id")) == assignment_id), None)
-            if not assignment_data:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Assignment {assignment_id} not found in Perusall"
-                )
-        else:
-            assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
-            headers = {
-                "X-Institution": institution_id,
-                "X-API-Token": api_token,
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            }
-            
-            assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
-            try:
-                assignments_response.raise_for_status()
-            except requests.exceptions.HTTPError:
-                status_code = assignments_response.status_code
-                response_text = (assignments_response.text or "")[:500]
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=f"Perusall assignments API request failed. Status: {status_code}. Response: {response_text}"
-                )
-            
-            all_assignments = assignments_response.json()
-            if not isinstance(all_assignments, list):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Unexpected response format from Perusall assignments API"
-                )
-            
-            assignment_data = next((a for a in all_assignments if (a.get("_id") or a.get("id")) == assignment_id), None)
-            if not assignment_data:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Assignment {assignment_id} not found in Perusall"
-                )
-        
-        assignment_name = assignment_data.get("name") or assignment_data.get("title") or "Untitled"
-        parts = assignment_data.get("parts") or []
-        
-        # Extract unique documentIds from parts
-        document_ids = []
-        document_pages = {}  # Map documentId to (startPage, endPage)
-        for part in parts:
-            if isinstance(part, dict):
+        # Fast path from DB cache
+        if cached_assignment and not sync:
+            cached_parts = cached_assignment.parts if isinstance(cached_assignment.parts, list) else []
+            for part in cached_parts:
+                if not isinstance(part, dict):
+                    continue
                 doc_id = part.get("documentId")
                 if doc_id and doc_id not in document_ids:
-                    document_ids.append(doc_id)
-                    document_pages[doc_id] = {
+                    doc_id_str = str(doc_id)
+                    document_ids.append(doc_id_str)
+                    document_pages[doc_id_str] = {
                         "startPage": part.get("startPage"),
                         "endPage": part.get("endPage"),
                     }
-        
-        # If no parts, try documentIds field
-        if not document_ids:
-            document_ids = assignment_data.get("documentIds") or []
-        
-        # Fetch library to get document names
-        if mock_mode:
-            from app.mocks.perusall_mock_data import get_mock_library_for_course
-            library_readings = get_mock_library_for_course(perusall_course_id)
+                    doc_name = part.get("documentName") or part.get("name") or part.get("title")
+                    if doc_name:
+                        document_names[doc_id_str] = str(doc_name)
+            if not document_ids:
+                document_ids = [str(d) for d in (cached_assignment.document_ids or []) if d is not None]
         else:
-            library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
-            headers = {
-                "X-Institution": institution_id,
-                "X-API-Token": api_token,
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            }
-            library_response = requests.get(library_url, headers=headers, timeout=30)
-            library_response.raise_for_status()
-            library_readings = library_response.json()
-            if not isinstance(library_readings, list):
-                library_readings = []
-        
-        # Create a map of document_id to document name
-        document_names = {}
-        for reading in library_readings:
-            if isinstance(reading, dict):
-                doc_id = reading.get("_id") or reading.get("id")
-                doc_name = reading.get("name") or reading.get("title")
-                if doc_id:
-                    document_names[doc_id] = doc_name
+            # Resolve Perusall credentials only when we need to sync from API.
+            env_institution = os.getenv("PERUSALL_INSTITUTION")
+            env_api_token = os.getenv("PERUSALL_API_TOKEN")
+
+            institution_id = None
+            api_token = None
+            if env_institution and env_api_token:
+                institution_id = env_institution
+                api_token = env_api_token
+            else:
+                credentials = get_user_perusall_credentials(db, current_user.id)
+                if not credentials or not credentials.is_validated:
+                    raise HTTPException(
+                        status_code=401,
+                        detail=(
+                            "Perusall credentials not found or not validated. "
+                            "Please authenticate first at /api/perusall/authenticate, "
+                            "or set PERUSALL_INSTITUTION and PERUSALL_API_TOKEN in environment variables."
+                        )
+                    )
+                institution_id = credentials.institution_id
+                api_token = credentials.api_token
+
+            mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+            if mock_mode:
+                from app.mocks.perusall_mock_data import get_mock_assignments_for_course
+                all_assignments = get_mock_assignments_for_course(perusall_course_id)
+                assignment_data = next((a for a in all_assignments if (a.get("_id") or a.get("id")) == assignment_id), None)
+                if not assignment_data:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Assignment {assignment_id} not found in Perusall"
+                    )
+            else:
+                assignments_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/assignments"
+                headers = {
+                    "X-Institution": institution_id,
+                    "X-API-Token": api_token,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                }
+                assignments_response = requests.get(assignments_url, headers=headers, timeout=30)
+                try:
+                    assignments_response.raise_for_status()
+                except requests.exceptions.HTTPError:
+                    status_code = assignments_response.status_code
+                    response_text = (assignments_response.text or "")[:500]
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail=f"Perusall assignments API request failed. Status: {status_code}. Response: {response_text}"
+                    )
+
+                all_assignments = assignments_response.json()
+                if not isinstance(all_assignments, list):
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Unexpected response format from Perusall assignments API"
+                    )
+
+                assignment_data = next((a for a in all_assignments if (a.get("_id") or a.get("id")) == assignment_id), None)
+                if not assignment_data:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Assignment {assignment_id} not found in Perusall"
+                    )
+
+            assignment_name = assignment_data.get("name") or assignment_data.get("title") or "Untitled"
+            parts = assignment_data.get("parts") or []
+            for part in parts:
+                if isinstance(part, dict):
+                    doc_id = part.get("documentId")
+                    if doc_id and doc_id not in document_ids:
+                        doc_id_str = str(doc_id)
+                        document_ids.append(doc_id_str)
+                        document_pages[doc_id_str] = {
+                            "startPage": part.get("startPage"),
+                            "endPage": part.get("endPage"),
+                        }
+
+            if not document_ids:
+                document_ids = [str(d) for d in (assignment_data.get("documentIds") or []) if d is not None]
+
+            # Persist/update assignment cache
+            normalized_parts = []
+            for part in parts:
+                if isinstance(part, dict):
+                    normalized_parts.append({
+                        "documentId": part.get("documentId") or "",
+                        "startPage": part.get("startPage"),
+                        "endPage": part.get("endPage"),
+                    })
+            if cache_available:
+                try:
+                    upsert_perusall_assignment(
+                        db=db,
+                        perusall_course_id=perusall_course_id,
+                        perusall_assignment_id=str(assignment_id),
+                        name=assignment_name,
+                        document_ids=document_ids if document_ids else None,
+                        parts=normalized_parts if normalized_parts else None,
+                    )
+                except ProgrammingError as e:
+                    if "perusall_assignments" in str(e):
+                        cache_available = False
+                        db.rollback()
+                    else:
+                        raise
+
+            # On sync/no-cache path, fetch library once to enrich names.
+            if mock_mode:
+                from app.mocks.perusall_mock_data import get_mock_library_for_course
+                library_readings = get_mock_library_for_course(perusall_course_id)
+            else:
+                library_url = f"{PERUSALL_BASE_URL}/courses/{perusall_course_id}/library"
+                headers = {
+                    "X-Institution": institution_id,
+                    "X-API-Token": api_token,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                }
+                library_response = requests.get(library_url, headers=headers, timeout=30)
+                library_response.raise_for_status()
+                library_readings = library_response.json()
+                if not isinstance(library_readings, list):
+                    library_readings = []
+
+            for reading in library_readings:
+                if isinstance(reading, dict):
+                    doc_id = reading.get("_id") or reading.get("id")
+                    doc_name = reading.get("name") or reading.get("title")
+                    if doc_id and doc_name:
+                        document_names[str(doc_id)] = doc_name
         
         # Determine upload status.
         # Prefer the canonical field persisted during PDF upload: readings.perusall_reading_id == Perusall documentId.
@@ -2249,6 +2396,12 @@ def get_assignment_readings_status(
         local_reading_by_doc_id = {
             (r.perusall_reading_id or ""): r for r in local_readings if r.perusall_reading_id
         }
+
+        # If no cached Perusall library names are available, use local reading titles as fallback.
+        if not document_names:
+            for doc_id, local_reading in local_reading_by_doc_id.items():
+                if doc_id and local_reading and local_reading.title:
+                    document_names[str(doc_id)] = local_reading.title
 
         # Fallback (legacy): some older flows may have stored only PerusallMapping without setting perusall_reading_id.
         perusall_mappings = db.query(PerusallMapping).filter(
@@ -2300,3 +2453,72 @@ def get_assignment_readings_status(
             status_code=500,
             detail=f"Failed to fetch assignment readings status: {str(e)}"
         )
+
+
+@router.get("/courses/{course_id}/perusall/assignments/{assignment_id}/readings", response_model=AssignmentReadingsResponse)
+def get_assignment_readings_status(
+    course_id: str,
+    assignment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _get_assignment_readings_status_impl(
+        course_id=course_id,
+        assignment_id=assignment_id,
+        current_user=current_user,
+        db=db,
+        sync=False,
+    )
+
+
+@router.post("/courses/{course_id}/perusall/session-update", response_model=PerusallSessionUpdateResponse)
+def refresh_session_selection_payload(
+    course_id: str,
+    req: PerusallSessionUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Force-refresh assignment/readings metadata for Session Selection page and return
+    the refreshed payload in one response so frontend can update from backend result directly.
+    """
+    assignments_resp = _get_perusall_course_assignments_impl(
+        course_id=course_id,
+        current_user=current_user,
+        db=db,
+        sync=True,
+    )
+
+    selected_assignment_id = req.assignment_id
+    assignment_name: Optional[str] = None
+    readings: Optional[List[AssignmentReadingStatus]] = None
+    message: Optional[str] = None
+
+    if selected_assignment_id:
+        try:
+            readings_resp = _get_assignment_readings_status_impl(
+                course_id=course_id,
+                assignment_id=selected_assignment_id,
+                current_user=current_user,
+                db=db,
+                sync=False,
+            )
+            assignment_name = readings_resp.assignment_name
+            readings = readings_resp.readings
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                selected_assignment_id = None
+                readings = []
+                message = "Selected assignment no longer exists in Perusall."
+            else:
+                raise
+
+    return PerusallSessionUpdateResponse(
+        success=True,
+        perusall_course_id=assignments_resp.perusall_course_id,
+        assignments=assignments_resp.assignments,
+        assignment_id=selected_assignment_id,
+        assignment_name=assignment_name,
+        readings=readings,
+        message=message,
+    )

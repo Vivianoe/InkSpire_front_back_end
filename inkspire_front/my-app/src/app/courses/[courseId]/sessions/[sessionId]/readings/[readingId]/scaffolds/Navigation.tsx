@@ -8,7 +8,6 @@ import styles from './Navigation.module.css';
 
 const NAVIGATION_LINKS = [
   { name: 'Dashboard', href: '/' },
-  { name: 'History', href: '/history' },
 ];
 
 export default function Navigation() {

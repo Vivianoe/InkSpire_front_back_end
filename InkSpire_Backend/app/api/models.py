@@ -536,3 +536,17 @@ class AssignmentReadingsResponse(BaseModel):
     assignment_name: str
     readings: List[AssignmentReadingStatus]
     message: Optional[str] = None
+
+
+class PerusallSessionUpdateRequest(BaseModel):
+    assignment_id: Optional[str] = None
+
+
+class PerusallSessionUpdateResponse(BaseModel):
+    success: bool
+    perusall_course_id: str
+    assignments: List[PerusallAssignmentItem]
+    assignment_id: Optional[str] = None
+    assignment_name: Optional[str] = None
+    readings: Optional[List[AssignmentReadingStatus]] = None
+    message: Optional[str] = None
