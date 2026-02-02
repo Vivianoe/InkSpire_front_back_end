@@ -24,10 +24,17 @@
   gap: 1.5rem;
 }
 
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
 .title {
-  margin: 0;
-  font-size: 1.75rem;
+  font-size: 2rem;
+  font-weight: 700;
   color: var(--gray-900);
+  margin: 0 0 0.25rem 0;
 }
 
 .subtitle {
@@ -40,6 +47,31 @@
   gap: 0.75rem;
 }
 
+.backIconButton {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 9999px;
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  color: var(--gray-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.backIconButton:hover {
+  background-color: var(--gray-50);
+  border-color: var(--gray-300);
+  transform: translateY(-1px);
+}
+
+.backIconButton:active {
+  transform: translateY(0);
+}
+
 .content {
   max-width: 1200px;
   margin: 0 auto;
@@ -50,9 +82,9 @@
   padding: 1rem;
   margin-bottom: 1.5rem;
   border-radius: 0.75rem;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  background: #FFEBEE;
+  border-left: 4px solid #EF5350;
+  color: #E53935;
 }
 
 .uploadSection {
@@ -97,6 +129,15 @@
   gap: 1rem;
 }
 
+.listSectionTitle {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .emptyState {
   padding: 2rem;
   border: 1px dashed var(--gray-200);
@@ -118,9 +159,15 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.readingCard:hover {
+  background: #FAFAFA;
+  border-color: #E5DEFF;
+}
+
 .readingCardSelected {
-  border-color: var(--indigo-200);
-  box-shadow: 0 0 0 3px rgba(99, 189, 241, 0.15);
+  border: 2px solid #7C6FDC;
+  background: #F8F7FF;
+  box-shadow: none;
 }
 
 .readingMeta {
@@ -177,17 +224,35 @@
   padding: 0.35rem 0.75rem;
   border-radius: 0.5rem;
   border: none;
-  background: #fcebe2;
-  border: 1px solid #df8a6d;
-  color: #ae5612;
+  background: #F5F5F5;
+  border: 1px solid #BDBDBD;
+  color: #757575;
   cursor: pointer;
   font-weight: 500;
+}
+
+.compactActionButton {
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  min-height: 0;
+}
+
+.removeButton:hover:not(:disabled) {
+  background: #FAFAFA;
+  border-color: #9E9E9E;
 }
 
 @media (max-width: 768px) {
   .header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .headerLeft {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
   }
 
   .headerActions {

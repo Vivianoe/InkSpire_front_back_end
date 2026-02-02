@@ -161,8 +161,7 @@
   width: 100%;
 }
 
-.contextCard,
-.designCard {
+.contextCard {
   width: 100%;
   box-sizing: border-box;
 }
@@ -182,11 +181,17 @@
   overflow: visible;
 }
 
+.designRationaleCard {
+  background: #FDEDDD;
+  padding-top: 0.6rem;
+  margin-top: 1rem;
+}
+
 .sectionHeader {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
 }
 
@@ -466,6 +471,7 @@
 .cardTitle {
   margin: 0.25rem 0 0;
   font-size: 1.65rem;
+  font-weight: 600;
   color: var(--gray-900);
 }
 
@@ -593,8 +599,9 @@
   border-radius: 1.25rem;
   background: #DAF4FE;
   border: 1px solid #dfe9ff;
-  padding: 1.75rem;
+  padding: 0.6rem 1.75rem 1.75rem;
   max-height: none;
+  margin-top: 1rem;
 }
 
 .profileCardHeader {
@@ -642,7 +649,7 @@
   flex-wrap: wrap;
   gap: 1rem;
   min-width: 12rem;
-  align-items: flex-end;
+  align-items: center;
 }
 
 .levelTabActions {
@@ -650,6 +657,7 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: flex-end;
+  align-items: center;
 }
 
 .levelTabActions button {
@@ -660,23 +668,46 @@
   border: none;
   border-radius: 0;
   background: transparent;
-  padding: 0.35rem 0.85rem 0.4rem 0;
+  padding: 0.35rem 0.85rem 0.6rem;
   font-size: 0.9rem;
   color: var(--gray-600);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.2s ease, border-color 0.2s ease;
+  position: relative;
+  transition: color 0.25s ease;
+}
+
+.levelTab::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0.15rem;
+  width: 60%;
+  height: 2px;
+  background: var(--gray-400);
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.6);
+  transition: opacity 0.25s ease, transform 0.25s ease, background-color 0.25s ease;
 }
 
 .levelTab:not(:disabled):hover {
   color: var(--gray-900);
-  border-bottom-color: var(--gray-400);
+}
+
+.levelTab:not(:disabled):hover::after {
+  opacity: 1;
+  transform: translateX(-50%) scaleX(1);
 }
 
 .levelTabActive {
   color: var(--gray-900);
   font-weight: 600;
-  border-bottom-color: var(--indigo-500);
+}
+
+.levelTabActive::after {
+  opacity: 1 !important;
+  transform: translateX(-50%) scaleX(1) !important;
+  background: #111827;
 }
 
 .levelTab:disabled {
@@ -761,8 +792,8 @@
 .profileTextareaEditable,
 .designTextarea {
   width: 100%;
-  border: 1px solid var(--indigo-200);
-  border-radius: 0.85rem;
+  border: 1.6px solid transparent;
+  border-radius: 1rem;
   padding: 1rem;
   font-family: inherit;
   font-size: 0.95rem;
@@ -770,13 +801,16 @@
   min-height: 16rem;
   resize: vertical;
   background: var(--white);
+  box-sizing: border-box;
+  display: block;
+  transition: border-color 0.2s ease;
+
 }
 
 .profileTextareaEditable:focus,
 .designTextarea:focus {
   outline: none;
-  border-color: var(--indigo-500);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
+  border-color: #fcd8b4;
 }
 
 .profileEmptyState {
@@ -786,34 +820,10 @@
   font-size: 0.95rem;
 }
 
-.designCard {
-  border-radius: 1.25rem;
-  background: #FDEDDD;
-  padding: 1.1rem 1.3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  height: auto;
-  align-self: flex-start;
-}
-
-.designHeader {
-  display: flex;
-  justify-content: space-between;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-}
-
-.designHelper {
-  margin: 0.35rem 0 0;
-  font-size: 0.9rem;
-  color: #b25911;
-}
-
 .designBody {
   background: #ffffff;
   border-radius: 1rem;
-  padding: 0.95rem;
+  padding: 0;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -875,8 +885,7 @@
     min-height: 14rem;
   }
 
-  .profileCard,
-  .designCard {
+  .profileCard {
     padding: 1.25rem;
   }
 

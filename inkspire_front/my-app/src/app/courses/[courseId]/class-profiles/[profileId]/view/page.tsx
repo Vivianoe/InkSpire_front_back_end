@@ -1526,10 +1526,10 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         )}
         <div className={styles.layoutGrid}>
           <div className={styles.leftColumn}>
-            <section className={styles.contextCard}>
+            <section className={`${styles.contextCard} ${styles.designRationaleCard}`}>
               <div className={styles.sectionHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>LLM Design Rationale</h3>
+                  <h2 className={styles.cardTitle}>LLM Design Rationale</h2>
                 </div>
                 <div className={styles.cardActions}>
                   {editingDesign ? (

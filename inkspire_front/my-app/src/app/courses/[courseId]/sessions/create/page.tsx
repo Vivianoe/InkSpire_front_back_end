@@ -962,16 +962,10 @@ export default function SessionCreationPage() {
           <Navigation />
         </div>
         <div className={styles.header}>
-      
-          <div>
-            <h1 className={styles.title}>Session Setup</h1>
-            <p className={styles.subtitle}>
-              Create a new session or continue working on an existing session.
-            </p>
-          </div>
-    
-          <div className={styles.headerActions}>
+          <div className={styles.headerLeft}>
             <button
+              type="button"
+              className={styles.backIconButton}
               onClick={() => {
                 if (resolvedProfileId) {
                   router.push(`/courses/${courseId}/readings?profileId=${resolvedProfileId}`);
@@ -979,11 +973,21 @@ export default function SessionCreationPage() {
                   router.push(`/courses/${courseId}/readings`);
                 }
               }}
-              className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+              aria-label="Back to readings"
+              title="Back to readings"
               disabled={creating}
             >
-              ← Back to Readings
+              ←
             </button>
+            <div>
+              <h1 className={styles.title}>Session Setup</h1>
+              <p className={styles.subtitle}>
+                Create a new session or continue working on an existing session.
+              </p>
+            </div>
+          </div>
+
+          <div className={styles.headerActions}>
             {/*
             <button
               onClick={handleCreateSession}
@@ -1006,10 +1010,11 @@ export default function SessionCreationPage() {
       <div className={styles.content}>
         {error && <div className={styles.errorMessage}>{error}</div>}
         {success && <div style={{ 
-          backgroundColor: '#d1fae5', 
-          color: '#065f46', 
+          backgroundColor: '#E8F5E9',
+          color: '#4CAF50',
           padding: '1rem', 
           borderRadius: '0.5rem', 
+          borderLeft: '4px solid #66BB6A',
           marginBottom: '1.5rem' 
         }}>{success}</div>}
 
@@ -1047,28 +1052,10 @@ export default function SessionCreationPage() {
                     style={{ cursor: 'pointer' }}
                   >
                     <div className={styles.readingMeta}>
-                      <div>
-                        <p className={styles.readingName}>
-                          {assignment.name}
-                          {existingSession && (
-                            <span style={{
-                              marginLeft: '8px',
-                              padding: '2px 8px',
-                              backgroundColor: '#10b981',
-                              color: 'white',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '500'
-                            }}>
-                              ✓ Session Exists
-                            </span>
-                          )}
-                        </p>
-                        <p className={styles.readingDetails}>
-                          {assignment.documents?.length || 0} document{assignment.documents?.length !== 1 ? 's' : ''}
-                          {existingSession && (
-                            <> · {existingSession.readingIds?.length || 0} reading{(existingSession.readingIds?.length || 0) !== 1 ? 's' : ''}</>
-                          )}
+                      <div style={{ flex: 1 }}>
+                        <p className={styles.readingName}>{assignment.name}</p>
+                        <p className={styles.readingSecondaryDetail} style={{ color: '#1976D2', fontSize: '12px' }}>
+                          {existingSession ? 'Session exists' : 'Ready for session'}
                         </p>
                       </div>
                     </div>
@@ -1079,7 +1066,9 @@ export default function SessionCreationPage() {
                           e.stopPropagation();
                           handleSelectAssignment(assignment.id);
                         }}
-                        className={`${styles.selectionButton} ${styles.selectionButtonActive}`}
+                        className={`${uiStyles.btn} ${styles.compactActionButton} ${
+                          existingSession ? uiStyles.btnPrimary : styles.neutralActionButton
+                        }`}
                       >
                         {existingSession ? 'Open Session' : 'Create Session'}
                       </button>
@@ -1112,11 +1101,10 @@ export default function SessionCreationPage() {
                 {urlSessionId && isDraftDirty && (
                   <div style={{ 
                     padding: '0.5rem 1rem', 
-                    backgroundColor: '#fef3c7', 
-                    border: '1px solid #fbbf24',
+                    backgroundColor: '#FFF8E1',
                     borderRadius: '0.375rem',
                     fontSize: '0.875rem',
-                    color: '#92400e'
+                    color: '#F57C00'
                   }}>
                     ⚠️ You have unsaved changes
                   </div>
@@ -1124,11 +1112,10 @@ export default function SessionCreationPage() {
                 {urlSessionId && currentVersion && !isDraftDirty && (
                   <div style={{ 
                     padding: '0.5rem 1rem', 
-                    backgroundColor: '#d1fae5', 
-                    border: '1px solid #10b981',
+                    backgroundColor: '#E3F2FD',
                     borderRadius: '0.375rem',
                     fontSize: '0.875rem',
-                    color: '#065f46'
+                    color: '#1976D2'
                   }}>
                     ✓ Using version {currentVersion}
                   </div>
@@ -1245,7 +1232,7 @@ export default function SessionCreationPage() {
               */}
               <button
                 onClick={handleStartWorkingOnReadings}
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+                className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
                 disabled={
                   creating || 
                   !selectedReadingIds.length
@@ -1278,40 +1265,40 @@ export default function SessionCreationPage() {
                       <div
                         key={ar.perusall_document_id}
                         className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
-                        style={{
-                          borderLeft: ar.is_uploaded ? '4px solid #10b981' : '4px solid #ef4444',
-                        }}
                       >
                         <div className={styles.readingMeta}>
-                          <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        {ar.is_uploaded ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                            <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#E5F3E6" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                            <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                            <path opacity="0.4" d="M12 27C12 23.2288 12 21.3432 13.1716 20.1716C14.3431 19 16.2288 19 20 19H22C25.7712 19 27.6569 19 28.8284 20.1716C30 21.3432 30 23.2288 30 27V31C30 34.7712 30 36.6569 28.8284 37.8284C27.6569 39 25.7712 39 22 39H20C16.2288 39 14.3431 39 13.1716 37.8284C12 36.6569 12 34.7712 12 31V27Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 29C16.25 28.5858 16.5858 28.25 17 28.25H25C25.4142 28.25 25.75 28.5858 25.75 29C25.75 29.4142 25.4142 29.75 25 29.75H17C16.5858 29.75 16.25 29.4142 16.25 29Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 25C16.25 24.5858 16.5858 24.25 17 24.25H25C25.4142 24.25 25.75 24.5858 25.75 25C25.75 25.4142 25.4142 25.75 25 25.75H17C16.5858 25.75 16.25 25.4142 16.25 25Z" fill="#5EB161"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M16.25 33C16.25 32.5858 16.5858 32.25 17 32.25H22C22.4142 32.25 22.75 32.5858 22.75 33C22.75 33.4142 22.4142 33.75 22 33.75H17C16.5858 33.75 16.25 33.75 16.25 33Z" fill="#5EB161"/>
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                            <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#FDF2DD" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                            <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#F38623" strokeWidth="2" strokeLinecap="round"/>
+                            <path opacity="0.5" d="M32.1689 32.3494V31.241C32.1689 28.1059 32.1687 26.5388 31.1947 25.5648C30.2207 24.5908 28.6531 24.5908 25.518 24.5908H16.6504C13.5153 24.5908 11.9477 24.5908 10.9737 25.5648C10 26.5385 10 28.105 10 31.2386V31.241V32.3494C10 35.4846 10 37.0521 10.974 38.0261C11.9479 39.0001 13.5155 39.0001 16.6507 39.0001H25.5182C28.6533 39.0001 30.2209 39.0001 31.1949 38.0261C32.1689 37.0521 32.1689 35.4846 32.1689 32.3494Z" fill="#F38623"/>
+                            <path fillRule="evenodd" clipRule="evenodd" d="M21.0844 32.0724C21.5435 32.0724 21.9157 31.7002 21.9157 31.2411V19.0786L23.7786 21.2519C24.0773 21.6005 24.6022 21.6409 24.9508 21.3421C25.2994 21.0433 25.3397 20.5185 25.041 20.1699L21.7157 16.2903C21.5577 16.106 21.3271 16 21.0844 16C20.8418 16 20.6112 16.106 20.4533 16.2903L17.1279 20.1699C16.8291 20.5185 16.8695 21.0433 17.2181 21.3421C17.5667 21.6409 18.0915 21.6005 18.3903 21.2519L20.2531 19.0786V31.2411C20.2531 31.7002 20.6253 32.0724 21.0844 32.0724Z" fill="#F38623"/>
+                          </svg>
+                        )}
+                        <div style={{ flex: 1 }}>
                             <p className={styles.readingName}>
                               {ar.perusall_document_name || `Document ${ar.perusall_document_id}`}
                             </p>
-                            <p className={styles.readingDetails}>
-                              <span style={{
-                                padding: '2px 6px',
-                                backgroundColor: ar.is_uploaded ? '#10b981' : '#ef4444',
-                                color: 'white',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                fontWeight: '500',
-                                marginRight: '8px'
-                              }}>
-                                {ar.is_uploaded ? '✓ Uploaded' : '✗ Missing PDF'}
-                              </span>
-                              {ar.start_page && ar.end_page ? `Pages ${ar.start_page}-${ar.end_page}` : ''}
-                            </p>
-                            {ar.is_uploaded && ar.local_reading_title && (
-                              <p className={styles.readingSecondaryDetail}>
-                                Local reading: {ar.local_reading_title}
-                              </p>
-                            )}
+                          <p className={styles.readingSecondaryDetail} style={{ color: ar.is_uploaded ? '#4CAF50' : '#F57C00', fontSize: '12px' }}>
+                            {ar.is_uploaded ? 'Uploaded' : 'PDF upload required'}
+                          </p>
+                        </div>
                           </div>
                         </div>
                         <div className={styles.readingActions}>
                           {!ar.is_uploaded && (
                             <label
-                              className={styles.selectionButton}
+                          className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                               style={{
                                 cursor: uploadingReading === ar.perusall_document_id ? 'not-allowed' : 'pointer',
                                 opacity: uploadingReading === ar.perusall_document_id ? 0.6 : 1,
@@ -1334,7 +1321,7 @@ export default function SessionCreationPage() {
                               if (!canSelect) return;
                               handleReadingSelect(localId, !isSelected);
                             }}
-                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                        className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                             disabled={creating || !canSelect}
                             title={!ar.is_uploaded ? 'Upload PDF before selecting' : !localId ? 'Missing local reading mapping' : undefined}
                           >
@@ -1358,40 +1345,28 @@ export default function SessionCreationPage() {
                         className={`${styles.readingCard} ${isSelected ? styles.readingCardSelected : ''}`}
                       >
                         <div className={styles.readingMeta}>
-                          <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 42 54" fill="none">
+                          <path d="M1 49V5C1 2.79086 2.79087 1 5 1H27.9276C29.0042 1 30.0354 1.43398 30.7879 2.20384L39.8603 11.4844C40.5909 12.2318 41 13.2355 41 14.2806V49C41 51.2091 39.2091 53 37 53H5C2.79086 53 1 51.2091 1 49Z" fill="#E5F3E6" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path d="M30 2V10C30 11.1046 30.8954 12 32 12H40" stroke="#5EB161" strokeWidth="2" strokeLinecap="round"/>
+                          <path opacity="0.4" d="M12 27C12 23.2288 12 21.3432 13.1716 20.1716C14.3431 19 16.2288 19 20 19H22C25.7712 19 27.6569 19 28.8284 20.1716C30 21.3432 30 23.2288 30 27V31C30 34.7712 30 36.6569 28.8284 37.8284C27.6569 39 25.7712 39 22 39H20C16.2288 39 14.3431 39 13.1716 37.8284C12 36.6569 12 34.7712 12 31V27Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 29C16.25 28.5858 16.5858 28.25 17 28.25H25C25.4142 28.25 25.75 28.5858 25.75 29C25.75 29.4142 25.4142 29.75 25 29.75H17C16.5858 29.75 16.25 29.4142 16.25 29Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 25C16.25 24.5858 16.5858 24.25 17 24.25H25C25.4142 24.25 25.75 24.5858 25.75 25C25.75 25.4142 25.4142 25.75 25 25.75H17C16.5858 25.75 16.25 25.4142 16.25 25Z" fill="#5EB161"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M16.25 33C16.25 32.5858 16.5858 32.25 17 32.25H22C22.4142 32.25 22.75 32.5858 22.75 33C22.75 33.4142 22.4142 33.75 22 33.75H17C16.5858 33.75 16.25 33.75 16.25 33Z" fill="#5EB161"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
                             <p className={styles.readingName}>{reading.title}</p>
-                            <p className={styles.readingDetails}>
-                              {(reading.displaySize || reading.sourceType || 'PDF').trim()}{' '}
-                              {reading.displayDate ? `· ${reading.displayDate}` : ''}
-                              {reading.hasChunks && (
-                                <span style={{
-                                  marginLeft: '8px',
-                                  padding: '2px 6px',
-                                  backgroundColor: '#10b981',
-                                  color: 'white',
-                                  borderRadius: '4px',
-                                  fontSize: '11px',
-                                  fontWeight: '500'
-                                }}>
-                                  Processed
-                                </span>
-                              )}
-                            </p>
-                            {reading.filePath && (
-                              <p className={styles.readingSecondaryDetail}>{reading.filePath}</p>
-                            )}
-                            {reading.hasChunks && reading.readingChunks && (
-                              <p className={styles.readingSecondaryDetail} style={{ color: '#10b981', fontSize: '12px' }}>
-                                {reading.readingChunks.length} chunks available
-                              </p>
-                            )}
+                          <p className={styles.readingSecondaryDetail} style={{ color: '#4CAF50', fontSize: '12px' }}>
+                            {reading.hasChunks ? 'Processed' : 'Uploaded'}
+                          </p>
+                        </div>
                           </div>
                         </div>
                         <div className={styles.readingActions}>
                           <button
                             type="button"
                             onClick={() => handleReadingSelect(reading.id, !isSelected)}
-                            className={`${styles.selectionButton} ${isSelected ? styles.selectionButtonActive : ''}`}
+                        className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
                             disabled={creating}
                           >
                             {isSelected ? 'Selected' : 'Select'}
