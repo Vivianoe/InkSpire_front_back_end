@@ -350,6 +350,21 @@ class PerusallAnnotationResponse(BaseModel):
     errors: List[Dict[str, Any]]
 
 
+class PerusallAnnotationStatusRequest(BaseModel):
+    session_id: Optional[str] = None
+    annotation_ids: List[str]
+    perusall_user_id: Optional[str] = None
+
+
+class PerusallAnnotationStatusItem(BaseModel):
+    annotation_id: str
+    status: str  # pending | posted
+
+
+class PerusallAnnotationStatusResponse(BaseModel):
+    items: List[PerusallAnnotationStatusItem]
+
+
 class PerusallMappingRequest(BaseModel):
     course_id: str  # UUID as string
     reading_id: str  # UUID as string
