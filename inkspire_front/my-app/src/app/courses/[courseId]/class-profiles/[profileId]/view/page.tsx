@@ -103,6 +103,8 @@ const buildClassInputPayload = (
     enrollment: data.classInfo.enrollment,
     background: data.classInfo.background || DEFAULT_CLASS_BACKGROUND,
     prior_knowledge: data.classInfo.priorKnowledge,
+    learning_challenges: data.classInfo.learningChallenges,
+    learning_challenges_other: data.classInfo.learningChallengesOther,
   },
   design_considerations: designConsiderationsPayload ?? null,
 });
@@ -256,7 +258,7 @@ const PRIOR_KNOWLEDGE_LABELS: Record<string, string> = {
   developing: 'Developing – some previous experience',
   intermediate: 'Intermediate – working familiarity',
   advanced: 'Advanced – extensive experience',
-  mixed: 'Mixed experience cohort',
+  mixed: 'Mixed proficiency cohort',
 };
 
 const PRIOR_KNOWLEDGE_OPTIONS = [
@@ -272,6 +274,28 @@ const DELIVERY_MODE_OPTIONS = [
 ];
 
 const SEMESTER_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];
+
+const LEARNING_CHALLENGE_OPTIONS = [
+  'Struggle with technical terminology',
+  'Tendency to focus on surface details rather than core ideas',
+  'Trouble connecting core ideas in readings',
+  'Low confidence in explaining their thinking',
+  'Difficulty getting started with open-ended tasks',
+  'Other',
+];
+
+const normalizeLearningChallenges = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[|,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
 
 const cloneProfile = (profile: ClassProfile): ClassProfile =>
   JSON.parse(JSON.stringify(profile));
@@ -311,6 +335,8 @@ interface ClassProfile {
     enrollment: string;
     background: string;
     priorKnowledge: string;
+    learningChallenges: string[];
+    learningChallengesOther: string;
   };
   generatedProfile?: string;
 }
@@ -370,6 +396,11 @@ export default function ViewClassProfilePage() {
     if (!formData || !initialData) return false;
     return JSON.stringify(formData) !== JSON.stringify(initialData);
   }, [formData, initialData]);
+
+  const selectedLearningChallenges = useMemo(
+    () => normalizeLearningChallenges(formData?.classInfo.learningChallenges),
+    [formData?.classInfo.learningChallenges]
+  );
 
   const hasDesignConsiderationsChanged = useMemo(() => {
     // If no initial version found, allow button (edge case: profile created before versioning)
@@ -531,6 +562,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       enrollment: '',
       background: DEFAULT_CLASS_BACKGROUND,
       priorKnowledge: '',
+      learningChallenges: [],
+      learningChallengesOther: '',
     },
   generatedProfile: '',
   });
@@ -561,6 +594,15 @@ const createDefaultProfile = (id: string): ClassProfile => ({
         ...defaults.classInfo,
         ...loadedClassInfo,
         background: loadedClassInfo.background || DEFAULT_CLASS_BACKGROUND,
+        learningChallenges: normalizeLearningChallenges(
+          // @ts-expect-error legacy field name
+          loadedClassInfo.learningChallenges ?? loadedClassInfo.learning_challenges
+        ),
+        learningChallengesOther:
+          loadedClassInfo.learningChallengesOther ??
+          // @ts-expect-error legacy field name
+          loadedClassInfo.learning_challenges_other ??
+          defaults.classInfo.learningChallengesOther,
       },
       generatedProfile: data.generatedProfile || DEFAULT_CLASS_PROFILE_TEXT,
     };
@@ -1336,6 +1378,8 @@ const createDefaultProfile = (id: string): ClassProfile => ({
             enrollment: formData.classInfo.enrollment,
             background: formData.classInfo.background || DEFAULT_CLASS_BACKGROUND,
             prior_knowledge: formData.classInfo.priorKnowledge,
+            learning_challenges: formData.classInfo.learningChallenges,
+            learning_challenges_other: formData.classInfo.learningChallengesOther,
           },
         }),
       });
@@ -1687,19 +1731,6 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                         disabled={!isBasicInfoEditing}
                       />
                     </div>
-                    <div className={styles.editField}>
-                      <label className={styles.editLabel}>Field Description</label>
-                      <textarea
-                        className={styles.editTextarea}
-                        rows={3}
-                        value={formData.disciplineInfo.fieldDescription}
-                        onChange={(e) =>
-                          handleFieldChange('disciplineInfo', 'fieldDescription', e.target.value)
-                        }
-                        placeholder="Summarize the discipline’s focus areas, core questions, and methods."
-                        disabled={!isBasicInfoEditing}
-                      />
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1739,34 +1770,15 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     />
                   </div>
                   <div className={styles.editField}>
-                    <label className={styles.editLabel}>Course Code *</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.courseCode}
-                      onChange={(e) => handleFieldChange('courseInfo', 'courseCode', e.target.value)}
-                      placeholder="e.g., EDU 101"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Credits</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.credits}
-                      onChange={(e) => handleFieldChange('courseInfo', 'credits', e.target.value)}
-                      placeholder="e.g., 3"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Prerequisites</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.courseInfo.prerequisites}
+                    <label className={styles.editLabel}>Course Description</label>
+                    <textarea
+                      className={styles.editTextarea}
+                      rows={4}
+                      value={formData.courseInfo.description}
                       onChange={(e) =>
-                        handleFieldChange('courseInfo', 'prerequisites', e.target.value)
+                        handleFieldChange('courseInfo', 'description', e.target.value)
                       }
-                      placeholder="e.g., EDU 100 or instructor permission"
+                      placeholder="Enter a detailed description of the course..."
                       disabled={!isBasicInfoEditing}
                     />
                   </div>
@@ -1813,19 +1825,7 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                       ))}
                     </select>
                   </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Course Description</label>
-                    <textarea
-                      className={styles.editTextarea}
-                      rows={4}
-                      value={formData.courseInfo.description}
-                      onChange={(e) =>
-                        handleFieldChange('courseInfo', 'description', e.target.value)
-                      }
-                      placeholder="Enter a detailed description of the course..."
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
+                  
                 </div>
               </div>
               </div>
@@ -1881,67 +1881,12 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                     />
                   </div>
                   <div className={styles.editField}>
-                    <label className={styles.editLabel}>Section</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.section}
-                      onChange={(e) => handleFieldChange('classInfo', 'section', e.target.value)}
-                      placeholder="e.g., A, B, 01"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Enrollment</label>
+                    <label className={styles.editLabel}>Enrollment (Number of Students)</label>
                     <input
                       className={styles.editInput}
                       value={formData.classInfo.enrollment}
                       onChange={(e) => handleFieldChange('classInfo', 'enrollment', e.target.value)}
                       placeholder="e.g., 25"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Meeting Days</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.meetingDays}
-                      onChange={(e) =>
-                        handleFieldChange('classInfo', 'meetingDays', e.target.value)
-                      }
-                      placeholder="e.g., MWF, TTh"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Meeting Time</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.meetingTime}
-                      onChange={(e) =>
-                        handleFieldChange('classInfo', 'meetingTime', e.target.value)
-                      }
-                      placeholder="e.g., 10:00 AM - 11:30 AM"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Location</label>
-                    <input
-                      className={styles.editInput}
-                      value={formData.classInfo.location}
-                      onChange={(e) => handleFieldChange('classInfo', 'location', e.target.value)}
-                      placeholder="e.g., Building A, Room 201"
-                      disabled={!isBasicInfoEditing}
-                    />
-                  </div>
-                  <div className={styles.editField}>
-                    <label className={styles.editLabel}>Background</label>
-                    <textarea
-                      className={styles.editTextarea}
-                      rows={3}
-                      value={formData.classInfo.background}
-                      onChange={(e) => handleFieldChange('classInfo', 'background', e.target.value)}
-                      placeholder="Provide background information about this class and its learners."
                       disabled={!isBasicInfoEditing}
                     />
                   </div>
@@ -1962,6 +1907,60 @@ const createDefaultProfile = (id: string): ClassProfile => ({
                       ))}
                     </select>
                   </div>
+                  <div className={styles.editField}>
+                    <label className={styles.editLabel}>Major Learning Challenges</label>
+                    <p className={styles.fieldHint}>
+                      Which challenges do students in this class commonly experience?
+                    </p>
+                    <div className={styles.checkboxGroup}>
+                      {LEARNING_CHALLENGE_OPTIONS.map(option => {
+                        const isChecked = selectedLearningChallenges.includes(option);
+                        return (
+                          <label
+                            key={option}
+                            className={`${styles.checkboxOption} ${styles.checkboxOptionWrap}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const nextValues = e.target.checked
+                                  ? [...selectedLearningChallenges, option]
+                                  : selectedLearningChallenges.filter(item => item !== option);
+                                setFormData(prev => {
+                                  if (!prev) return prev;
+                                  return {
+                                    ...prev,
+                                    classInfo: {
+                                      ...prev.classInfo,
+                                      learningChallenges: nextValues,
+                                    },
+                                  };
+                                });
+                              }}
+                              disabled={!isBasicInfoEditing}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {selectedLearningChallenges.includes('Other') && (
+                    <div className={styles.editField}>
+                      <label className={styles.editLabel}>Other</label>
+                      <textarea
+                        className={styles.editTextarea}
+                        rows={2}
+                        value={formData.classInfo.learningChallengesOther}
+                        onChange={(e) =>
+                          handleFieldChange('classInfo', 'learningChallengesOther', e.target.value)
+                        }
+                        placeholder="Describe other learning challenges..."
+                        disabled={!isBasicInfoEditing}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
