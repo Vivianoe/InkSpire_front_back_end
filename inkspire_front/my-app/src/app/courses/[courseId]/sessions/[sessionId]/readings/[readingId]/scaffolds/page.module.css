@@ -6,7 +6,7 @@ html, body {
 
 .page {
   min-height: 100vh;
-  background-color: var(--gray-50);
+  background-color: transparent;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;

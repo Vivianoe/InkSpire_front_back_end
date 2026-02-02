@@ -53,6 +53,15 @@ type AssignmentReadingStatus = {
   end_page?: number | null;
 };
 
+type SessionUpdateResponse = {
+  success: boolean;
+  assignments?: PerusallAssignment[];
+  assignment_id?: string | null;
+  assignment_name?: string | null;
+  readings?: AssignmentReadingStatus[] | null;
+  message?: string | null;
+};
+
 type PersistedReadingSelection = {
   id: string;
   title: string;
@@ -400,12 +409,63 @@ export default function SessionCreationPage() {
     }
   }, [selectedPerusallAssignmentId, fetchAssignmentReadings]);
 
-  const handleSelectAssignment = async (assignmentId: string) => {
+  const handleSessionUpdate = async () => {
+    try {
+      setLoadingPerusallAssignments(true);
+      setLoadingAssignmentReadings(Boolean(selectedPerusallAssignmentId));
+      setError(null);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch(`/api/courses/${courseId}/perusall/session-update`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          assignment_id: selectedPerusallAssignmentId || undefined,
+        }),
+      });
+      const data: SessionUpdateResponse = await response.json().catch(() => ({ success: false }));
+      if (!response.ok || !data?.success) {
+        throw new Error((data as any)?.detail || data?.message || 'Failed to refresh session selection data.');
+      }
+
+      const assignmentsRaw = Array.isArray(data?.assignments) ? data.assignments : [];
+      const normalizedAssignments = assignmentsRaw
+        .map((a: any) => ({
+          ...a,
+          id: a?.id ?? a?._id,
+        }))
+        .filter((a: any) => typeof a?.id === 'string' && a.id.length > 0);
+      setPerusallAssignments(normalizedAssignments);
+
+      if (selectedPerusallAssignmentId) {
+        if (data.assignment_id && Array.isArray(data.readings)) {
+          setAssignmentReadings(data.readings);
+          setSelectedAssignmentName(data.assignment_name || '');
+        } else {
+          setAssignmentReadings([]);
+          setSelectedAssignmentName('');
+        }
+      }
+      if (data.message) {
+        setSuccess(data.message);
+      }
+    } catch (err) {
+      console.error('Session update failed:', err);
+      setError(err instanceof Error ? err.message : 'Session update failed.');
+    } finally {
+      setLoadingPerusallAssignments(false);
+      setLoadingAssignmentReadings(false);
+    }
+  };
+
+  const handleSelectAssignment = (assignmentId: string) => {
     setSelectedPerusallAssignmentId(assignmentId);
     setSelectedReadingIds([]);
-
-    // Fetch assignment readings status
-    await fetchAssignmentReadings(assignmentId);
 
     const matchingSessions = sessions.filter(s => s.perusall_assignment_id === assignmentId);
     if (matchingSessions.length > 0) {
@@ -417,7 +477,6 @@ export default function SessionCreationPage() {
 
       setSelectedSessionId(latestSession.id);
       setMode('edit');
-      loadExistingSession(latestSession.id);
 
       const params = new URLSearchParams();
       params.set('sessionId', latestSession.id);
@@ -1031,6 +1090,14 @@ export default function SessionCreationPage() {
                 Choose a Perusall assignment to create or open a session.
               </p>
             </div>
+            <button
+              type="button"
+              className={`${uiStyles.btn} ${uiStyles.btnNeutral} ${styles.compactActionButton}`}
+              onClick={handleSessionUpdate}
+              disabled={loadingPerusallAssignments || loadingAssignmentReadings}
+            >
+              Session Update
+            </button>
           </div>
 
           <div className={styles.readingList}>
@@ -1249,14 +1316,20 @@ export default function SessionCreationPage() {
 
           <div className={styles.readingList}>
             {selectedPerusallAssignmentId ? (
-              loadingAssignmentReadings ? (
+              loadingAssignmentReadings && assignmentReadings.length === 0 ? (
                 <div className={styles.emptyState}>Loading assignment readings…</div>
               ) : assignmentReadings.length === 0 ? (
                 <div className={styles.emptyState}>
                   No readings found for this assignment.
                 </div>
               ) : (
-                assignmentReadings.map((ar) => {
+                <>
+                  {loadingAssignmentReadings ? (
+                    <div className={styles.selectionCount} style={{ marginBottom: '0.5rem' }}>
+                      Refreshing readings...
+                    </div>
+                  ) : null}
+                  {assignmentReadings.map((ar) => {
                     const localId = ar.local_reading_id || '';
                     const canSelect = Boolean(ar.is_uploaded && localId);
                     const isSelected = canSelect && selectedReadingIds.includes(localId);
@@ -1330,7 +1403,8 @@ export default function SessionCreationPage() {
                         </div>
                       </div>
                     );
-                  })
+                  })}
+                </>
               )
             ) : readings.length === 0 ? (
               <div className={styles.emptyState}>
