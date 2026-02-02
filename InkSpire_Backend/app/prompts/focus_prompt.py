@@ -59,6 +59,8 @@ def get_focus_prompt():
             "- If the material_report_text explicitly includes an excerpt for a section, you may use it.\n"
             "- Otherwise, use the underlying reading text (from reading_chunks) and quote a representative\n"
             "  1–2 sentences (≤ 400 characters).\n\n"
+            "- HARD CONSTRAINT: never output a fragment longer than 5 sentences.\n\n"
+            "- Ordering rule: output focus_areas in document order (earlier fragment in the reading first).\n\n"
             "Return ONLY the JSON object in the format above. No extra text."
         ),
         (
@@ -72,6 +74,7 @@ def get_focus_prompt():
             "- Identify and prioritize segments that need scaffolding for this specific class.\n"
             "- For each, provide a fragment, rationales (referencing the rules), a priority_level, and\n"
             "  concrete suggested_activities.\n\n"
+            "- Order focus_areas by where the fragment appears in the reading (earlier-to-later).\n\n"
             "Return ONLY valid JSON in the specified \"focus_areas\" schema."
         ),
     ])

@@ -70,6 +70,75 @@ from app.api.models import (
 
 router = APIRouter()
 
+def _sort_scaffold_annotations_by_position(annotations: List[Any]) -> List[Any]:
+    def _key(a: Any) -> tuple:
+        start_offset = getattr(a, "start_offset", None)
+        page_number = getattr(a, "page_number", None)
+        created_at = getattr(a, "created_at", None)
+        ann_id = getattr(a, "id", None)
+        return (
+            1 if start_offset is None else 0,
+            start_offset if start_offset is not None else 10**12,
+            1 if page_number is None else 0,
+            page_number if page_number is not None else 10**12,
+            created_at.timestamp() if created_at else 10**12,
+            str(ann_id) if ann_id is not None else "",
+        )
+
+    return sorted(annotations, key=_key)
+
+def _coerce_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+def _build_reading_chunks_data(chunks: List[Any]) -> Dict[str, Any]:
+    """
+    Build reading_chunks payload with computed start_offset/end_offset/page_number.
+    """
+    current_offset = 0
+    chunk_items: List[Dict[str, Any]] = []
+
+    for chunk in chunks:
+        content = getattr(chunk, "content", "") or ""
+        meta = getattr(chunk, "chunk_metadata", None) or {}
+
+        start_offset = _coerce_int(meta.get("start_offset"))
+        end_offset = _coerce_int(meta.get("end_offset"))
+        if start_offset is None:
+            if end_offset is not None:
+                start_offset = max(0, end_offset - len(content))
+            else:
+                start_offset = current_offset
+        if end_offset is None:
+            end_offset = start_offset + len(content)
+
+        current_offset = end_offset + 1  # keep in sync with "\n".join in workflow
+
+        page_number = _coerce_int(meta.get("page_number"))
+        if page_number is None:
+            page_number = _coerce_int(meta.get("page"))
+        if page_number is None and meta.get("page_index") is not None:
+            page_index = _coerce_int(meta.get("page_index"))
+            page_number = (page_index + 1) if page_index is not None else None
+
+        chunk_items.append(
+            {
+                "document_id": meta.get("document_id") if isinstance(meta, dict) else None,
+                "chunk_index": getattr(chunk, "chunk_index", None),
+                "text": content,
+                "content": content,
+                "token_count": meta.get("token_count") if isinstance(meta, dict) else None,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "page_number": page_number,
+            }
+        )
+
+    return {"chunks": chunk_items}
 
 # Helper functions
 def get_scaffold_or_404(scaffold_id: str, db: Session) -> Dict[str, Any]:
@@ -430,23 +499,16 @@ def generate_scaffolds_with_session(
         filtered_chunks = [c for c in chunks if c.chunk_index >= start_idx]
     else:
         filtered_chunks = [c for c in chunks if start_idx <= c.chunk_index <= end_idx]
+    filtered_chunks = sorted(
+        filtered_chunks,
+        key=lambda c: (c.chunk_index if isinstance(getattr(c, "chunk_index", None), int) else 10**12),
+    )
     print(
         f"[generate_scaffolds_with_session] Using page range start_page={start_page}, end_page={end_page} -> chunk_index {start_idx}..{end_idx}; selected {len(filtered_chunks)}/{len(chunks)} chunks"
     )
     
-    # Convert to workflow format: {"chunks": [...]}
-    reading_chunks_data = {
-        "chunks": [
-            {
-                "document_id": chunk.chunk_metadata.get("document_id") if chunk.chunk_metadata else None,
-                "chunk_index": chunk.chunk_index,
-                "text": chunk.content,
-                "content": chunk.content,
-                "token_count": chunk.chunk_metadata.get("token_count") if chunk.chunk_metadata else None,
-            }
-            for chunk in filtered_chunks
-        ]
-    }
+    # Convert to workflow format with computed start/end offsets and page numbers.
+    reading_chunks_data = _build_reading_chunks_data(filtered_chunks)
     
     # Build reading_info from reading and session version
     reading_info = {
@@ -505,6 +567,7 @@ def generate_scaffolds_with_session(
             if a.reading_id == reading_uuid and a.generation_id == generation_uuid
         ]
         print(f"[generate_scaffolds_with_session] Found {len(annotations)} annotations in database for reading {reading_uuid}")
+        annotations = _sort_scaffold_annotations_by_position(annotations)
         
         # If no annotations found, check if run_material_focus_scaffold returned any
         if len(annotations) == 0:
@@ -728,6 +791,10 @@ def run_material_focus_scaffold(
             start_offset = scaf.get("start_offset")
             end_offset = scaf.get("end_offset")
             page_number = scaf.get("page_number")
+            print(
+                f"[run_material_focus_scaffold] Scaffold {idx + 1} offsets: "
+                f"start_offset={start_offset}, end_offset={end_offset}, page_number={page_number}"
+            )
 
             try:
                 annotation = create_scaffold_annotation(
@@ -860,6 +927,10 @@ def load_scaffolds_from_session(
         annotations = [a for a in annotations if a.generation_id == latest_generation_id]
     elif annotations:
         annotations = [a for a in annotations if a.generation_id is None]
+
+    annotations = _sort_scaffold_annotations_by_position(annotations)
+
+    annotations = _sort_scaffold_annotations_by_position(annotations)
     
     if not annotations:
         raise HTTPException(

@@ -427,7 +427,7 @@ export default function ScaffoldPage() {
     const editedValueRaw = valueOverride ?? manualEditMap[key] ?? '';
     const editedValue = editedValueRaw.trim();
     if (!editedValue) {
-      alert('Please enter the updated text before saving.');
+      showToast('Please enter the updated text before saving.');
       return null;
     }
 
@@ -569,13 +569,13 @@ export default function ScaffoldPage() {
       processReviewResponse(scaffold.id, data, action === 'accept' ? 'ACCEPTED' : 'REJECTED');
     } catch (err) {
       console.error('Review action failed:', err);
-      alert('Failed to process review action. Please try again.');
+      showToast('Failed to process review action. Please try again.');
     } finally {
       setManualEditSubmittingId(null);
     }
     } catch (outerErr) {
       console.error('Error in handleScaffoldAction:', outerErr);
-      alert('An error occurred. Please try again.');
+      showToast('An error occurred. Please try again.');
     }
   };
 
@@ -618,7 +618,7 @@ export default function ScaffoldPage() {
       showToast(`Refine scaffold #${currentReviewIndex + 1} succeeded.`);
     } catch (err) {
       console.error('Modification request failed:', err);
-      alert('Failed to send modification request. Please try again.');
+      showToast('Failed to send modification request. Please try again.');
     } finally {
       setLlmRefining(false);
     }
@@ -733,11 +733,11 @@ export default function ScaffoldPage() {
         }
       }
       
-      alert('Scaffolds generated successfully!');
+      showToast('Scaffolds generated successfully!');
     } catch (err) {
       console.error('Failed to generate scaffolds:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
-      alert(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
+      showToast(err instanceof Error ? err.message : 'Failed to generate scaffolds. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -799,10 +799,10 @@ ${scaffold.text || 'No scaffold text available'}
   const handleCopyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(mdContent);
-      alert('Markdown copied to clipboard!');
+      showToast('Markdown copied to clipboard!');
     } catch (err) {
       console.error('Failed to copy to clipboard:', err);
-      alert('Failed to copy to clipboard. Please copy manually.');
+      showToast('Failed to copy to clipboard. Please copy manually.');
     }
   };
 
@@ -822,7 +822,7 @@ ${scaffold.text || 'No scaffold text available'}
   const handleDownloadPDF = async () => {
     const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
     if (acceptedScaffolds.length === 0) {
-      alert('No accepted scaffolds to download.');
+      showToast('No accepted scaffolds to download.');
       return;
     }
 
@@ -840,7 +840,7 @@ ${scaffold.text || 'No scaffold text available'}
       });
     } catch (error) {
       console.error('Failed to generate PDF:', error);
-      alert('Failed to generate PDF. Please try again.');
+      showToast('Failed to generate PDF. Please try again.');
     }
   };
 
@@ -926,7 +926,7 @@ ${scaffold.text || 'No scaffold text available'}
       }
 
       setShowPublishModal(false);
-      alert('Scaffolds published successfully!');
+      showToast('Scaffolds published successfully!');
     } catch (error) {
       console.error('Publish failed:', error);
       
@@ -1105,8 +1105,9 @@ ${scaffold.text || 'No scaffold text available'}
         <div
           style={{
             position: 'fixed',
-            top: '1rem',
-            right: '1rem',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
             zIndex: 1000,
             background: '#ecfdf5',
             border: '1px solid #34d399',
@@ -1117,6 +1118,7 @@ ${scaffold.text || 'No scaffold text available'}
             fontSize: '0.9rem',
             fontWeight: 600,
             maxWidth: '22rem',
+            width: 'max-content',
           }}
           role="status"
           aria-live="polite"
@@ -1291,7 +1293,7 @@ ${scaffold.text || 'No scaffold text available'}
                   onClick={() => {
                     const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
                     if (acceptedScaffolds.length === 0) {
-                      alert('No accepted scaffolds to download.');
+                      showToast('No accepted scaffolds to download.');
                       return;
                     }
                     const md = generateMarkdown(acceptedScaffolds);
@@ -1307,7 +1309,7 @@ ${scaffold.text || 'No scaffold text available'}
                   onClick={() => {
                     const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
                     if (acceptedScaffolds.length === 0) {
-                      alert('No accepted scaffolds to publish.');
+                      showToast('No accepted scaffolds to publish.');
                       return;
                     }
                     setShowPublishModal(true);
@@ -1500,7 +1502,7 @@ ${scaffold.text || 'No scaffold text available'}
                                         await submitManualEdit(rawScaffold, manualEditMap[scaffoldKey] ?? '');
                                       } catch (err) {
                                         console.error('Manual edit failed:', err);
-                                        alert('Manual edit failed. Please try again.');
+                                        showToast('Manual edit failed. Please try again.');
                                       } finally {
                                         setManualEditSubmittingId(null);
                                       }
@@ -1646,7 +1648,7 @@ ${scaffold.text || 'No scaffold text available'}
             onClick={() => {
               const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
               if (acceptedScaffolds.length === 0) {
-                alert('No accepted scaffolds to download.');
+                showToast('No accepted scaffolds to download.');
                 return;
               }
               const md = generateMarkdown(acceptedScaffolds);
@@ -1663,7 +1665,7 @@ ${scaffold.text || 'No scaffold text available'}
             onClick={() => {
               const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
               if (acceptedScaffolds.length === 0) {
-                alert('No accepted scaffolds to publish.');
+                showToast('No accepted scaffolds to publish.');
                 return;
               }
               setShowPublishModal(true);

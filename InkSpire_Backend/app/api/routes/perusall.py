@@ -2047,7 +2047,7 @@ def _get_perusall_course_assignments_impl(
                 document_name_by_id[str(doc_id)] = str(doc_name)
 
         assignment_items: List[PerusallAssignmentItem] = []
-        for assignment in perusall_assignments:
+        for assignment_order_index, assignment in enumerate(perusall_assignments):
             if not isinstance(assignment, dict):
                 continue
 
@@ -2101,6 +2101,7 @@ def _get_perusall_course_assignments_impl(
                         name=assignment_name,
                         document_ids=[str(d) for d in document_ids] if document_ids else None,
                         parts=parts_list if parts_list else None,
+                        order_index=assignment_order_index,
                     )
                 except ProgrammingError as e:
                     if "perusall_assignments" in str(e):

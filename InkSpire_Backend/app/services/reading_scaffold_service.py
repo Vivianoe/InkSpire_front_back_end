@@ -110,9 +110,21 @@ def get_scaffold_annotations_by_session(
     """
     Get all scaffold annotations for a session
     """
-    return db.query(ScaffoldAnnotation).filter(
+    annotations = db.query(ScaffoldAnnotation).filter(
         ScaffoldAnnotation.session_id == session_id
     ).all()
+    # Stable in-memory order for downstream APIs:
+    # prefer reading position (start_offset), then page_number, then creation time.
+    annotations.sort(
+        key=lambda a: (
+            1 if a.start_offset is None else 0,
+            a.start_offset if a.start_offset is not None else 10**12,
+            1 if a.page_number is None else 0,
+            a.page_number if a.page_number is not None else 10**12,
+            a.created_at.timestamp() if a.created_at else 10**12,
+        )
+    )
+    return annotations
 
 
 def get_scaffold_annotations_by_reading(
