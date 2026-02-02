@@ -46,6 +46,9 @@ from auth.dependencies import get_current_user
 from app.api.models import (
     PerusallAnnotationRequest,
     PerusallAnnotationResponse,
+    PerusallAnnotationStatusRequest,
+    PerusallAnnotationStatusResponse,
+    PerusallAnnotationStatusItem,
     PerusallAnnotationItem,
     PerusallMappingRequest,
     PerusallMappingResponse,
@@ -303,6 +306,7 @@ def _build_perusall_idempotency_source(
     session_id: str,
     perusall_user_id: str,
     req: PerusallAnnotationRequest,
+    annotation_version_pairs: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     payload: Dict[str, Any] = {
         "course_id": course_id,
@@ -312,6 +316,11 @@ def _build_perusall_idempotency_source(
     }
     if req.annotation_ids:
         payload["annotation_ids"] = sorted(req.annotation_ids)
+        if annotation_version_pairs:
+            payload["annotation_version_pairs"] = sorted(
+                annotation_version_pairs,
+                key=lambda item: (item.get("annotation_id", ""), item.get("annotation_version_id", "")),
+            )
     elif req.annotations:
         payload["annotations"] = [item.model_dump() for item in req.annotations]
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -604,6 +613,7 @@ def post_annotations_to_perusall(
     # If annotation_ids provided, fetch highlight_coords from database
     annotations_to_post = []
     first_annotation = None  # Store first annotation to verify it belongs to the course/reading
+    annotation_version_map: Dict[str, str] = {}
     if req.annotation_ids:
         print(f"[post_annotations_to_perusall] Fetching highlight_coords for {len(req.annotation_ids)} annotation(s)")
         for annotation_id_str in req.annotation_ids:
@@ -691,6 +701,11 @@ def post_annotations_to_perusall(
                         f"frag_len={len(best.fragment or '')})"
                     )
                     coords_list = [best]
+
+                if coords_list and coords_list[0].annotation_version_id:
+                    annotation_version_map[str(annotation_id_str)] = str(coords_list[0].annotation_version_id)
+                elif annotation.current_version_id:
+                    annotation_version_map[str(annotation_id_str)] = str(annotation.current_version_id)
 
                 version_ids = list({coord.annotation_version_id for coord in coords_list if coord.annotation_version_id})
                 version_content_by_id: Dict[str, str] = {}
@@ -856,6 +871,13 @@ def post_annotations_to_perusall(
                         session_id=str(session_uuid),
                         perusall_user_id=str(post_user_id),
                         req=req,
+                        annotation_version_pairs=[
+                            {
+                                "annotation_id": annotation_id,
+                                "annotation_version_id": version_id,
+                            }
+                            for annotation_id, version_id in annotation_version_map.items()
+                        ],
                     ).encode("utf-8")
                 ).hexdigest()
             )
@@ -884,6 +906,7 @@ def post_annotations_to_perusall(
                 status="pending",
                 request_payload={
                     "annotation_ids": req.annotation_ids,
+                    "annotation_version_map": annotation_version_map or None,
                     "annotations": [item.model_dump() for item in req.annotations] if req.annotations else None,
                 },
             )
@@ -1085,6 +1108,116 @@ def post_annotations_to_perusall(
             status_code=500,
             detail=f"Failed to post annotations to Perusall: {str(e)}"
         )
+
+
+@router.post(
+    "/courses/{course_id}/readings/{reading_id}/perusall/annotation-status",
+    response_model=PerusallAnnotationStatusResponse,
+)
+def get_perusall_annotation_status(
+    course_id: str,
+    reading_id: str,
+    req: PerusallAnnotationStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return posting status for each annotation ID:
+    - posted: already posted successfully with matching idempotent record
+    - pending: no successful post record found yet
+    """
+    try:
+        course_uuid = uuid.UUID(course_id)
+        reading_uuid = uuid.UUID(reading_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id or reading_id format: course_id={course_id}, reading_id={reading_id}",
+        )
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(status_code=404, detail=f"Course {course_id} not found")
+
+    reading = get_reading_by_id(db, reading_uuid)
+    if not reading:
+        raise HTTPException(status_code=404, detail=f"Reading {reading_id} not found")
+    if reading.course_id != course_uuid:
+        raise HTTPException(status_code=400, detail=f"Reading {reading_id} does not belong to course {course_id}")
+
+    post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
+    if not post_user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+        )
+
+    records = db.query(PerusallAnnotationPost).filter(
+        PerusallAnnotationPost.course_id == course_uuid,
+        PerusallAnnotationPost.reading_id == reading_uuid,
+        PerusallAnnotationPost.perusall_user_id == str(post_user_id),
+    ).all()
+
+    target_version_map: Dict[str, str] = {}
+    for annotation_id in req.annotation_ids:
+        annotation_id_str = str(annotation_id)
+        try:
+            annotation_uuid = uuid.UUID(annotation_id_str)
+        except ValueError:
+            continue
+        annotation = db.query(ScaffoldAnnotation).filter(ScaffoldAnnotation.id == annotation_uuid).first()
+        if not annotation or annotation.reading_id != reading_uuid or not annotation.current_version_id:
+            continue
+        target_version_map[annotation_id_str] = str(annotation.current_version_id)
+
+    posted_ids = set()
+    pending_ids = set()
+    target_ids = {str(annotation_id) for annotation_id in req.annotation_ids}
+
+    for record in records:
+        payload = record.request_payload if isinstance(record.request_payload, dict) else {}
+        payload_annotation_ids = payload.get("annotation_ids")
+        if not isinstance(payload_annotation_ids, list):
+            continue
+        payload_version_map = payload.get("annotation_version_map")
+        record_version_map = payload_version_map if isinstance(payload_version_map, dict) else {}
+
+        matching_ids = set()
+        for raw_id in payload_annotation_ids:
+            annotation_id = str(raw_id)
+            if annotation_id not in target_ids:
+                continue
+            target_version_id = target_version_map.get(annotation_id)
+            record_version_id = (
+                str(record_version_map.get(annotation_id))
+                if annotation_id in record_version_map and record_version_map.get(annotation_id)
+                else None
+            )
+
+            if target_version_id:
+                # If target version is known, only treat as duplicate when versions match.
+                if record_version_id and record_version_id == target_version_id:
+                    matching_ids.add(annotation_id)
+            else:
+                # Fallback for annotations without version info.
+                matching_ids.add(annotation_id)
+        if not matching_ids:
+            continue
+        if record.status == "succeeded":
+            posted_ids.update(matching_ids)
+        elif record.status == "pending":
+            pending_ids.update(matching_ids)
+
+    items: List[PerusallAnnotationStatusItem] = []
+    for annotation_id in req.annotation_ids:
+        annotation_id_str = str(annotation_id)
+        status = "posted" if annotation_id_str in posted_ids else "pending"
+        # Explicitly keep pending if currently in a pending job and not posted.
+        if status != "posted" and annotation_id_str in pending_ids:
+            status = "pending"
+        items.append(PerusallAnnotationStatusItem(annotation_id=annotation_id_str, status=status))
+
+    return PerusallAnnotationStatusResponse(items=items)
 
 
 @router.post("/courses/{course_id}/perusall/users/sync", response_model=PerusallUsersResponse)
