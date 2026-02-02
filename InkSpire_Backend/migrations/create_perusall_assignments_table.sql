@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS perusall_assignments (
     name TEXT NOT NULL,
     document_ids JSONB,  -- Array of Perusall reading IDs
     parts JSONB,  -- JSONB with documentId + page ranges
+    order_index INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Ensure unique combination of perusall_course_id and perusall_assignment_id
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS perusall_assignments (
 CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_id ON perusall_assignments(perusall_course_id);
 CREATE INDEX IF NOT EXISTS idx_perusall_assignments_assignment_id ON perusall_assignments(perusall_assignment_id);
 CREATE INDEX IF NOT EXISTS idx_perusall_assignments_composite ON perusall_assignments(perusall_course_id, perusall_assignment_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_order ON perusall_assignments(perusall_course_id, order_index);
 
 -- Step 2: Detect schema type and handle accordingly
 DO $$

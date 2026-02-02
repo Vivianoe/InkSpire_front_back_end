@@ -403,6 +403,7 @@ class PerusallAssignment(Base):
     name = Column(Text, nullable=False)
     document_ids = Column(JSONB, nullable=True)  # Array of Perusall reading IDs
     parts = Column(JSONB, nullable=True)  # JSONB with documentId + page ranges
+    order_index = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 

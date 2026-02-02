@@ -55,6 +55,7 @@ class WorkflowState(TypedDict, total=False):
     class_profile: Any         # JSON: { "class_id", "profile", "design_consideration" }
     reading_info: Any          # JSON: { "assignment_id", "session_description", ... }
     scaffold_count: int
+    min_fragment_gap_chars: int
 
     # Intermediate / Outputs
     material_report_text: str                  # free text
@@ -191,6 +192,405 @@ def safe_json_loads(raw: str, context: str = "") -> Any:
             raise ValueError(f"Failed to parse JSON in {context}: {e}") from e
 
 
+def _salvage_annotation_scaffolds_from_raw(raw: str) -> Dict[str, Any]:
+    """
+    Best-effort fallback when model JSON is malformed:
+    extract {"fragment": "...", "text": "..."} objects from raw text.
+    """
+    text = clean_json_output(raw or "")
+    if not text:
+        return {"annotation_scaffolds": []}
+
+    pattern = re.compile(
+        r'\{\s*"fragment"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"text"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}',
+        re.DOTALL,
+    )
+    items: List[Dict[str, str]] = []
+    for m in pattern.finditer(text):
+        frag_raw = m.group(1)
+        txt_raw = m.group(2)
+        try:
+            frag = json.loads(f'"{frag_raw}"')
+            txt = json.loads(f'"{txt_raw}"')
+        except Exception:
+            continue
+        if isinstance(frag, str) and isinstance(txt, str) and frag.strip() and txt.strip():
+            items.append({"fragment": frag.strip(), "text": txt.strip()})
+
+    return {"annotation_scaffolds": items}
+
+
+def _split_sentences(text: str) -> List[str]:
+    if not text:
+        return []
+    # Split by sentence-ending punctuation and line breaks first.
+    primary = re.split(r'(?<=[.!?。！？])\s+|[\r\n]+', text)
+    primary = [p.strip() for p in primary if p and p.strip()]
+    if len(primary) > 1:
+        return primary
+
+    # Fallback: some model outputs use semicolons as sentence separators.
+    secondary = re.split(r'[;；]+', text)
+    secondary = [s.strip() for s in secondary if s and s.strip()]
+    if len(secondary) > 1:
+        return secondary
+
+    # Last fallback: keep as one sentence.
+    return [text.strip()] if text.strip() else []
+
+
+def _truncate_fragment_to_max_sentences(fragment: str, max_sentences: int = 5) -> str:
+    sentences = _split_sentences(fragment)
+    if len(sentences) <= max_sentences:
+        return fragment.strip()
+    return " ".join(sentences[:max_sentences]).strip()
+
+
+def _resolve_target_count(scaffold_count: Any) -> int | None:
+    if isinstance(scaffold_count, int) and scaffold_count > 0:
+        return scaffold_count
+    if isinstance(scaffold_count, str):
+        try:
+            parsed = int(scaffold_count)
+            return parsed if parsed > 0 else None
+        except Exception:
+            return None
+    return None
+
+
+def _resolve_generation_count(scaffold_count: Any, extra: int = 4) -> Any:
+    target = _resolve_target_count(scaffold_count)
+    if target is None:
+        return scaffold_count
+    return target + max(0, extra)
+
+
+def _resolve_min_gap_chars(value: Any, default: int = 20) -> int:
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str):
+        try:
+            return max(0, int(value))
+        except Exception:
+            return default
+    return default
+
+
+def _spans_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return max(a_start, b_start) < min(a_end, b_end)
+
+
+def _span_gap(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
+    """
+    Distance between two non-overlapping spans (in characters).
+    Returns 0 when spans overlap or touch.
+    """
+    if _spans_overlap(a_start, a_end, b_start, b_end):
+        return 0
+    if a_end <= b_start:
+        return b_start - a_end
+    if b_end <= a_start:
+        return a_start - b_end
+    return 0
+
+
+def _build_norm_index(text: str) -> tuple[str, List[int]]:
+    """
+    Normalize text for robust matching, adapted from backend perusall fragment matching.
+    Returns (normalized_text, norm_idx -> original_idx map).
+    """
+    if not text:
+        return "", []
+    norm_chars: List[str] = []
+    norm_to_orig: List[int] = []
+    prev_space = True
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            if not prev_space and norm_chars:
+                norm_chars.append(" ")
+                norm_to_orig.append(i)
+            prev_space = True
+            continue
+        prev_space = False
+        if ch == "\u00ad":
+            continue
+        if ch == "-" and i > 0 and i + 1 < len(text):
+            if text[i - 1].isalpha() and text[i + 1].isalpha():
+                # skip OCR/extraction hyphenation between letters
+                continue
+        if ch in "“”«»„":
+            ch = '"'
+        elif ch in "‘’‚":
+            ch = "'"
+        elif ch in "–—":
+            ch = "-"
+
+        if ch.isalnum() or ch in "-'":
+            norm_chars.append(ch.lower())
+            norm_to_orig.append(i)
+        else:
+            if norm_chars and norm_chars[-1] != " ":
+                norm_chars.append(" ")
+                norm_to_orig.append(i)
+
+    if norm_chars and norm_chars[-1] == " ":
+        norm_chars.pop()
+        norm_to_orig.pop()
+    return "".join(norm_chars), norm_to_orig
+
+
+def _find_fragment_range_in_text(text: str, fragment: str) -> tuple[int, int] | None:
+    """
+    Find fragment span in text using normalized matching + prefix/suffix fallback.
+    Adapted from backend perusall `_find_fragment_range`.
+    """
+    if not text or not fragment:
+        return None
+
+    norm_text, map_text = _build_norm_index(text)
+    norm_frag, _ = _build_norm_index(fragment)
+    if not norm_text or not norm_frag:
+        return None
+
+    def _range_from_norm_idx(idx: int) -> tuple[int, int]:
+        start_orig = map_text[idx]
+        end_norm = min(idx + len(norm_frag) - 1, len(map_text) - 1)
+        end_orig = map_text[end_norm] + 1
+        return start_orig, end_orig
+
+    idx = norm_text.find(norm_frag)
+    if idx >= 0:
+        return _range_from_norm_idx(idx)
+
+    if len(norm_frag) < 20:
+        return None
+    lens = [120, 80, 60, 40, 30, 20]
+    for L in lens:
+        if len(norm_frag) < L * 2:
+            continue
+        prefix = norm_frag[:L]
+        suffix = norm_frag[-L:]
+        start_idx = 0
+        while True:
+            p_idx = norm_text.find(prefix, start_idx)
+            if p_idx < 0:
+                break
+            s_idx = norm_text.find(suffix, p_idx + L)
+            if s_idx >= 0:
+                start_orig = map_text[p_idx]
+                end_norm = min(s_idx + L - 1, len(map_text) - 1)
+                end_orig = map_text[end_norm] + 1
+                return start_orig, end_orig
+            start_idx = p_idx + 1
+    return None
+
+
+def _sort_chunks_for_reading_order(chunks: List[Any]) -> List[Dict[str, Any]]:
+    valid_chunks: List[Dict[str, Any]] = [c for c in chunks if isinstance(c, dict)]
+
+    def _key(c: Dict[str, Any]) -> tuple[int, int, int]:
+        start_offset = c.get("start_offset")
+        if isinstance(start_offset, int):
+            return (0, start_offset, 0)
+        chunk_index = c.get("chunk_index")
+        if isinstance(chunk_index, int):
+            return (1, chunk_index, 0)
+        page_number = c.get("page_number")
+        if isinstance(page_number, int):
+            return (2, page_number, 0)
+        return (3, 10**12, 0)
+
+    return sorted(valid_chunks, key=_key)
+
+
+def _normalize_fragment_key(fragment: str) -> str:
+    return re.sub(r"\s+", " ", fragment or "").strip().lower()
+
+
+def _fallback_text_overlap(a_key: str, b_key: str) -> bool:
+    if not a_key or not b_key:
+        return False
+    # Direct containment is always overlap.
+    return a_key in b_key or b_key in a_key
+
+
+def _resolve_order_key(fragment: str, chunk_list: List[Any], source_text: str) -> tuple[int, int]:
+    """
+    Resolve stable reading order for a fragment.
+    Priority:
+    1) chunk-level match + start_offset
+    2) chunk-level match + chunk_index / chunk order
+    3) full-source-text find
+    4) unresolved (send to end, keep generation order via index tie-break)
+    """
+    f = fragment or ""
+    if not f:
+        return (3, 10**12)
+    for idx, chunk in enumerate(chunk_list):
+        if not isinstance(chunk, dict):
+            continue
+        chunk_text = str(chunk.get("content") or chunk.get("text") or "")
+        if not chunk_text:
+            continue
+        local_range = _find_fragment_range_in_text(chunk_text, f)
+        if not local_range:
+            continue
+        local_pos, _ = local_range
+
+        start_offset = chunk.get("start_offset")
+        if isinstance(start_offset, int):
+            return (0, start_offset + local_pos)
+
+        chunk_order = chunk.get("chunk_index")
+        if not isinstance(chunk_order, int):
+            chunk_order = idx
+        return (1, chunk_order * 10**6 + local_pos)
+
+    source_range = _find_fragment_range_in_text(source_text, f) if source_text else None
+    if source_range:
+        return (2, source_range[0])
+
+    return (3, 10**12)
+
+
+def _sanitize_annotation_scaffolds_output(
+    parsed: Any,
+    reading_chunks: Any,
+    max_sentences: int = 5,
+    target_count: int | None = None,
+    min_gap_chars: int = 40,
+) -> Dict[str, Any]:
+    if not isinstance(parsed, dict):
+        return {"annotation_scaffolds": []}
+
+    items = parsed.get("annotation_scaffolds", [])
+    if not isinstance(items, list):
+        return {"annotation_scaffolds": []}
+
+    raw_chunks = reading_chunks.get("chunks", []) if isinstance(reading_chunks, dict) else []
+    chunk_list = _sort_chunks_for_reading_order(raw_chunks if isinstance(raw_chunks, list) else [])
+    source_text_parts: List[str] = []
+    for chunk in chunk_list:
+        if not isinstance(chunk, dict):
+            continue
+        chunk_text = chunk.get("content") or chunk.get("text") or ""
+        if chunk_text:
+            source_text_parts.append(str(chunk_text))
+    source_text = "\n".join(source_text_parts)
+
+    candidates = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        fragment = item.get("fragment")
+        text = item.get("text")
+        if not isinstance(fragment, str) or not isinstance(text, str):
+            continue
+
+        original_fragment = fragment.strip()
+        if not original_fragment:
+            continue
+
+        unique_key = _normalize_fragment_key(original_fragment)
+        fragment = _truncate_fragment_to_max_sentences(original_fragment, max_sentences=max_sentences)
+        if not fragment:
+            continue
+
+        dedup_key = _normalize_fragment_key(fragment)
+
+        source_range = _find_fragment_range_in_text(source_text, fragment) if source_text else None
+        pos = source_range[0] if source_range else -1
+        end = source_range[1] if source_range else -1
+        order_tier, order_pos = _resolve_order_key(fragment, chunk_list, source_text)
+        candidates.append(
+            {
+                "fragment": fragment,
+                "text": text.strip(),
+                "pos": pos,
+                "end": end,
+                "order_tier": order_tier,
+                "order_pos": order_pos,
+                "index": i,
+                "key": dedup_key,
+                "unique_key": unique_key,
+            }
+        )
+
+    # Remove overlaps by output order; when one is dropped, keep scanning later
+    # candidates so we can fill from the remaining output list.
+    selected: List[Dict[str, Any]] = []
+    for cand in candidates:
+        overlap = False
+        for keep in selected:
+            # Overlap if source spans overlap OR one fragment contains the other.
+            span_overlap = (
+                cand["pos"] >= 0
+                and keep["pos"] >= 0
+                and _spans_overlap(cand["pos"], cand["end"], keep["pos"], keep["end"])
+            )
+            containment_overlap = _fallback_text_overlap(cand["key"], keep["key"])
+            too_close = False
+            if (
+                cand["pos"] >= 0
+                and cand["end"] >= 0
+                and keep["pos"] >= 0
+                and keep["end"] >= 0
+                and min_gap_chars > 0
+            ):
+                gap = _span_gap(cand["pos"], cand["end"], keep["pos"], keep["end"])
+                too_close = gap < min_gap_chars
+
+            if span_overlap or containment_overlap or too_close:
+                overlap = True
+                break
+        if overlap:
+            continue
+        selected.append(cand)
+
+    # Fallback: if strict filtering leaves too few items, backfill from remaining
+    # non-duplicate candidates (by normalized fragment key) in reading order.
+    if target_count and target_count > 0 and len(selected) < target_count:
+        selected_keys = {row["unique_key"] for row in selected}
+        relaxed_pool = [
+            row for row in candidates
+            if row["unique_key"] not in selected_keys
+        ]
+        relaxed_pool.sort(key=lambda row: (row["order_tier"], row["order_pos"], row["index"]))
+        for row in relaxed_pool:
+            selected.append(row)
+            selected_keys.add(row["unique_key"])
+            if len(selected) >= target_count:
+                break
+
+    # Final output order: by reading_chunks order key.
+    selected.sort(key=lambda row: (row["order_tier"], row["order_pos"], row["index"]))
+    if target_count and target_count > 0 and len(selected) > target_count:
+        # Spread picks across the full range so positions are more uniform.
+        if target_count == 1:
+            selected = [selected[0]]
+        else:
+            max_idx = len(selected) - 1
+            indices = [round(i * max_idx / (target_count - 1)) for i in range(target_count)]
+            # Dedup while preserving order, then backfill if needed.
+            seen = set()
+            spaced = []
+            for idx in indices:
+                if idx not in seen:
+                    spaced.append(selected[idx])
+                    seen.add(idx)
+            if len(spaced) < target_count:
+                for row in selected:
+                    if len(spaced) >= target_count:
+                        break
+                    if row not in spaced:
+                        spaced.append(row)
+            selected = spaced
+
+    return {
+        "annotation_scaffolds": [{"fragment": row["fragment"], "text": row["text"]} for row in selected]
+    }
+
+
 # ======================================================
 # 3. LLM CREATOR & INVOCATION HELPER
 # ======================================================
@@ -240,6 +640,35 @@ def run_chain(
         raise TypeError(f"{context}: expected string result from chain, got {type(result)}")
 
     return result
+
+
+def _repair_scaffold_json_with_llm(llm: ChatGoogleGenerativeAI, raw: str) -> str:
+    """
+    Ask the LLM to repair malformed scaffold JSON.
+    Returns a JSON string or empty JSON object on failure.
+    """
+    repair_prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            "You fix malformed JSON. Return ONLY valid JSON, no commentary. "
+            "Output must match schema: {{\"annotation_scaffolds\":[{{\"fragment\":\"...\",\"text\":\"...\"}}]}}."
+        ),
+        (
+            "human",
+            "Malformed JSON:\n{raw}\n\n"
+            "Return a repaired JSON object with the same schema."
+        ),
+    ])
+    try:
+        return run_chain(
+            llm=llm,
+            prompt=repair_prompt,
+            variables={"raw": raw or ""},
+            context="node_scaffold_repair",
+        )
+    except Exception as e:
+        print(f"[node_scaffold] WARNING: JSON repair failed: {e}")
+        return "{\"annotation_scaffolds\": []}"
 
 
 # ======================================================
@@ -314,6 +743,8 @@ def node_focus(state: WorkflowState) -> dict:
             "reading_info": state["reading_info"],
             "reading_chunks": state["reading_chunks"],
             "material_report_text": state["material_report_text"],
+            # Ask for a buffer so downstream scaffold filtering can still hit target count.
+            "scaffold_count": _resolve_generation_count(state.get("scaffold_count", "unspecified"), extra=4),
         },
         context="node_focus",
     )
@@ -409,7 +840,8 @@ def node_scaffold(state: WorkflowState) -> dict:
             "reading_info": state["reading_info"],
             "reading_chunks": state["reading_chunks"],
             "focus_report_json": state["focus_report_json"],
-            "scaffold_count": state.get("scaffold_count", "unspecified"),
+            # Ask LLM for a small buffer so backend can drop overlaps and still fill requested count.
+            "scaffold_count": _resolve_generation_count(state.get("scaffold_count", "unspecified"), extra=4),
         },
         context="node_scaffold",
     )
@@ -418,19 +850,62 @@ def node_scaffold(state: WorkflowState) -> dict:
     print(f"[node_scaffold] Raw LLM result length: {len(result) if result else 0}")
     print(f"[node_scaffold] Raw LLM result (first 500 chars): {str(result)[:500] if result else 'None'}")
     
-    # Check if result is valid JSON
+    # Validate/clean output and enforce backend overlap filtering + ordering.
     try:
-        import json
-        parsed = json.loads(result) if isinstance(result, str) else result
+        parsed = safe_json_loads(result, context="node_scaffold_output") if isinstance(result, str) else result
         if isinstance(parsed, dict):
             annotation_scaffolds = parsed.get("annotation_scaffolds", [])
             print(f"[node_scaffold] Parsed JSON has {len(annotation_scaffolds)} annotation_scaffolds")
             if not annotation_scaffolds:
                 print(f"[node_scaffold] WARNING: annotation_scaffolds is empty. Full parsed JSON: {parsed}")
+            else:
+                sanitized = _sanitize_annotation_scaffolds_output(
+                    parsed,
+                    state.get("reading_chunks", {}),
+                    max_sentences=5,
+                    target_count=_resolve_target_count(state.get("scaffold_count")),
+                    min_gap_chars=_resolve_min_gap_chars(state.get("min_fragment_gap_chars"), default=20),
+                )
+                sanitized_count = len(sanitized.get("annotation_scaffolds", []))
+                if sanitized_count != len(annotation_scaffolds):
+                    print(
+                        f"[node_scaffold] Sanitized scaffolds count changed: {len(annotation_scaffolds)} -> {sanitized_count}"
+                    )
+                result = json.dumps(sanitized, ensure_ascii=False)
         else:
             print(f"[node_scaffold] WARNING: Parsed JSON is not a dict, got {type(parsed)}")
     except Exception as e:
         print(f"[node_scaffold] WARNING: Failed to parse result as JSON: {e}")
+        repaired_raw = _repair_scaffold_json_with_llm(llm, result if isinstance(result, str) else "")
+        try:
+            repaired_parsed = safe_json_loads(repaired_raw, context="node_scaffold_repair_output")
+            sanitized = _sanitize_annotation_scaffolds_output(
+                repaired_parsed,
+                state.get("reading_chunks", {}),
+                max_sentences=5,
+                target_count=_resolve_target_count(state.get("scaffold_count")),
+                min_gap_chars=_resolve_min_gap_chars(state.get("min_fragment_gap_chars"), default=20),
+            )
+            print(
+                f"[node_scaffold] Repaired JSON scaffolds count: "
+                f"{len(sanitized.get('annotation_scaffolds', []))}"
+            )
+            result = json.dumps(sanitized, ensure_ascii=False)
+        except Exception as repair_err:
+            print(f"[node_scaffold] WARNING: Repaired JSON still invalid: {repair_err}")
+            salvaged = _salvage_annotation_scaffolds_from_raw(result if isinstance(result, str) else "")
+            sanitized = _sanitize_annotation_scaffolds_output(
+                salvaged,
+                state.get("reading_chunks", {}),
+                max_sentences=5,
+                target_count=_resolve_target_count(state.get("scaffold_count")),
+                min_gap_chars=_resolve_min_gap_chars(state.get("min_fragment_gap_chars"), default=20),
+            )
+            print(
+                f"[node_scaffold] Fallback salvage extracted "
+                f"{len(sanitized.get('annotation_scaffolds', []))} scaffolds from malformed JSON"
+            )
+            result = json.dumps(sanitized, ensure_ascii=False)
 
     return {"scaffold_json": result}
 
@@ -458,7 +933,15 @@ def node_init_scaffold_review(state: WorkflowState) -> dict:
         print("WARNING: node_init_scaffold_review received empty scaffold_json")
         return {"annotation_scaffolds_review": []}
     
-    scaffold = safe_json_loads(raw, context="node_init_scaffold_review")
+    try:
+        scaffold = safe_json_loads(raw, context="node_init_scaffold_review")
+    except Exception as e:
+        print(f"[node_init_scaffold_review] WARNING: primary JSON parse failed: {e}")
+        scaffold = _salvage_annotation_scaffolds_from_raw(raw)
+        print(
+            f"[node_init_scaffold_review] Fallback salvage extracted "
+            f"{len(scaffold.get('annotation_scaffolds', [])) if isinstance(scaffold, dict) else 0} scaffolds"
+        )
     if not scaffold:
         print("WARNING: node_init_scaffold_review failed to parse scaffold_json")
         return {"annotation_scaffolds_review": []}
@@ -528,7 +1011,48 @@ def node_init_scaffold_review(state: WorkflowState) -> dict:
                     source_chunk = chunk
                     print(f"[node_init_scaffold_review] Found partial match for fragment")
                     break
-        
+
+        local_range = None
+        if not source_chunk:
+            # Fallback: normalized search across chunk contents
+            for chunk in chunks:
+                if not isinstance(chunk, dict):
+                    continue
+                chunk_text = chunk.get("text") or chunk.get("content", "")
+                if not chunk_text:
+                    continue
+                match = _find_fragment_range_in_text(chunk_text, fragment)
+                if match:
+                    source_chunk = chunk
+                    local_range = match
+                    print(f"[node_init_scaffold_review] Found normalized match for fragment")
+                    break
+
+        if not source_chunk:
+            # Fallback: match against full concatenated text (handles cross-chunk fragments)
+            source_text_parts = []
+            for c in chunks:
+                if not isinstance(c, dict):
+                    continue
+                c_text = c.get("text") or c.get("content", "")
+                if c_text:
+                    source_text_parts.append(str(c_text))
+            source_text = "\n".join(source_text_parts)
+            global_range = _find_fragment_range_in_text(source_text, fragment) if source_text else None
+            if global_range:
+                global_start, global_end = global_range
+                for chunk in chunks:
+                    if not isinstance(chunk, dict):
+                        continue
+                    start_offset = chunk.get("start_offset")
+                    end_offset = chunk.get("end_offset")
+                    if isinstance(start_offset, int) and isinstance(end_offset, int):
+                        if start_offset <= global_start < end_offset:
+                            source_chunk = chunk
+                            local_range = (global_start - start_offset, min(global_end, end_offset) - start_offset)
+                            print(f"[node_init_scaffold_review] Found cross-chunk match for fragment")
+                            break
+
         if not source_chunk:
             print(f"[node_init_scaffold_review] WARNING: No matching chunk found for fragment: '{fragment[:50]}...'")
 
@@ -548,10 +1072,18 @@ def node_init_scaffold_review(state: WorkflowState) -> dict:
 
         # Add position fields if we found a matching chunk
         if source_chunk:
-            if "start_offset" in source_chunk:
-                review_obj["start_offset"] = source_chunk["start_offset"]
-            if "end_offset" in source_chunk:
-                review_obj["end_offset"] = source_chunk["end_offset"]
+            chunk_text = source_chunk.get("text") or source_chunk.get("content", "")
+            if local_range is None:
+                local_range = _find_fragment_range_in_text(chunk_text, fragment) if chunk_text else None
+            if local_range and isinstance(source_chunk.get("start_offset"), int):
+                local_start, local_end = local_range
+                review_obj["start_offset"] = source_chunk["start_offset"] + local_start
+                review_obj["end_offset"] = source_chunk["start_offset"] + local_end
+            else:
+                if "start_offset" in source_chunk:
+                    review_obj["start_offset"] = source_chunk["start_offset"]
+                if "end_offset" in source_chunk:
+                    review_obj["end_offset"] = source_chunk["end_offset"]
             if "page_number" in source_chunk:
                 review_obj["page_number"] = source_chunk["page_number"]
 

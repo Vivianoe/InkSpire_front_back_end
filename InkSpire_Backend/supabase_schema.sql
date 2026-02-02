@@ -360,6 +360,7 @@ CREATE TABLE IF NOT EXISTS perusall_assignments (
     name TEXT NOT NULL,  -- Assignment title
     document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,  -- Array of Perusall document IDs
     parts JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{documentId, startPage, endPage, documentName?}]
+    order_index INTEGER,  -- Preserve Perusall assignment order per course
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_perusall_course_assignment UNIQUE (perusall_course_id, perusall_assignment_id),
@@ -436,6 +437,7 @@ CREATE INDEX IF NOT EXISTS idx_user_perusall_credentials_validated ON user_perus
 -- Create indexes for perusall_assignments
 CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_id ON perusall_assignments(perusall_course_id);
 CREATE INDEX IF NOT EXISTS idx_perusall_assignments_assignment_id ON perusall_assignments(perusall_assignment_id);
+CREATE INDEX IF NOT EXISTS idx_perusall_assignments_course_order ON perusall_assignments(perusall_course_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_sessions_perusall_assignment_id ON sessions(perusall_assignment_id);
 
 -- Create indexes for perusall_course_users

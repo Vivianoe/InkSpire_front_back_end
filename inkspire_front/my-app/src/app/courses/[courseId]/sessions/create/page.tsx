@@ -339,7 +339,8 @@ export default function SessionCreationPage() {
       sessionDescription !== originalDraft.sessionDescription ||
       assignmentDescription !== originalDraft.assignmentDescription ||
       assignmentGoal !== originalDraft.assignmentGoal ||
-      JSON.stringify(selectedReadingIds.sort()) !== JSON.stringify(originalDraft.selectedReadingIds.sort())
+      JSON.stringify([...selectedReadingIds].sort()) !==
+        JSON.stringify([...(originalDraft.selectedReadingIds || [])].sort())
     );
   }, [originalDraft, sessionTitle, weekNumber, sessionDescription, assignmentDescription, assignmentGoal, selectedReadingIds]);
 
@@ -487,6 +488,34 @@ export default function SessionCreationPage() {
 
     handleCreateNew(assignmentId);
   };
+
+  const orderedSelectedReadingIds = useMemo(() => {
+    if (!selectedPerusallAssignmentId || assignmentReadings.length === 0) {
+      return selectedReadingIds;
+    }
+    const positionMap = new Map<string, number>();
+    assignmentReadings.forEach((reading, idx) => {
+      const localId = String(reading.local_reading_id || '');
+      if (localId) positionMap.set(localId, idx);
+    });
+    return [...selectedReadingIds].sort((a, b) => {
+      const pa = positionMap.get(String(a));
+      const pb = positionMap.get(String(b));
+      if (pa === undefined && pb === undefined) return 0;
+      if (pa === undefined) return 1;
+      if (pb === undefined) return -1;
+      return pa - pb;
+    });
+  }, [selectedReadingIds, selectedPerusallAssignmentId, assignmentReadings]);
+
+  useEffect(() => {
+    // Keep selected IDs aligned with Perusall reading order for session/scaffold navigation.
+    if (orderedSelectedReadingIds.length !== selectedReadingIds.length) return;
+    const changed = orderedSelectedReadingIds.some((id, idx) => id !== selectedReadingIds[idx]);
+    if (changed) {
+      setSelectedReadingIds(orderedSelectedReadingIds);
+    }
+  }, [orderedSelectedReadingIds, selectedReadingIds]);
 
   /* functions for previous non-perusall integration session creation 
   const handleCreateSession = async () => {
@@ -677,7 +706,7 @@ export default function SessionCreationPage() {
           assignment_goals_json: {
             goal: assignmentGoal || undefined,
           },
-          reading_ids: selectedReadingIds,
+          reading_ids: orderedSelectedReadingIds,
         };
 
         const response = await fetch(`/api/courses/${courseId}/sessions/${existingSessionId}/versions`, {
@@ -701,7 +730,7 @@ export default function SessionCreationPage() {
         const payload = {
           week_number: weekNumber,
           title: sessionTitle || undefined,
-          reading_ids: selectedReadingIds,
+          reading_ids: orderedSelectedReadingIds,
           session_description: sessionDescription || undefined,
           assignment_description: assignmentDescription || undefined,
           assignment_goal: assignmentGoal || undefined,
@@ -727,7 +756,7 @@ export default function SessionCreationPage() {
       }
 
       // Navigate to first reading's scaffold page with full reading list for navigation
-      const firstReadingId = selectedReadingIds[0];
+      const firstReadingId = orderedSelectedReadingIds[0];
       const firstReadingStartPage = selectedPerusallAssignmentId
         ? assignmentReadings.find((ar) => String(ar.local_reading_id || '') === String(firstReadingId))?.start_page
         : undefined;
@@ -743,7 +772,7 @@ export default function SessionCreationPage() {
           'inkspire:sessionReadingNavigation',
           JSON.stringify({
             sessionId,
-            readingIds: selectedReadingIds,
+            readingIds: orderedSelectedReadingIds,
             currentIndex: 0,
             courseId: courseId,
             profileId: resolvedProfileId || '',

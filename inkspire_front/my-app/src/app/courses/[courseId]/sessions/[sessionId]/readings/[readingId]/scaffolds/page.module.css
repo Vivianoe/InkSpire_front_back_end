@@ -245,7 +245,8 @@ html, body {
   top: 60px;
   left: 0;
   right: 0;
-  bottom: 1.4rem;
+  /* Reserve space for fixed bottom action bar so content is not covered. */
+  bottom: 0.2rem;
   padding: 1rem 0.5rem 2rem;
   height: auto;
   overflow: hidden;
@@ -256,7 +257,8 @@ html, body {
   flex-direction: column;
   margin-top: -50px;
   height: 100%;
-  padding-bottom: 5.5rem;
+  /* Extra breathing room above fixed bottom action bar. */
+  padding-bottom: 9rem;
   overflow-y: auto;
   overflow-x: visible;
   -ms-overflow-style: none;  /* IE and Edge */
@@ -310,8 +312,8 @@ html, body {
 
 .bottomActionBar {
   position: fixed;
-  left: 20rem;
-  right: 20rem;
+  left: 16rem;
+  right: 16rem;
   bottom: 1rem;
   background: #fff;
   border-radius: 0.75rem;
