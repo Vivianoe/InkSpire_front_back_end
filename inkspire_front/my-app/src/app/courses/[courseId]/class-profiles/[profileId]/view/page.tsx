@@ -616,50 +616,51 @@ export default function ViewClassProfilePage() {
     generatedProfile: '',
   });
 
-  const normalizeProfile = (data: Record<string, unknown>): ClassProfile => {
+  const normalizeProfile = (data: Record<string, unknown> | ClassProfile): ClassProfile => {
+    const dataRecord = data as Record<string, unknown>;
     const profileIdValue =
-      (data?.id as string | undefined) ||
-      (data?.profile_id as string | undefined) ||
+      (dataRecord?.id as string | undefined) ||
+      (dataRecord?.profile_id as string | undefined) ||
       (profileId as string | undefined) ||
       'new';
     const defaults = createDefaultProfile(profileIdValue);
 
     let parsedText: Record<string, unknown> | null = null;
-    if (typeof data?.text === 'string') {
-      parsedText = parsePossiblyInvalidJson(data.text);
+    if (typeof dataRecord?.text === 'string') {
+      parsedText = parsePossiblyInvalidJson(dataRecord.text);
     }
 
     const classInput =
-      (data?.class_input as Record<string, unknown> | undefined) ||
-      (data?.classInput as Record<string, unknown> | undefined) ||
+      (dataRecord?.class_input as Record<string, unknown> | undefined) ||
+      (dataRecord?.classInput as Record<string, unknown> | undefined) ||
       (parsedText?.class_input as Record<string, unknown> | undefined) ||
       (parsedText?.classInput as Record<string, unknown> | undefined) ||
       undefined;
 
     const disciplineInput =
-      ((data?.disciplineInfo as Record<string, unknown> | undefined) ||
-        (data?.discipline_info as Record<string, unknown> | undefined) ||
+      ((dataRecord?.disciplineInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.discipline_info as Record<string, unknown> | undefined) ||
         (classInput?.discipline_info as Record<string, unknown> | undefined) ||
         (classInput?.disciplineInfo as Record<string, unknown> | undefined) ||
         {}) as Record<string, unknown>;
 
     const courseInput =
-      ((data?.courseInfo as Record<string, unknown> | undefined) ||
-        (data?.course_info as Record<string, unknown> | undefined) ||
+      ((dataRecord?.courseInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.course_info as Record<string, unknown> | undefined) ||
         (classInput?.course_info as Record<string, unknown> | undefined) ||
         (classInput?.courseInfo as Record<string, unknown> | undefined) ||
         {}) as Record<string, unknown>;
 
     const classInputObj =
-      ((data?.classInfo as Record<string, unknown> | undefined) ||
-        (data?.class_info as Record<string, unknown> | undefined) ||
+      ((dataRecord?.classInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.class_info as Record<string, unknown> | undefined) ||
         (classInput?.class_info as Record<string, unknown> | undefined) ||
         (classInput?.classInfo as Record<string, unknown> | undefined) ||
         {}) as Record<string, unknown>;
 
     const directStructuredProfile =
-      data?.profile && typeof data.profile === 'object'
-        ? (data.profile as Record<string, unknown>)
+      dataRecord?.profile && typeof dataRecord.profile === 'object'
+        ? (dataRecord.profile as Record<string, unknown>)
         : null;
     const structuredProfile =
       directStructuredProfile ??
@@ -668,11 +669,11 @@ export default function ViewClassProfilePage() {
         : null);
 
     let parsedGeneratedText: Record<string, unknown> | null = null;
-    if (typeof data?.generatedProfile === 'string') {
-      parsedGeneratedText = parsePossiblyInvalidJson(data.generatedProfile);
+    if (typeof dataRecord?.generatedProfile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generatedProfile);
     }
-    if (!parsedGeneratedText && typeof data?.generated_profile === 'string') {
-      parsedGeneratedText = parsePossiblyInvalidJson(data.generated_profile);
+    if (!parsedGeneratedText && typeof dataRecord?.generated_profile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generated_profile);
     }
     const generatedStructuredProfile =
       parsedGeneratedText?.profile && typeof parsedGeneratedText.profile === 'object'
@@ -691,14 +692,14 @@ export default function ViewClassProfilePage() {
       (typeof parsedText?.design_rationale === 'string'
         ? parsedText.design_rationale
         : undefined) ||
-      (typeof data?.design_consideration === 'string'
-        ? data.design_consideration
+      (typeof dataRecord?.design_consideration === 'string'
+        ? dataRecord.design_consideration
         : undefined);
 
     const generatedProfile =
-      (data?.generatedProfile as string | undefined) ||
-      (data?.generated_profile as string | undefined) ||
-      (typeof data?.profile === 'string' ? data.profile : undefined) ||
+      (dataRecord?.generatedProfile as string | undefined) ||
+      (dataRecord?.generated_profile as string | undefined) ||
+      (typeof dataRecord?.profile === 'string' ? dataRecord.profile : undefined) ||
       (typeof parsedText?.profile === 'string' ? parsedText.profile : undefined) ||
       (typeof parsedText?.text === 'string' ? parsedText.text : undefined) ||
       (structuredProfile
