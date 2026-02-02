@@ -549,7 +549,7 @@ export default function EditClassProfilePage() {
               {isEdit ? 'Edit Class Profile' : 'Create New Class Profile'}
             </h1>
             <p className={styles.subtitle}>
-              Fill in the details below to generate your class profile
+              Fill in the details below to generate your class profile. The generated profile will be used as an integral part to create scaffolds for your students.
             </p>
           </div>
           <div className={styles.headerActions}>
@@ -856,7 +856,7 @@ export default function EditClassProfilePage() {
           <section className={styles.section}>
             <h2 className={`${styles.sectionTitle} ${styles.sectionTitleNoDivider}`}>Design Considerations</h2>
             <p className={styles.fieldHint}>
-              These considerations help Inkspire align its scaffolds with your teaching intentions. There are no right or wrong answers.
+              These considerations help Inkspire align the generated scaffolds with your theoretical orientation and teaching intentions. There are no right or wrong answers.
             </p>
             <div className={styles.sectionDivider} />
             <div className={styles.formGrid}>

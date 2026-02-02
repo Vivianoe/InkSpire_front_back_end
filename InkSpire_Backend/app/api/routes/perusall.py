@@ -1836,6 +1836,73 @@ def get_perusall_course_library(
             detail=f"Failed to fetch Perusall course library: {str(e)}"
         )
 
+
+@router.get("/courses/{course_id}/perusall/library/debug")
+def get_perusall_course_library_debug(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Debug endpoint to inspect Perusall credential source and course configuration.
+    """
+    try:
+        course_uuid = uuid.UUID(course_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid course_id format: {course_id}"
+        )
+
+    course = get_course_by_id(db, course_uuid)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course {course_id} not found"
+        )
+
+    perusall_course_id = course.perusall_course_id
+    env_institution = os.getenv("PERUSALL_INSTITUTION")
+    env_api_token = os.getenv("PERUSALL_API_TOKEN")
+    mock_mode = os.getenv("PERUSALL_MOCK_MODE", "false").lower() == "true"
+
+    credentials = get_user_perusall_credentials(db, current_user.id)
+
+    if env_institution and env_api_token:
+        credential_source = "env"
+        institution_id = env_institution
+        api_token = env_api_token
+    elif credentials:
+        credential_source = "user"
+        institution_id = credentials.institution_id
+        api_token = credentials.api_token
+    else:
+        credential_source = "none"
+        institution_id = None
+        api_token = None
+
+    def mask_token(token: Optional[str]) -> Optional[str]:
+        if not token:
+            return None
+        if len(token) <= 8:
+            return f"{token[:2]}…{token[-2:]}"
+        return f"{token[:4]}…{token[-4:]}"
+
+    return {
+        "course_id": course_id,
+        "perusall_course_id": perusall_course_id,
+        "credential_source": credential_source,
+        "env_institution_present": bool(env_institution),
+        "env_api_token_present": bool(env_api_token),
+        "user_credentials_present": bool(credentials),
+        "user_credentials_validated": bool(credentials.is_validated) if credentials else False,
+        "institution_id": institution_id,
+        "api_token_masked": mask_token(api_token),
+        "api_token_sha256_prefix": hashlib.sha256(api_token.encode("utf-8")).hexdigest()[:12]
+        if api_token else None,
+        "mock_mode": mock_mode,
+    }
+
 # ======================================================
 # Perusall Assignments Integration Endpoints
 # ======================================================

@@ -145,7 +145,64 @@ def _build_frontend_profile(
         "designConsiderations": {},
     }
 
+    def apply_class_input(class_input: Dict[str, Any]) -> None:
+        di = class_input.get("discipline_info") or {}
+        ci = class_input.get("course_info") or {}
+        cl = class_input.get("class_info") or {}
+
+        if isinstance(di, dict):
+            result["disciplineInfo"] = {
+                "disciplineName": di.get("discipline_name", "") or "",
+                "department": di.get("department", "") or "",
+                "fieldDescription": di.get("field_description", "") or "",
+            }
+
+        if isinstance(ci, dict):
+            result["courseInfo"] = {
+                "courseName": ci.get("course_name", "") or "",
+                "courseCode": ci.get("course_code", "") or "",
+                "description": ci.get("description", "") or "",
+                "credits": ci.get("credits", "") or "",
+                "prerequisites": ci.get("prerequisites", "") or "",
+                "learningObjectives": ci.get("learning_objectives", "") or "",
+                "assessmentMethods": ci.get("assessment_methods", "") or "",
+                "deliveryMode": ci.get("delivery_mode", "") or "",
+            }
+
+        if isinstance(cl, dict):
+            learning_challenges = cl.get("learning_challenges", [])
+            if isinstance(learning_challenges, str):
+                learning_challenges = [
+                    item.strip()
+                    for item in learning_challenges.replace("||", ",").split(",")
+                    if item.strip()
+                ]
+            if not isinstance(learning_challenges, list):
+                learning_challenges = []
+            result["classInfo"] = {
+                "semester": cl.get("semester", "") or "",
+                "year": cl.get("year", "") or "",
+                "section": cl.get("section", "") or "",
+                "meetingDays": cl.get("meeting_days", "") or "",
+                "meetingTime": cl.get("meeting_time", "") or "",
+                "location": cl.get("location", "") or "",
+                "enrollment": cl.get("enrollment", "") or "",
+                "background": cl.get("background", "") or "",
+                "priorKnowledge": cl.get("prior_knowledge", "") or "",
+                "learningChallenges": learning_challenges,
+                "learningChallengesOther": cl.get("learning_challenges_other", "") or "",
+            }
+
     if not profile_text:
+        if db and course_id:
+            from app.services.course_service import get_course_basic_info_by_course_id
+            basic_info = get_course_basic_info_by_course_id(db, course_id)
+            if basic_info:
+                apply_class_input({
+                    "discipline_info": basic_info.discipline_info_json or {},
+                    "course_info": basic_info.course_info_json or {},
+                    "class_info": basic_info.class_info_json or {},
+                })
         return result
 
     try:
@@ -198,52 +255,7 @@ def _build_frontend_profile(
                     }
 
             if isinstance(class_input, dict):
-                di = class_input.get("discipline_info") or {}
-                ci = class_input.get("course_info") or {}
-                cl = class_input.get("class_info") or {}
-
-                if isinstance(di, dict):
-                    result["disciplineInfo"] = {
-                        "disciplineName": di.get("discipline_name", "") or "",
-                        "department": di.get("department", "") or "",
-                        "fieldDescription": di.get("field_description", "") or "",
-                    }
-
-                if isinstance(ci, dict):
-                    result["courseInfo"] = {
-                        "courseName": ci.get("course_name", "") or "",
-                        "courseCode": ci.get("course_code", "") or "",
-                        "description": ci.get("description", "") or "",
-                        "credits": ci.get("credits", "") or "",
-                        "prerequisites": ci.get("prerequisites", "") or "",
-                        "learningObjectives": ci.get("learning_objectives", "") or "",
-                        "assessmentMethods": ci.get("assessment_methods", "") or "",
-                        "deliveryMode": ci.get("delivery_mode", "") or "",
-                    }
-
-                if isinstance(cl, dict):
-                    learning_challenges = cl.get("learning_challenges", [])
-                    if isinstance(learning_challenges, str):
-                        learning_challenges = [
-                            item.strip()
-                            for item in learning_challenges.replace("||", ",").split(",")
-                            if item.strip()
-                        ]
-                    if not isinstance(learning_challenges, list):
-                        learning_challenges = []
-                    result["classInfo"] = {
-                        "semester": cl.get("semester", "") or "",
-                        "year": cl.get("year", "") or "",
-                        "section": cl.get("section", "") or "",
-                        "meetingDays": cl.get("meeting_days", "") or "",
-                        "meetingTime": cl.get("meeting_time", "") or "",
-                        "location": cl.get("location", "") or "",
-                        "enrollment": cl.get("enrollment", "") or "",
-                        "background": cl.get("background", "") or "",
-                        "priorKnowledge": cl.get("prior_knowledge", "") or "",
-                        "learningChallenges": learning_challenges,
-                        "learningChallengesOther": cl.get("learning_challenges_other", "") or "",
-                    }
+                apply_class_input(class_input)
 
                 # Also check class_input for design_considerations if not already set
                 dc2 = class_input.get("design_considerations")
@@ -258,7 +270,17 @@ def _build_frontend_profile(
 
             return result
     except Exception:
-        pass
+        result["generatedProfile"] = profile_text
+        if db and course_id:
+            from app.services.course_service import get_course_basic_info_by_course_id
+            basic_info = get_course_basic_info_by_course_id(db, course_id)
+            if basic_info:
+                apply_class_input({
+                    "discipline_info": basic_info.discipline_info_json or {},
+                    "course_info": basic_info.course_info_json or {},
+                    "class_info": basic_info.class_info_json or {},
+                })
+        return result
 
     result["generatedProfile"] = profile_text
     return result
@@ -493,6 +515,88 @@ def get_class_profile(
         "review": profile_to_model(profile, db).model_dump(),
         "course_id": str(profile.course_id) if profile.course_id else None,
         "instructor_id": str(profile.instructor_id) if profile.instructor_id else None,
+    }
+
+
+@router.get("/class-profiles/{profile_id}/debug")
+def get_class_profile_debug(
+    profile_id: str,
+    course_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Debug endpoint to inspect how class_input/basic info are resolved for a profile.
+    """
+    profile = get_profile_or_404(profile_id, db)
+
+    if course_id:
+        try:
+            course_uuid = uuid.UUID(course_id)
+            if profile.course_id != course_uuid:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Class profile {profile_id} does not belong to course {course_id}"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid course_id format: {course_id}"
+            )
+
+    current_content = _get_current_profile_text(profile, db)
+    parsed_profile = None
+    parsed_error = None
+    try:
+        parsed_profile = json.loads(current_content) if current_content else None
+    except Exception as exc:
+        parsed_error = str(exc)
+
+    metadata_json = profile.metadata_json if isinstance(profile.metadata_json, dict) else None
+    metadata_class_input = (
+        metadata_json.get("class_input") if metadata_json else None
+    )
+    text_class_input = (
+        parsed_profile.get("class_input") if isinstance(parsed_profile, dict) else None
+    )
+
+    basic_info = None
+    basic_info_payload = None
+    if profile.course_id:
+        basic_info = get_course_basic_info_by_course_id(db, profile.course_id)
+        if basic_info:
+            basic_info_payload = {
+                "discipline_info": basic_info.discipline_info_json or {},
+                "course_info": basic_info.course_info_json or {},
+                "class_info": basic_info.class_info_json or {},
+            }
+
+    class_input_source = None
+    if isinstance(metadata_class_input, dict):
+        class_input_source = "metadata_json"
+    elif isinstance(text_class_input, dict):
+        class_input_source = "profile_text"
+    elif isinstance(basic_info_payload, dict):
+        class_input_source = "course_basic_info"
+
+    return {
+        "profile_id": str(profile.id),
+        "course_id": str(profile.course_id) if profile.course_id else None,
+        "metadata_json_present": bool(metadata_json),
+        "metadata_json_keys": list(metadata_json.keys()) if metadata_json else [],
+        "metadata_class_input_present": isinstance(metadata_class_input, dict),
+        "text_class_input_present": isinstance(text_class_input, dict),
+        "course_basic_info_present": basic_info is not None,
+        "class_input_source": class_input_source,
+        "parsed_profile_present": isinstance(parsed_profile, dict),
+        "parsed_profile_error": parsed_error,
+        "basic_info_keys": {
+            "discipline_info": list((basic_info_payload or {}).get("discipline_info", {}).keys())
+            if basic_info_payload else [],
+            "course_info": list((basic_info_payload or {}).get("course_info", {}).keys())
+            if basic_info_payload else [],
+            "class_info": list((basic_info_payload or {}).get("class_info", {}).keys())
+            if basic_info_payload else [],
+        },
     }
 
 

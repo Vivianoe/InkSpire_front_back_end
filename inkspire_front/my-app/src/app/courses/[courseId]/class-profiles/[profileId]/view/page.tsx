@@ -300,6 +300,54 @@ const normalizeLearningChallenges = (value: unknown): string[] => {
 const cloneProfile = (profile: ClassProfile): ClassProfile =>
   JSON.parse(JSON.stringify(profile));
 
+const buildProfileTextFromStructuredProfile = (
+  profileObj: Record<string, unknown>,
+  designText?: string
+): string => {
+  const parts: string[] = [];
+  const overall = typeof profileObj.overall_profile === 'string' ? profileObj.overall_profile : '';
+  const discipline = typeof profileObj.discipline_paragraph === 'string' ? profileObj.discipline_paragraph : '';
+  const course = typeof profileObj.course_paragraph === 'string' ? profileObj.course_paragraph : '';
+  const classText = typeof profileObj.class_paragraph === 'string' ? profileObj.class_paragraph : '';
+
+  if (overall) parts.push(overall);
+  if (discipline) parts.push('Discipline level:', discipline);
+  if (course) parts.push('Course level:', course);
+  if (classText) parts.push('Class level:', classText);
+  if (designText && designText.trim()) {
+    parts.push('Design Considerations:', designText.trim());
+  }
+
+  return parts.join('\n\n').trim();
+};
+
+const parsePossiblyInvalidJson = (raw: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Attempt a minimal fix for trailing commas in objects/arrays.
+    const sanitized = raw.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return JSON.parse(sanitized) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+};
+
+const readString = (
+  obj: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const BASIC_SECTION_KEYS = ['disciplineInfo', 'courseInfo', 'classInfo'] as const;
 type BasicSectionKey = (typeof BASIC_SECTION_KEYS)[number];
 
@@ -535,7 +583,7 @@ export default function ViewClassProfilePage() {
     setProfileSections(parseProfileSections(baseText));
   }, [formData?.generatedProfile, isCreateMode]);
 
-const createDefaultProfile = (id: string): ClassProfile => ({
+  const createDefaultProfile = (id: string): ClassProfile => ({
     id,
     disciplineInfo: {
       disciplineName: '',
@@ -565,46 +613,159 @@ const createDefaultProfile = (id: string): ClassProfile => ({
       learningChallenges: [],
       learningChallengesOther: '',
     },
-  generatedProfile: '',
+    generatedProfile: '',
   });
 
-  const normalizeProfile = (data: ClassProfile): ClassProfile => {
-    const defaults = createDefaultProfile(data.id);
-    const loadedDisciplineInfo = data.disciplineInfo || {};
-    const loadedCourseInfo = data.courseInfo || {};
-    const loadedClassInfo = data.classInfo || {};
+  const normalizeProfile = (data: Record<string, unknown> | ClassProfile): ClassProfile => {
+    const dataRecord = data as Record<string, unknown>;
+    const profileIdValue =
+      (dataRecord?.id as string | undefined) ||
+      (dataRecord?.profile_id as string | undefined) ||
+      (profileId as string | undefined) ||
+      'new';
+    const defaults = createDefaultProfile(profileIdValue);
+
+    let parsedText: Record<string, unknown> | null = null;
+    if (typeof dataRecord?.text === 'string') {
+      parsedText = parsePossiblyInvalidJson(dataRecord.text);
+    }
+
+    const classInput =
+      (dataRecord?.class_input as Record<string, unknown> | undefined) ||
+      (dataRecord?.classInput as Record<string, unknown> | undefined) ||
+      (parsedText?.class_input as Record<string, unknown> | undefined) ||
+      (parsedText?.classInput as Record<string, unknown> | undefined) ||
+      undefined;
+
+    const disciplineInput =
+      ((dataRecord?.disciplineInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.disciplineInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const courseInput =
+      ((dataRecord?.courseInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.courseInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const classInputObj =
+      ((dataRecord?.classInfo as Record<string, unknown> | undefined) ||
+        (dataRecord?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.classInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+
+    const directStructuredProfile =
+      dataRecord?.profile && typeof dataRecord.profile === 'object'
+        ? (dataRecord.profile as Record<string, unknown>)
+        : null;
+    const structuredProfile =
+      directStructuredProfile ??
+      (parsedText?.profile && typeof parsedText.profile === 'object'
+        ? (parsedText.profile as Record<string, unknown>)
+        : null);
+
+    let parsedGeneratedText: Record<string, unknown> | null = null;
+    if (typeof dataRecord?.generatedProfile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generatedProfile);
+    }
+    if (!parsedGeneratedText && typeof dataRecord?.generated_profile === 'string') {
+      parsedGeneratedText = parsePossiblyInvalidJson(dataRecord.generated_profile);
+    }
+    const generatedStructuredProfile =
+      parsedGeneratedText?.profile && typeof parsedGeneratedText.profile === 'object'
+        ? (parsedGeneratedText.profile as Record<string, unknown>)
+        : null;
+    const parsedDesignText =
+      (typeof parsedGeneratedText?.design_consideration === 'string'
+        ? parsedGeneratedText.design_consideration
+        : undefined) ||
+      (typeof parsedGeneratedText?.design_rationale === 'string'
+        ? parsedGeneratedText.design_rationale
+        : undefined) ||
+      (typeof parsedText?.design_consideration === 'string'
+        ? parsedText.design_consideration
+        : undefined) ||
+      (typeof parsedText?.design_rationale === 'string'
+        ? parsedText.design_rationale
+        : undefined) ||
+      (typeof dataRecord?.design_consideration === 'string'
+        ? dataRecord.design_consideration
+        : undefined);
+
+    const generatedProfile =
+      (dataRecord?.generatedProfile as string | undefined) ||
+      (dataRecord?.generated_profile as string | undefined) ||
+      (typeof dataRecord?.profile === 'string' ? dataRecord.profile : undefined) ||
+      (typeof parsedText?.profile === 'string' ? parsedText.profile : undefined) ||
+      (typeof parsedText?.text === 'string' ? parsedText.text : undefined) ||
+      (structuredProfile
+        ? buildProfileTextFromStructuredProfile(structuredProfile, parsedDesignText)
+        : undefined) ||
+      (generatedStructuredProfile
+        ? buildProfileTextFromStructuredProfile(generatedStructuredProfile, parsedDesignText)
+        : undefined) ||
+      DEFAULT_CLASS_PROFILE_TEXT;
 
     return {
       ...defaults,
-      ...data,
+      id: profileIdValue,
       disciplineInfo: {
         ...defaults.disciplineInfo,
-        ...loadedDisciplineInfo,
+        ...disciplineInput,
         disciplineName:
-          loadedDisciplineInfo.disciplineName ??
-          // @ts-expect-error legacy field name
-          loadedDisciplineInfo.field ??
+          readString(disciplineInput, 'disciplineName', 'discipline_name', 'field') ??
           defaults.disciplineInfo.disciplineName,
+        department:
+          readString(disciplineInput, 'department') ?? defaults.disciplineInfo.department,
+        fieldDescription:
+          readString(disciplineInput, 'fieldDescription', 'field_description') ??
+          defaults.disciplineInfo.fieldDescription,
       },
       courseInfo: {
         ...defaults.courseInfo,
-        ...loadedCourseInfo,
+        ...courseInput,
+        courseName:
+          readString(courseInput, 'courseName', 'course_name') ??
+          defaults.courseInfo.courseName,
+        courseCode:
+          readString(courseInput, 'courseCode', 'course_code') ??
+          defaults.courseInfo.courseCode,
+        learningObjectives:
+          readString(courseInput, 'learningObjectives', 'learning_objectives') ??
+          defaults.courseInfo.learningObjectives,
+        assessmentMethods:
+          readString(courseInput, 'assessmentMethods', 'assessment_methods') ??
+          defaults.courseInfo.assessmentMethods,
+        deliveryMode:
+          readString(courseInput, 'deliveryMode', 'delivery_mode') ??
+          defaults.courseInfo.deliveryMode,
       },
       classInfo: {
         ...defaults.classInfo,
-        ...loadedClassInfo,
-        background: loadedClassInfo.background || DEFAULT_CLASS_BACKGROUND,
+        ...classInputObj,
+        meetingDays:
+          readString(classInputObj, 'meetingDays', 'meeting_days') ??
+          defaults.classInfo.meetingDays,
+        meetingTime:
+          readString(classInputObj, 'meetingTime', 'meeting_time') ??
+          defaults.classInfo.meetingTime,
+        priorKnowledge:
+          readString(classInputObj, 'priorKnowledge', 'prior_knowledge') ??
+          defaults.classInfo.priorKnowledge,
+        background:
+          readString(classInputObj, 'background') ?? DEFAULT_CLASS_BACKGROUND,
         learningChallenges: normalizeLearningChallenges(
-          // @ts-expect-error legacy field name
-          loadedClassInfo.learningChallenges ?? loadedClassInfo.learning_challenges
+          classInputObj.learningChallenges ?? classInputObj.learning_challenges
         ),
         learningChallengesOther:
-          loadedClassInfo.learningChallengesOther ??
-          // @ts-expect-error legacy field name
-          loadedClassInfo.learning_challenges_other ??
+          readString(classInputObj, 'learningChallengesOther', 'learning_challenges_other') ??
           defaults.classInfo.learningChallengesOther,
       },
-      generatedProfile: data.generatedProfile || DEFAULT_CLASS_PROFILE_TEXT,
+      generatedProfile,
     };
   };
 
@@ -647,7 +808,15 @@ const createDefaultProfile = (id: string): ClassProfile => ({
 
       const profilePayload =
         data.profile ?? data.class_profile ?? data.review ?? null;
-      const loadedProfile = profilePayload ? normalizeProfile(profilePayload) : null;
+      const combinedPayload =
+        profilePayload && typeof profilePayload === 'object'
+          ? {
+              ...data,
+              ...profilePayload,
+              profile: data.profile ?? profilePayload,
+            }
+          : data;
+      const loadedProfile = combinedPayload ? normalizeProfile(combinedPayload) : null;
 
       if (loadedProfile) {
         setFormData(cloneProfile(loadedProfile));
