@@ -335,6 +335,19 @@ const parsePossiblyInvalidJson = (raw: string): Record<string, unknown> | null =
   }
 };
 
+const readString = (
+  obj: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const BASIC_SECTION_KEYS = ['disciplineInfo', 'courseInfo', 'classInfo'] as const;
 type BasicSectionKey = (typeof BASIC_SECTION_KEYS)[number];
 
@@ -624,25 +637,25 @@ export default function ViewClassProfilePage() {
       undefined;
 
     const disciplineInput =
-      (data?.disciplineInfo as Record<string, unknown> | undefined) ||
-      (data?.discipline_info as Record<string, unknown> | undefined) ||
-      (classInput?.discipline_info as Record<string, unknown> | undefined) ||
-      (classInput?.disciplineInfo as Record<string, unknown> | undefined) ||
-      {};
+      ((data?.disciplineInfo as Record<string, unknown> | undefined) ||
+        (data?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.discipline_info as Record<string, unknown> | undefined) ||
+        (classInput?.disciplineInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
 
     const courseInput =
-      (data?.courseInfo as Record<string, unknown> | undefined) ||
-      (data?.course_info as Record<string, unknown> | undefined) ||
-      (classInput?.course_info as Record<string, unknown> | undefined) ||
-      (classInput?.courseInfo as Record<string, unknown> | undefined) ||
-      {};
+      ((data?.courseInfo as Record<string, unknown> | undefined) ||
+        (data?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.course_info as Record<string, unknown> | undefined) ||
+        (classInput?.courseInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
 
     const classInputObj =
-      (data?.classInfo as Record<string, unknown> | undefined) ||
-      (data?.class_info as Record<string, unknown> | undefined) ||
-      (classInput?.class_info as Record<string, unknown> | undefined) ||
-      (classInput?.classInfo as Record<string, unknown> | undefined) ||
-      {};
+      ((data?.classInfo as Record<string, unknown> | undefined) ||
+        (data?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.class_info as Record<string, unknown> | undefined) ||
+        (classInput?.classInfo as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
 
     const directStructuredProfile =
       data?.profile && typeof data.profile === 'object'
@@ -703,68 +716,52 @@ export default function ViewClassProfilePage() {
         ...defaults.disciplineInfo,
         ...disciplineInput,
         disciplineName:
-          (disciplineInput as Record<string, unknown>).disciplineName ??
-          (disciplineInput as Record<string, unknown>).discipline_name ??
-          // @ts-expect-error legacy field name
-          (disciplineInput as Record<string, unknown>).field ??
+          readString(disciplineInput, 'disciplineName', 'discipline_name', 'field') ??
           defaults.disciplineInfo.disciplineName,
         department:
-          (disciplineInput as Record<string, unknown>).department ??
-          defaults.disciplineInfo.department,
+          readString(disciplineInput, 'department') ?? defaults.disciplineInfo.department,
         fieldDescription:
-          (disciplineInput as Record<string, unknown>).fieldDescription ??
-          (disciplineInput as Record<string, unknown>).field_description ??
+          readString(disciplineInput, 'fieldDescription', 'field_description') ??
           defaults.disciplineInfo.fieldDescription,
       },
       courseInfo: {
         ...defaults.courseInfo,
         ...courseInput,
         courseName:
-          (courseInput as Record<string, unknown>).courseName ??
-          (courseInput as Record<string, unknown>).course_name ??
+          readString(courseInput, 'courseName', 'course_name') ??
           defaults.courseInfo.courseName,
         courseCode:
-          (courseInput as Record<string, unknown>).courseCode ??
-          (courseInput as Record<string, unknown>).course_code ??
+          readString(courseInput, 'courseCode', 'course_code') ??
           defaults.courseInfo.courseCode,
         learningObjectives:
-          (courseInput as Record<string, unknown>).learningObjectives ??
-          (courseInput as Record<string, unknown>).learning_objectives ??
+          readString(courseInput, 'learningObjectives', 'learning_objectives') ??
           defaults.courseInfo.learningObjectives,
         assessmentMethods:
-          (courseInput as Record<string, unknown>).assessmentMethods ??
-          (courseInput as Record<string, unknown>).assessment_methods ??
+          readString(courseInput, 'assessmentMethods', 'assessment_methods') ??
           defaults.courseInfo.assessmentMethods,
         deliveryMode:
-          (courseInput as Record<string, unknown>).deliveryMode ??
-          (courseInput as Record<string, unknown>).delivery_mode ??
+          readString(courseInput, 'deliveryMode', 'delivery_mode') ??
           defaults.courseInfo.deliveryMode,
       },
       classInfo: {
         ...defaults.classInfo,
         ...classInputObj,
         meetingDays:
-          (classInputObj as Record<string, unknown>).meetingDays ??
-          (classInputObj as Record<string, unknown>).meeting_days ??
+          readString(classInputObj, 'meetingDays', 'meeting_days') ??
           defaults.classInfo.meetingDays,
         meetingTime:
-          (classInputObj as Record<string, unknown>).meetingTime ??
-          (classInputObj as Record<string, unknown>).meeting_time ??
+          readString(classInputObj, 'meetingTime', 'meeting_time') ??
           defaults.classInfo.meetingTime,
         priorKnowledge:
-          (classInputObj as Record<string, unknown>).priorKnowledge ??
-          (classInputObj as Record<string, unknown>).prior_knowledge ??
+          readString(classInputObj, 'priorKnowledge', 'prior_knowledge') ??
           defaults.classInfo.priorKnowledge,
         background:
-          (classInputObj as Record<string, unknown>).background ??
-          DEFAULT_CLASS_BACKGROUND,
+          readString(classInputObj, 'background') ?? DEFAULT_CLASS_BACKGROUND,
         learningChallenges: normalizeLearningChallenges(
-          (classInputObj as Record<string, unknown>).learningChallenges ??
-            (classInputObj as Record<string, unknown>).learning_challenges
+          classInputObj.learningChallenges ?? classInputObj.learning_challenges
         ),
         learningChallengesOther:
-          (classInputObj as Record<string, unknown>).learningChallengesOther ??
-          (classInputObj as Record<string, unknown>).learning_challenges_other ??
+          readString(classInputObj, 'learningChallengesOther', 'learning_challenges_other') ??
           defaults.classInfo.learningChallengesOther,
       },
       generatedProfile,
