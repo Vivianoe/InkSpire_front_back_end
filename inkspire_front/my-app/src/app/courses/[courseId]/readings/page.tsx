@@ -653,7 +653,7 @@ export default function ReadingUploadPage() {
                           setSelectedPerusallReading(perusallReading.perusall_reading_id);
                           inputRef.current?.click();
                         }}
-                          className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
+                          className={`${uiStyles.btn} ${uiStyles.btnOrange} ${styles.compactActionButton}`}
                         disabled={uploading || selectedPerusallReading !== null}
                       >
                         Upload PDF

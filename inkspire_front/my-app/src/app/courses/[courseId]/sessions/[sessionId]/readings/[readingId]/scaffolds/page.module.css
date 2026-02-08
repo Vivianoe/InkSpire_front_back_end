@@ -64,6 +64,54 @@ html, body {
   margin-left: 5%;
 }
 
+.fieldNarrow textarea {
+  min-height: 4rem;
+}
+
+.scaffoldCountRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.scaffoldCountControls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.scaffoldCountButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--gray-700);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.scaffoldCountButton:hover {
+  background-color: var(--gray-50);
+  border-color: var(--gray-400);
+}
+
+.scaffoldCountButton:active {
+  transform: scale(0.95);
+}
+
+.scaffoldCountValue {
+  min-width: 2.5rem;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
 .fieldHint {
   width: 100%;
   margin: 0;
@@ -245,9 +293,8 @@ html, body {
   top: 60px;
   left: 0;
   right: 0;
-  /* Reserve space for fixed bottom action bar so content is not covered. */
-  bottom: 0.2rem;
-  padding: 1rem 0.5rem 2rem;
+  bottom: 5rem;
+  padding: 2rem 0.5rem 0.5rem;
   height: auto;
   overflow: hidden;
 }
@@ -255,7 +302,8 @@ html, body {
 .leftPanel {
   display: flex;
   flex-direction: column;
-  margin-top: -50px;
+  margin-top: 0;
+  /* padding-top: 1rem; */
   height: 100%;
   /* Extra breathing room above fixed bottom action bar. */
   padding-bottom: 9rem;
@@ -310,20 +358,110 @@ html, body {
   transform: translateY(0);
 }
 
-.bottomActionBar {
+.bottomActionBarsContainer {
   position: fixed;
-  left: 16rem;
-  right: 16rem;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  z-index: 40;
+}
+
+.bottomActionBarBack {
   background: #fff;
   border-radius: 0.75rem;
   box-shadow: 2px 4px 20px rgba(0, 0, 0, 0.1);
   padding: 0.75rem 1.5rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+}
+
+.bottomActionBarPagination {
+  background: #fff;
+  border-radius: 0.75rem;
+  box-shadow: 2px 4px 20px rgba(0, 0, 0, 0.1);
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.paginationContainer {
+  display: flex;
+  align-items: center;
   gap: 1rem;
-  z-index: 40;
+}
+
+.paginationLabel {
+  font-size: 0.875rem;
+  color: #474b52;
+  white-space: nowrap;
+}
+
+.paginationArrow {
+  background: transparent;
+  border: none;
+  color: #474b52;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.paginationArrow:hover:not(:disabled) {
+  color: #474b52;
+}
+
+.paginationArrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.paginationNumbers {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.paginationNumber {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  color: #474b52;
+  background: transparent;
+  transition: all 0.2s ease;
+}
+
+.paginationNumberActive {
+  background: #afd9f5;
+  color: #1e394b;
+  font-weight: 400;
+}
+
+.rightPanelActions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 1.4rem; 
+  padding: 0 1rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  background: #fff;
+  z-index: 35;
+}
+
+.rightPanelActions button {
+  min-width: 9rem;
 }
 
 .bottomActionGroup {
@@ -336,6 +474,7 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* padding-top: 1rem; */
   overflow: hidden;
 }
 
@@ -343,14 +482,24 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* padding-top: 1rem; */
   overflow-y: auto;
     overflow-x: hidden;
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
+  position: relative;
 }
 
 .rightPanel::-webkit-scrollbar {
   display: none;  /* Chrome, Safari and Opera */
+}
+
+.rightPanel .container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .pdfContent {
@@ -430,18 +579,35 @@ html, body {
 }
 
 @media (max-width: 640px) {
-  .bottomActionBar {
+  .bottomActionBarsContainer {
     left: 0.75rem;
     right: 0.75rem;
-    bottom: 0.75rem;
+    transform: none;
     flex-direction: column;
-    align-items: stretch;
+    gap: 0.5rem;
   }
 
-  .bottomActionGroup {
+  .bottomActionBarBack,
+  .bottomActionBarPagination {
     width: 100%;
-    justify-content: center;
-    flex-wrap: wrap;
+  }
+
+  .bottomActionBarPagination {
+    padding: 0.5rem 1rem;
+  }
+
+  .paginationContainer {
+    gap: 0.5rem;
+  }
+
+  .paginationLabel {
+    font-size: 0.75rem;
+  }
+
+  .paginationNumber {
+    width: 1.75rem;
+    height: 1.75rem;
+    font-size: 0.75rem;
   }
 }
   
@@ -449,8 +615,6 @@ html, body {
 .scaffoldsContainer {
     display: flex;
     flex-direction: column;
-    height: 100%; 
-    max-height: 100%;
     width: 100%;
     overflow: visible;
     flex: 1;
@@ -463,12 +627,12 @@ html, body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
-    padding: 0 0 0.5rem 0;
+    padding: 1rem 1rem 0.5rem 1rem;
     border-bottom: 1px solid #e5e7eb;
     position: sticky;
     top: 0;
     z-index: 5;
-    background: var(--gray-50);
+    background: #ffffff;
     pointer-events: none;
   }
   
@@ -477,7 +641,7 @@ html, body {
   }
   
   .scaffoldsHeader h3 {
-    font-size: 1.125rem;
+    font-size: 1.25rem;
     font-weight: 600;
     color: #111827;
     margin: 0;
@@ -646,6 +810,61 @@ html, body {
     flex-direction: column;
     gap: 1rem;
   }
+
+.questionPopup {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.questionPopupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.questionPopupTitle {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.questionPopupClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.questionPopupClose:hover {
+  background-color: #e5e7eb;
+  color: #111827;
+}
+
+.questionPopupContent {
+  padding: 1rem;
+}
+
+.questionPopupContent p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #374151;
+  line-height: 1.6;
+}
   
 .inlineRow {
   display: flex;
@@ -668,6 +887,42 @@ html, body {
 .inlineTextarea {
   flex: 1;
   min-height: 5rem;
+  font-size: 1rem; /* Large desktops (1920px+) */
+}
+
+/* Standard desktops (1440px - 1920px) */
+@media (max-width: 1920px) {
+  .inlineTextarea {
+    font-size: 0.8rem;
+  }
+}
+
+/* Laptops (1024px - 1440px) */
+@media (max-width: 1440px) {
+  .inlineTextarea {
+    font-size: 0.75rem;
+  }
+}
+
+/* Small laptops/tablets (768px - 1024px) */
+@media (max-width: 1024px) {
+  .inlineTextarea {
+    font-size: 0.7rem;
+  }
+}
+
+/* Mobile (480px - 768px) */
+@media (max-width: 768px) {
+  .inlineTextarea {
+    font-size: 0.7rem;
+  }
+}
+
+/* Small mobile (<480px) */
+@media (max-width: 480px) {
+  .inlineTextarea {
+    font-size: 0.75rem;
+  }
 }
 
 /* ===== Header & Title ===== */
@@ -790,8 +1045,8 @@ html, body {
 }
 .infoTooltipText {
   position: absolute;
-  bottom: calc(100% + 0.4rem);
-  left: 20%;
+  bottom: calc(-100%);
+  left: 50%;
   background: #111827;
   color: #fff;
   padding: 0.35rem 0.5rem;
