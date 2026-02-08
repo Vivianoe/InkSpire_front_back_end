@@ -319,7 +319,7 @@ export default function SessionCreationPage() {
       }
     };
 
-    loadData();
+      loadData();
   }, [courseId, resolvedInstructorId, urlSessionId, fetchPerusallAssignments]);
 
   // Load existing session if sessionId is in URL
@@ -1150,7 +1150,7 @@ export default function SessionCreationPage() {
                     <div className={styles.readingMeta}>
                       <div style={{ flex: 1 }}>
                         <p className={styles.readingName}>{assignment.name}</p>
-                        <p className={styles.readingSecondaryDetail} style={{ color: '#1976D2', fontSize: '12px' }}>
+                        <p className={styles.readingSecondaryDetail} style={{ color: existingSession ? '#1976D2' : '#F57C00', fontSize: '12px' }}>
                           {existingSession ? 'Session exists' : 'Ready for session'}
                         </p>
                       </div>
@@ -1163,7 +1163,7 @@ export default function SessionCreationPage() {
                           handleSelectAssignment(assignment.id);
                         }}
                         className={`${uiStyles.btn} ${styles.compactActionButton} ${
-                          existingSession ? uiStyles.btnPrimary : styles.neutralActionButton
+                          existingSession ? uiStyles.btnPrimary : uiStyles.btnOrange
                         }`}
                       >
                         {existingSession ? 'Open Session' : 'Create Session'}
@@ -1400,7 +1400,7 @@ export default function SessionCreationPage() {
                         <div className={styles.readingActions}>
                           {!ar.is_uploaded && (
                             <label
-                          className={`${uiStyles.btn} ${uiStyles.btnPrimary} ${styles.compactActionButton}`}
+                          className={`${uiStyles.btn} ${uiStyles.btnOrange} ${styles.compactActionButton}`}
                               style={{
                                 cursor: uploadingReading === ar.perusall_document_id ? 'not-allowed' : 'pointer',
                                 opacity: uploadingReading === ar.perusall_document_id ? 0.6 : 1,

@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Navigation from './Navigation';
 import { generateScaffoldPDF } from '@/utils/generateScaffoldPDF';
-import { InformationCircleIcon } from '@heroicons/react/24/outline';
+import { InformationCircleIcon, ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import uiStyles from '@/app/ui/ui.module.css';
 import styles from './page.module.css';
 import { supabase } from '@/lib/supabase/client';
@@ -80,6 +80,7 @@ export default function ScaffoldPage() {
   const [modificationRequest, setModificationRequest] = useState('');
   const modificationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentReviewIndex, setCurrentReviewIndex] = useState<number>(-1);
+  const [showQuestionPopup, setShowQuestionPopup] = useState<string | null>(null); // scaffold ID
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
   const [llmRefining, setLlmRefining] = useState(false);
@@ -481,6 +482,8 @@ export default function ScaffoldPage() {
       if (action === 'llm-edit') {
         const message = modificationRequest.trim();
         setCurrentReviewIndex(scaffoldIndex);
+        // Show popup with scaffold question
+        setShowQuestionPopup(scaffold.id);
         if (!message) {
           setTimeout(() => {
             modificationTextareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -515,6 +518,7 @@ export default function ScaffoldPage() {
           processReviewResponse(scaffold.id, responseData);
           focusRefinedScaffold(scaffold, scaffoldIndex);
           setModificationRequest('');
+          setShowQuestionPopup(null); // Close popup after successful refine
           showToast(`Refine scaffold #${scaffoldIndex + 1} succeeded.`);
         } finally {
           setLlmRefining(false);
@@ -615,6 +619,7 @@ export default function ScaffoldPage() {
       processReviewResponse(currentCard.id, responseData);
       focusRefinedScaffold(currentCard, currentReviewIndex);
       setModificationRequest('');
+      setShowQuestionPopup(null); // Close popup after successful send
       showToast(`Refine scaffold #${currentReviewIndex + 1} succeeded.`);
     } catch (err) {
       console.error('Modification request failed:', err);
@@ -1145,18 +1150,6 @@ ${scaffold.text || 'No scaffold text available'}
       <div className={styles.layoutAfterGeneration}>
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
-          <div className={styles.leftPanelHeader}>
-            <button
-              type="button"
-              className={styles.backIconButton}
-              onClick={handleBackToSession}
-              aria-label="Back to session"
-              title="Back to session"
-            >
-              ←
-            </button>
-            {/*<h2 className={styles.leftPanelTitle}>Reading Scaffolds</h2>*/}
-          </div>
           <div className={styles.formCard}>
             {/* <div className={styles.formHeader}>
               <h1 className={styles.formTitle}>Reading Scaffolds</h1> 
@@ -1196,7 +1189,7 @@ ${scaffold.text || 'No scaffold text available'}
                 value={assignmentDescription}
                 className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
                 placeholder="Describe the assignment deliverable or activity focus."
-                rows={3}
+                rows={2}
                 readOnly
                 aria-readonly="true"
               />
@@ -1216,30 +1209,35 @@ ${scaffold.text || 'No scaffold text available'}
                 value={assignmentGoals}
                 className={`${uiStyles.fieldControl} ${uiStyles.fieldTextarea}`}
                 placeholder="List the goals or competencies this assignment reinforces."
-                rows={3}
+                rows={2}
                 readOnly
                 aria-readonly="true"
               />
             </div>
 
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
-              <div className={styles.labelWithIcon}>
-                <label className={uiStyles.fieldLabel}>Scaffolds to generate</label>
+              <div className={styles.scaffoldCountRow}>
+                <label className={uiStyles.fieldLabel} style={{ fontWeight: '600' }}>Scaffolds to generate:</label>
+                <div className={styles.scaffoldCountControls}>
+                  <button
+                    type="button"
+                    className={styles.scaffoldCountButton}
+                    onClick={() => setScaffoldCount(Math.max(1, scaffoldCount - 1))}
+                    aria-label="Decrease scaffold count"
+                  >
+                    <ChevronLeftIcon style={{ width: '1rem', height: '1rem' }} />
+                  </button>
+                  <span className={styles.scaffoldCountValue}>{scaffoldCount}</span>
+                  <button
+                    type="button"
+                    className={styles.scaffoldCountButton}
+                    onClick={() => setScaffoldCount(scaffoldCount + 1)}
+                    aria-label="Increase scaffold count"
+                  >
+                    <ChevronRightIcon style={{ width: '1rem', height: '1rem' }} />
+                  </button>
+                </div>
               </div>
-              <input
-                type="number"
-                min={1}
-                value={scaffoldCount}
-                onChange={(e) => {
-                  const nextValue = Number(e.target.value);
-                  const normalized = Number.isFinite(nextValue)
-                    ? Math.max(1, Math.floor(nextValue))
-                    : 1;
-                  setScaffoldCount(normalized);
-                }}
-                className={uiStyles.fieldControl}
-                placeholder="6"
-              />
             </div>
             
             {/* Session Info Display */}
@@ -1583,6 +1581,29 @@ ${scaffold.text || 'No scaffold text available'}
               </div>
               
               <div className={styles.scaffoldsFooter}>
+                {/* Popup showing scaffold question */}
+                {showQuestionPopup && (() => {
+                  const popupScaffold = scaffolds.find(s => s.id === showQuestionPopup);
+                  if (!popupScaffold) return null;
+                  return (
+                    <div className={styles.questionPopup}>
+                      <div className={styles.questionPopupHeader}>
+                        <h4 className={styles.questionPopupTitle}>Scaffold Question</h4>
+                        <button
+                          type="button"
+                          className={styles.questionPopupClose}
+                          onClick={() => setShowQuestionPopup(null)}
+                          aria-label="Close"
+                        >
+                          <XMarkIcon style={{ width: '1.25rem', height: '1.25rem' }} />
+                        </button>
+                      </div>
+                      <div className={styles.questionPopupContent}>
+                        <p>{popupScaffold.text}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className={styles.inlineRow}>
                   <div className={`${uiStyles.field} ${styles.inlineField}`}>
                     <label className={uiStyles.fieldLabel}>Request modifications</label>
@@ -1612,69 +1633,91 @@ ${scaffold.text || 'No scaffold text available'}
         </div>
       </div>
 
-      <div className={styles.bottomActionBar}>
-        <div className={styles.bottomActionGroup}>
+      {/* Download and Publish buttons bar below panels */}
+      <div className={styles.rightPanelActions}>
+        <button
+          className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+          type="button"
+          onClick={() => {
+            const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+            if (acceptedScaffolds.length === 0) {
+              showToast('No accepted scaffolds to download.');
+              return;
+            }
+            const md = generateMarkdown(acceptedScaffolds);
+            setMdContent(md);
+            setShowDownloadModal(true);
+          }}
+          disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+        >
+          Download / Export
+        </button>
+        <button
+          className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
+          type="button"
+          onClick={() => {
+            const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
+            if (acceptedScaffolds.length === 0) {
+              showToast('No accepted scaffolds to publish.');
+              return;
+            }
+            setShowPublishModal(true);
+          }}
+          disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
+        >
+          Publish Accepted Scaffolds
+        </button>
+      </div>
+
+      <div className={styles.bottomActionBarsContainer}>
+        <div className={styles.bottomActionBarBack}>
           <button
+            type="button"
             onClick={handleBackToSession}
-            className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
+            className={styles.backIconButton}
+            aria-label="Back to session"
+            title="Back to session"
           >
-            ← Back to Session
+            ←
           </button>
-          {enableNavigation && navigationData ? (
-            <>
+        </div>
+        {enableNavigation && navigationData ? (
+          <div className={styles.bottomActionBarPagination}>
+            <div className={styles.paginationContainer}>
+              <span className={styles.paginationLabel}>
+                Reading {navigationData.currentIndex + 1} of {navigationData.readingIds.length}
+              </span>
               <button
                 onClick={() => navigateToReading('prev')}
                 disabled={!canGoPrev}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                style={{ opacity: canGoPrev ? 1 : 0.5, cursor: canGoPrev ? 'pointer' : 'not-allowed' }}
+                className={styles.paginationArrow}
+                aria-label="Previous reading"
               >
-                ← Previous Reading
+                &lt;
               </button>
+              <div className={styles.paginationNumbers}>
+                {navigationData.readingIds.map((_, index) => (
+                  <span
+                    key={index}
+                    className={`${styles.paginationNumber} ${
+                      index === navigationData.currentIndex ? styles.paginationNumberActive : ''
+                    }`}
+                  >
+                    {index + 1}
+                  </span>
+                ))}
+              </div>
               <button
                 onClick={() => navigateToReading('next')}
                 disabled={!canGoNext}
-                className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-                style={{ opacity: canGoNext ? 1 : 0.5, cursor: canGoNext ? 'pointer' : 'not-allowed' }}
+                className={styles.paginationArrow}
+                aria-label="Next reading"
               >
-                Next Reading →
+                &gt;
               </button>
-            </>
-          ) : null}
-        </div>
-        <div className={styles.bottomActionGroup}>
-          <button
-            className={`${uiStyles.btn} ${uiStyles.btnNeutral}`}
-            type="button"
-            onClick={() => {
-              const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-              if (acceptedScaffolds.length === 0) {
-                showToast('No accepted scaffolds to download.');
-                return;
-              }
-              const md = generateMarkdown(acceptedScaffolds);
-              setMdContent(md);
-              setShowDownloadModal(true);
-            }}
-            disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-          >
-            Download / Export
-          </button>
-          <button
-            className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-            type="button"
-            onClick={() => {
-              const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
-              if (acceptedScaffolds.length === 0) {
-                showToast('No accepted scaffolds to publish.');
-                return;
-              }
-              setShowPublishModal(true);
-            }}
-            disabled={processedScaffolds.filter(s => s.status === 'ACCEPTED').length === 0}
-          >
-            Publish Accepted Scaffolds
-          </button>
-        </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Publish Modal */}
