@@ -857,12 +857,12 @@ def post_annotations_to_perusall(
                 "X-API-Token": api_token,
             }
 
-            post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
-            if not post_user_id:
+            if not req.perusall_user_id:
                 raise HTTPException(
-                    status_code=500,
-                    detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+                    status_code=400,
+                    detail="perusall_user_id is required. Please select a Perusall user before publishing.",
                 )
+            post_user_id = req.perusall_user_id
 
             idempotency_key = (
                 req.idempotency_key
@@ -1148,12 +1148,12 @@ def get_perusall_annotation_status(
     if reading.course_id != course_uuid:
         raise HTTPException(status_code=400, detail=f"Reading {reading_id} does not belong to course {course_id}")
 
-    post_user_id = req.perusall_user_id or PERUSALL_POST_USER_ID
-    if not post_user_id:
+    if not req.perusall_user_id:
         raise HTTPException(
-            status_code=500,
-            detail="Perusall post user ID is not configured. Set PERUSALL_POST_USER_ID (or PERUSALL_USER_ID).",
+            status_code=400,
+            detail="perusall_user_id is required to check annotation status.",
         )
+    post_user_id = req.perusall_user_id
 
     records = db.query(PerusallAnnotationPost).filter(
         PerusallAnnotationPost.course_id == course_uuid,
