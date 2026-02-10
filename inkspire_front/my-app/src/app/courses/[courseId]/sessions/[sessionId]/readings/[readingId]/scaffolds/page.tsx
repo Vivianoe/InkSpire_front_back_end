@@ -694,7 +694,7 @@ export default function ScaffoldPage() {
       // Try to use data from generate response first
       const generateData = await response.json();
       
-      // Check if response contains scaffolds
+      // Check if response contains scaffolds or not
       if (generateData.annotation_scaffolds_review && generateData.annotation_scaffolds_review.length > 0) {
         // Convert to ScaffoldData format
         const convertedScaffolds = generateData.annotation_scaffolds_review.map((scaffold: any) => ({
