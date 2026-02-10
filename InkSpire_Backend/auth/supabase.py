@@ -125,12 +125,43 @@ def supabase_signup(email: str, password: str, name: str) -> Dict[str, Any]:
         # Service role key bypasses RLS and may cause issues with auth flows
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_anon_key = os.getenv("SUPABASE_KEY")
+        disable_confirm = os.getenv("AUTH_DISABLE_EMAIL_CONFIRMATION", "false").lower() == "true"
         
         if not supabase_url or not supabase_anon_key:
             raise AuthenticationError("Supabase configuration missing: SUPABASE_URL and SUPABASE_KEY are required")
         
         # Create a client specifically for auth operations using anon key
         auth_client = create_client(supabase_url, supabase_anon_key)
+
+        if disable_confirm:
+            service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            if not service_role_key:
+                raise AuthenticationError("Signup failed: SUPABASE_SERVICE_ROLE_KEY is required when AUTH_DISABLE_EMAIL_CONFIRMATION=true")
+            admin_client = create_client(supabase_url, service_role_key)
+            created = admin_client.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+                "user_metadata": {"name": name},
+            })
+            created_user = created.user if hasattr(created, "user") else created.get("user")
+            if not created_user:
+                raise AuthenticationError("Signup failed: no user returned")
+
+            # Sign in to issue session tokens for immediate use
+            sign_in = auth_client.auth.sign_in_with_password({
+                "email": email,
+                "password": password,
+            })
+            if not sign_in.user or not sign_in.session:
+                raise AuthenticationError("Signup failed: could not create session")
+            return {
+                "access_token": sign_in.session.access_token,
+                "refresh_token": sign_in.session.refresh_token,
+                "token_type": "bearer",
+                "user": sign_in.user,
+                "session": sign_in.session,
+            }
 
         # Sign up user with Supabase
         response = auth_client.auth.sign_up({
