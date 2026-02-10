@@ -73,6 +73,7 @@ export default function ScaffoldPage() {
   const [navigationData, setNavigationData] = useState<SessionReadingNavigation | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfResetKey, setPdfResetKey] = useState(0);
+  const [highlightRefreshKey, setHighlightRefreshKey] = useState(0);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
   const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
@@ -704,6 +705,8 @@ export default function ScaffoldPage() {
           history: scaffold.history || [],
         }));
         setScaffolds(convertedScaffolds);
+        // Re-run highlight pass after generation without reloading the PDF.
+        setHighlightRefreshKey((prev) => prev + 1);
         
         // Update PDF URL if provided
         if (generateData.pdf_url) {
@@ -717,6 +720,8 @@ export default function ScaffoldPage() {
         if (refreshResponse.ok) {
           const data = await refreshResponse.json();
           setScaffolds(data.scaffolds || []);
+          // Re-run highlight pass after refresh without reloading the PDF.
+          setHighlightRefreshKey((prev) => prev + 1);
           
           // Update PDF URL if provided (support both pdfUrl and pdf_url)
           if (data.pdfUrl || data.pdf_url) {
@@ -1336,6 +1341,7 @@ ${scaffold.text || 'No scaffold text available'}
               url={pdfUrl || undefined}
               file={null}
               searchQueries={processedScaffolds.map(s => s.fragment).filter(f => f && f.trim())}
+              highlightRefreshKey={highlightRefreshKey}
               scaffolds={processedScaffolds.map(s => ({
                 id: s.id,
                 fragment: s.fragment,

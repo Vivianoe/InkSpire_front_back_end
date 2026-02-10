@@ -55,6 +55,8 @@ interface PdfPreviewProps {
   onTextExtracted?: (text: string) => void;
   // External search input: a sentence or multiple phrases to highlight across the rendered PDF
   searchQueries?: string | string[];
+  // External trigger to re-run highlighting without reloading the PDF
+  highlightRefreshKey?: number;
   // Scaffolds array with annotation_id and fragment mapping
   scaffolds?: Array<{
     id: string;  // annotation_id
@@ -77,7 +79,7 @@ interface PdfPreviewProps {
   initialPage?: number;
 }
 
-export default function PdfPreview({ file, url, searchQueries, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, highlightRefreshKey, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initialPageScrolledRef = useRef<number | null>(null);
   
@@ -2303,6 +2305,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
   // Track if coords have been reported to avoid duplicate uploads
   const coordsReportedRef = useRef<boolean>(false);
   const lastSearchQueriesRef = useRef<string>('');
+  const lastHighlightRefreshRef = useRef<number | undefined>(undefined);
   // Track code version for development hot reload - forces re-highlight when code changes
   const codeVersionRef = useRef<number>(0);
   
@@ -2324,6 +2327,14 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
     const searchQueriesKey = Array.isArray(searchQueries) 
       ? searchQueries.join('|') 
       : (searchQueries || '');
+
+    // If highlight refresh key changed, force a re-run even if queries are the same.
+    if (highlightRefreshKey !== lastHighlightRefreshRef.current) {
+      lastHighlightRefreshRef.current = highlightRefreshKey;
+      coordsReportedRef.current = false;
+      lastSearchQueriesRef.current = '';
+      console.log('[PdfPreview] highlightRefreshKey changed - forcing re-highlight');
+    }
     
     // In development, always re-highlight if code version changed (hot reload)
     const codeVersionChanged = process.env.NODE_ENV === 'development' && 
@@ -2598,7 +2609,7 @@ export default function PdfPreview({ file, url, searchQueries, scaffolds, scroll
         }
       }
     })();
-  }, [pdfDoc, renderedPages, searchQueries]); // Removed 'scaffolds' from dependencies to avoid re-triggering on status changes
+  }, [pdfDoc, renderedPages, searchQueries, highlightRefreshKey]); // Removed 'scaffolds' from dependencies to avoid re-triggering on status changes
 
   // Handle external scroll requests
   useEffect(() => {
