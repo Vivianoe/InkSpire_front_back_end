@@ -705,7 +705,8 @@ export default function ScaffoldPage() {
           history: scaffold.history || [],
         }));
         setScaffolds(convertedScaffolds);
-        // Re-run highlight pass after generation without reloading the PDF.
+        // Reload PDF and re-run highlight pass after generation.
+        setPdfResetKey((prev) => prev + 1);
         setHighlightRefreshKey((prev) => prev + 1);
         
         // Update PDF URL if provided
@@ -720,7 +721,8 @@ export default function ScaffoldPage() {
         if (refreshResponse.ok) {
           const data = await refreshResponse.json();
           setScaffolds(data.scaffolds || []);
-          // Re-run highlight pass after refresh without reloading the PDF.
+          // Reload PDF and re-run highlight pass after refresh.
+          setPdfResetKey((prev) => prev + 1);
           setHighlightRefreshKey((prev) => prev + 1);
           
           // Update PDF URL if provided (support both pdfUrl and pdf_url)
