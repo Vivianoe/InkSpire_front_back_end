@@ -845,6 +845,12 @@ ${scaffold.text || 'No scaffold text available'}
   };
 
   const handleConfirmPublish = async () => {
+    if (!selectedPerusallUserId) {
+      const message = 'Please select a Perusall user before publishing.';
+      setPublishError(message);
+      showToast(message);
+      return;
+    }
     const acceptedScaffolds = processedScaffolds.filter(s => s.status === 'ACCEPTED');
     if (acceptedScaffolds.length === 0) {
       setPublishError('No scaffolds available to publish.');
@@ -993,15 +999,15 @@ ${scaffold.text || 'No scaffold text available'}
     }
   };
 
-  const updateSelectedPerusallUser = (users: PerusallUser[], defaultUserId?: string | null) => {
+  const updateSelectedPerusallUser = (users: PerusallUser[]) => {
     if (!users.length) {
       setSelectedPerusallUserId('');
       return;
     }
     const hasSelected = selectedPerusallUserId && users.some((u) => String(u.id) === selectedPerusallUserId);
     if (hasSelected) return;
-    const fallback = defaultUserId || (users[0]?.id ? String(users[0].id) : '');
-    setSelectedPerusallUserId(fallback);
+    // Require explicit user selection before publishing.
+    setSelectedPerusallUserId('');
   };
 
   const loadPerusallUsers = async (mode: 'db' | 'sync') => {
@@ -1028,9 +1034,7 @@ ${scaffold.text || 'No scaffold text available'}
       }
       const users = Array.isArray(data?.users) ? data.users : [];
       setPerusallUsers(users);
-      const defaultUserId =
-        (typeof data?.default_user_id === 'string' && data.default_user_id) || '';
-      updateSelectedPerusallUser(users, defaultUserId);
+      updateSelectedPerusallUser(users);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load Perusall users.';
       setPerusallUsersError(message);
@@ -1704,6 +1708,9 @@ ${scaffold.text || 'No scaffold text available'}
                       value={selectedPerusallUserId}
                       onChange={(event) => setSelectedPerusallUserId(event.target.value)}
                     >
+                      <option value="" disabled>
+                        Select a Perusall user
+                      </option>
                       {perusallUsers.map(user => (
                         <option key={user.id} value={user.id}>
                           {formatPerusallUserLabel(user)}
