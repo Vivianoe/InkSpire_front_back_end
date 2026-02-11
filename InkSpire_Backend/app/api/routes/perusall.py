@@ -974,11 +974,11 @@ def post_annotations_to_perusall(
 
                 # Micro-adjustments for Perusall indexing drift.
                 try:
-                    start_offset = int(os.getenv("PERUSALL_RANGE_START_OFFSET", "11"))
-                    end_offset = int(os.getenv("PERUSALL_RANGE_END_OFFSET", "11"))
+                    start_offset = int(os.getenv("PERUSALL_RANGE_START_OFFSET", "13"))
+                    end_offset = int(os.getenv("PERUSALL_RANGE_END_OFFSET", "13"))
                 except Exception:
-                    start_offset = 11
-                    end_offset = 11
+                    start_offset = 13
+                    end_offset = 13
                 if start_offset or end_offset:
                     range_start = max(0, range_start + start_offset)
                     range_end = max(range_start, range_end + end_offset)
