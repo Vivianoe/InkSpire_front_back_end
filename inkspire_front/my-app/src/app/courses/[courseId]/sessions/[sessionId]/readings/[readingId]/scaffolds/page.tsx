@@ -75,6 +75,7 @@ export default function ScaffoldPage() {
   const [pdfResetKey, setPdfResetKey] = useState(0);
   const [highlightRefreshKey, setHighlightRefreshKey] = useState(0);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
+  const [activeScaffoldId, setActiveScaffoldId] = useState<string | null>(null);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
   const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
   const [manualEditMap, setManualEditMap] = useState<Record<string, string>>({});
@@ -405,6 +406,7 @@ export default function ScaffoldPage() {
     setCurrentReviewIndex(scaffoldIndex);
     if (scaffold.fragment) {
       setActiveFragment(scaffold.fragment);
+      setActiveScaffoldId(String(scaffold.id));
     }
     if (typeof window !== 'undefined') {
       window.requestAnimationFrame(() => {
@@ -470,6 +472,7 @@ export default function ScaffoldPage() {
 
       if (scaffold?.fragment) {
         setActiveFragment(scaffold.fragment);
+        setActiveScaffoldId(String(scaffold.id));
       }
 
       try {
@@ -628,6 +631,7 @@ export default function ScaffoldPage() {
   // Handle generate scaffolds
   const resetScaffoldUi = () => {
     setActiveFragment(null);
+    setActiveScaffoldId(null);
     setManualEditSubmittingId(null);
     setManualEditOpenId(null);
     setManualEditMap({});
@@ -776,6 +780,7 @@ export default function ScaffoldPage() {
     };
     return processed;
   });
+  const highlightableScaffolds = processedScaffolds.filter((s) => s.fragment && s.fragment.trim());
 
   const reviewedCount = processedScaffolds.filter(s => s.status === 'ACCEPTED' || s.status === 'REJECTED').length;
   const acceptedScaffoldsForPublish = processedScaffolds.filter((s) => s.status === 'ACCEPTED');
@@ -1342,9 +1347,9 @@ ${scaffold.text || 'No scaffold text available'}
               key={pdfResetKey}
               url={pdfUrl || undefined}
               file={null}
-              searchQueries={processedScaffolds.map(s => s.fragment).filter(f => f && f.trim())}
+              searchQueries={highlightableScaffolds.map((s) => s.fragment)}
               highlightRefreshKey={highlightRefreshKey}
-              scaffolds={processedScaffolds.map(s => ({
+              scaffolds={highlightableScaffolds.map((s) => ({
                 id: s.id,
                 fragment: s.fragment,
                 history: s.history || [],
@@ -1353,7 +1358,14 @@ ${scaffold.text || 'No scaffold text available'}
               courseId={courseId}
               readingId={readingId}
               scrollToFragment={activeFragment || undefined}
-              scaffoldIndex={activeFragment ? processedScaffolds.findIndex(s => s.fragment === activeFragment) : undefined}
+              scaffoldIndex={
+                activeScaffoldId
+                  ? highlightableScaffolds.findIndex((s) => String(s.id) === activeScaffoldId)
+                  : activeFragment
+                    ? highlightableScaffolds.findIndex((s) => s.fragment === activeFragment)
+                    : undefined
+              }
+              activeScaffoldId={activeScaffoldId || undefined}
               initialPage={Number.isFinite(initialPage) && (initialPage as number) > 0 ? (initialPage as number) : undefined}
             />
           </div>
@@ -1414,6 +1426,7 @@ ${scaffold.text || 'No scaffold text available'}
                         if ((e.target as HTMLElement).closest('button, textarea, li')) return;
                         if (scaffold.fragment) {
                           setActiveFragment(scaffold.fragment);
+                          setActiveScaffoldId(String(scaffold.id));
                         } else {
                           console.warn('No fragment available for scaffold:', scaffold.number);
                         }
