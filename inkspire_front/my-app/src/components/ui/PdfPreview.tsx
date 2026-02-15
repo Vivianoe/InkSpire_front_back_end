@@ -69,6 +69,8 @@ interface PdfPreviewProps {
   }>;
   // Request scroll to the first highlight matching this fragment (case-insensitive substring)
   scrollToFragment?: string;
+  // Preferred active scaffold annotation_id for precise scroll matching
+  activeScaffoldId?: string;
   // Scaffold index for direct matching (0-based, Card 1 -> index 0)
   scaffoldIndex?: number;
   // Session ID for mapping fragments to annotation_version_id
@@ -79,7 +81,7 @@ interface PdfPreviewProps {
   initialPage?: number;
 }
 
-export default function PdfPreview({ file, url, searchQueries, highlightRefreshKey, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, highlightRefreshKey, scaffolds, scrollToFragment, activeScaffoldId, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initialPageScrolledRef = useRef<number | null>(null);
   
@@ -588,6 +590,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
   
   // Highlight/search helpers
   const highlightRecordsRef = useRef<any[]>([]);
+  const scaffoldPageHintRef = useRef<Map<string, number>>(new Map());
   const pendingScrollRef = useRef<string | null>(null);
   const activeHighlightRef = useRef<HTMLElement | null>(null);
 
@@ -729,6 +732,23 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
    * - joins hyphenated line breaks (e.g., "inter-\nactive" -> "interactive")
    * - removes zero-width chars
    */
+
+  function isFancyL(ch: string): boolean {
+    // ℓ/ℒ (U+2113/U+2112) and math/script l variants -> treat as space/separator (discard)
+    const L_SET = new Set([
+      '\u2112',          // ℒ (script capital L)
+      '\u2113',          // ℓ
+      '\u{1D4C1}',       // 𝓁
+      '\u{1D4F5}',       // 𝓵
+      '\u{1D55D}',       // 𝕝
+      '\u{1D5F9}',       // 𝗹
+      '\u{1D62D}',       // 𝘭
+      '\u{1D661}',       // 𝙡
+      '\u{1D695}',       // 𝚕
+    ]);
+    return L_SET.has(ch);
+  }
+  
   function normalizeForMatch(s: string): string {
     if (!s) return '';
     const ligMap: Record<string, string> = {
@@ -754,15 +774,23 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       'ϱ': 'rho',
       'σ': 'sigma',
       'τ': 'tau',
+      'φ': 'phi',
+      'ϕ': 'phi',
       'ω': 'omega',
       'Δ': 'delta',
       'Λ': 'lambda',
       'Π': 'pi',
       'Ρ': 'rho',
+      'Φ': 'phi',
       'Σ': 'sigma',
       'Ω': 'omega',
     };
     return s
+      // Handle fancy-l BEFORE NFKD, otherwise ℓ may fold to plain "l" too early.
+      // If a fancy-l appears at tail (allow trailing spaces/punctuation), ignore it.
+      .replace(/[\u2112\u2113\u{1D4C1}\u{1D4F5}\u{1D55D}\u{1D5F9}\u{1D62D}\u{1D661}\u{1D695}](?=\s*["'”’\)\]\}\.,;:!?-]*\s*$)/gu, ' ')
+      // Non-tail fancy-l variants still participate in matching as plain 'l'.
+      .replace(/[\u2112\u2113\u{1D4C1}\u{1D4F5}\u{1D55D}\u{1D5F9}\u{1D62D}\u{1D661}\u{1D695}]/gu, 'l')
       // fold accents/diacritics (e.g., naïve -> naive)
       .normalize('NFKD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -770,7 +798,8 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       // normalize common ligatures (PDF text often uses these)
       .replace(/[\uFB00-\uFB06]/g, (m) => ligMap[m] ?? m)
       // normalize some Greek letters to ASCII words (helps with formulas)
-      .replace(/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/g, (m) => (greekMap[m] ?? m).toLowerCase())
+      // add spaces so cases like "angleφ" can match "angle phi"
+      .replace(/[αβγδεθλμπρϱστωφϕΔΛΠΡΣΩΦ]/g, (m) => ` ${(greekMap[m] ?? m).toLowerCase()} `)
       // normalize subscripts/superscripts commonly used in formulas (e.g. σₑ, r³)
       .replace(/[\u2080-\u2089]/g, (m) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(m)))
       .replace(/[ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]/g, (m) => ({
@@ -797,6 +826,23 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       // collapse spaces again
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  function debugVisible(s: string): string {
+    return (s || '')
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n')
+      .replace(/\t/g, '\\t')
+      .replace(/\u00A0/g, '[NBSP]')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '[ZW]');
+  }
+
+  function debugTailCodePoints(s: string, tailCount = 20): string[] {
+    const chars = Array.from(s || '').slice(-tailCount);
+    return chars.map((ch) => {
+      const cp = ch.codePointAt(0) ?? 0;
+      return `${JSON.stringify(ch)} U+${cp.toString(16).toUpperCase()}`;
+    });
   }
 
   /**
@@ -841,11 +887,14 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       'ϱ': 'rho',
       'σ': 'sigma',
       'τ': 'tau',
+      'φ': 'phi',
+      'ϕ': 'phi',
       'ω': 'omega',
       'Δ': 'delta',
       'Λ': 'lambda',
       'Π': 'pi',
       'Ρ': 'rho',
+      'Φ': 'phi',
       'Σ': 'sigma',
       'Ω': 'omega',
     };
@@ -860,32 +909,40 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
 
     let i = 0;
     while (i < original.length) {
-      const ch = original[i];
+      const cp = original.codePointAt(i)!;
+      const ch = String.fromCodePoint(cp);
+      const origIdx = i;
+      i += ch.length;
+
+      // --- fancy l (ℓ / ℒ / 𝓁 / 𝘭 / ...) ---
+      // Ignore only when it appears at tail (allowing trailing spaces/punctuation).
+      if (isFancyL(ch)) {
+        const tail = original.slice(origIdx + ch.length);
+        if (/^[\s"'”’\)\]\}\.,;:!?-]*$/u.test(tail)) pushSpace(origIdx);
+        else pushNorm('l', origIdx);
+        continue;
+      }
 
       // Zero-width / soft hyphen
-      if (/^[\u00AD\u200B-\u200D\uFEFF]$/.test(ch)) {
-        i += 1;
+      if (/^[\u00AD\u200B-\u200D\uFEFF]$/u.test(ch)) {
         continue;
       }
 
       // Ligatures (fi/fl/etc)
       if (/^[\uFB00-\uFB06]$/.test(ch)) {
         const rep = ligMap[ch] ?? '';
-        for (const outCh of rep) pushNorm(outCh, i);
-        i += 1;
+        for (const outCh of rep) pushNorm(outCh, origIdx);
         continue;
       }
 
       // Fold accents/diacritics to ASCII when possible (e.g., naïve -> naive)
-      // Keep mapping stable by mapping all produced chars back to the same original index.
       try {
         const folded = ch.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
         if (folded && folded !== ch) {
           for (const outCh of folded) {
-            if (/[A-Za-z0-9]/.test(outCh)) pushNorm(outCh.toLowerCase(), i);
-            else if (/[\s\u00A0]/.test(outCh)) pushSpace(i);
+            if (/[A-Za-z0-9]/.test(outCh)) pushNorm(outCh.toLowerCase(), origIdx);
+            else if (/[\s\u00A0]/.test(outCh)) pushSpace(origIdx);
           }
-          i += 1;
           continue;
         }
       } catch {
@@ -893,86 +950,77 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       }
 
       // Greek letters (keep as ASCII words so we can match formulas)
-      if (/[αβγδεθλμπρϱστωΔΛΠΡΣΩ]/.test(ch)) {
+      if (/[αβγδεθλμπρϱστωφϕΔΛΠΡΣΩΦ]/.test(ch)) {
         const rep = (greekMap[ch] ?? '').toLowerCase();
-        for (const outCh of rep) pushNorm(outCh, i);
-        i += 1;
+        // ensure a boundary before and after the expanded token
+        pushSpace(origIdx);
+        for (const outCh of rep) pushNorm(outCh, origIdx);
+        pushSpace(origIdx);
         continue;
       }
 
       // Subscript digits/letters (e.g., σₑ)
       if (subDigitMap[ch]) {
-        pushNorm(subDigitMap[ch], i);
-        i += 1;
+        pushNorm(subDigitMap[ch], origIdx);
         continue;
       }
       if (subLetterMap[ch]) {
-        pushNorm(subLetterMap[ch], i);
-        i += 1;
+        pushNorm(subLetterMap[ch], origIdx);
         continue;
       }
 
       // Hyphenated line breaks: letter/digit + hyphen + whitespace + letter/digit => join (skip hyphen+spaces)
-      const nextSlice = original.slice(i);
+      const nextSlice = original.slice(origIdx);
       const hyphenMatch = nextSlice.match(/^([A-Za-z0-9])\s*[-\u2010\u2011\u2012\u2013\u2014\u2212]\s*([A-Za-z0-9])/);
       if (hyphenMatch) {
-        // emit first char and second char as consecutive (map them to their respective orig indices)
-        const firstOrigIdx = i;
-        const secondOrigIdx = i + (hyphenMatch[0].lastIndexOf(hyphenMatch[2]));
+        const firstOrigIdx = origIdx;
+        const secondOrigIdx = origIdx + hyphenMatch[0].lastIndexOf(hyphenMatch[2]);
         pushNorm(hyphenMatch[1].toLowerCase(), firstOrigIdx);
         pushNorm(hyphenMatch[2].toLowerCase(), secondOrigIdx);
-        i = secondOrigIdx + 1;
+        i = origIdx + hyphenMatch[0].length;
         continue;
       }
 
       // Whitespace (collapse to single space)
       if (/[\s\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
       // Parentheses/brackets -> space
       if (/[()\[\]{}<>《》【】（）]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
       // Common punctuation -> space
       if (/[.,;:!?]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
       // Quotes/dashes normalization
       if (/[“”«»„]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
       if (/[‘’‚]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
       if (/[–—]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
       // Alnum
       if (/[A-Za-z0-9]/.test(ch)) {
-        pushNorm(ch.toLowerCase(), i);
-        i += 1;
+        pushNorm(ch.toLowerCase(), origIdx);
         continue;
       }
       // Operators are highly inconsistent in PDF text extraction; treat as separators
       if (/[+\-*/=^<>]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
@@ -990,36 +1038,30 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
           '\u2078': '8',
           '\u2079': '9',
         };
-        pushNorm((superscriptMap[ch] ?? ' ').toLowerCase(), i);
-        i += 1;
+        pushNorm((superscriptMap[ch] ?? ' ').toLowerCase(), origIdx);
         continue;
       }
 
       // Common math operators/symbols
       if (/[×∙·∗]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
       if (/[÷]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
       if (/[≤]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
       if (/[≥]/.test(ch)) {
-        pushSpace(i);
-        i += 1;
+        pushSpace(origIdx);
         continue;
       }
 
       // Other symbols -> space
-      pushSpace(i);
-      i += 1;
+      pushSpace(origIdx);
     }
 
     // Collapse spaces and trim while keeping a 1:1 mapping (crucial for accurate DOM range creation).
@@ -1631,6 +1673,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
   function clearHighlights() {
     overlayLayers.forEach(layer => { while (layer.firstChild) layer.removeChild(layer.firstChild); });
     highlightRecordsRef.current = [];
+    scaffoldPageHintRef.current.clear();
   }
 
   /**
@@ -1702,22 +1745,57 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
   }
 
   /**
-   * Renders highlight rectangles from backend coordinate records
-   * Draws highlights in the overlay layer based on saved coordinate data
+   * Renders highlight rectangles from backend coordinate records (refactored)
+   * Draws highlights in the overlay layer based on saved coordinate data,
+   * enriching records with annotation_id if possible for scroll/jump support.
    * @param records - Array of highlight coordinate records from backend
    * @param clearOverlayOnly - If true, only clear overlay without clearing highlightRecordsRef
    */
   function renderBackendHighlights(records: any[], clearOverlayOnly = false) {
     if (!records || !records.length) return;
+
     // Clear overlay layers but preserve highlightRecordsRef if we're just adding overlays
     if (clearOverlayOnly) {
       overlayLayers.forEach(layer => { while (layer.firstChild) layer.removeChild(layer.firstChild); });
     } else {
       clearHighlights();
-      // Restore records after clearing
-      highlightRecordsRef.current = records;
     }
-    records.forEach(rec => {
+
+    // Enrich backend records with annotation_id when missing, so scroll/jump can work.
+    // Backend payloads often include coordinates but not the annotation_id used by the UI.
+    const mapping = fragmentToAnnotationIdRef.current;
+    const resolveAnnotationId = (text?: string) => {
+      if (!text) return undefined;
+      const raw = String(text);
+      const norm = raw.toLowerCase().trim();
+      return (
+        mapping.get(norm) ||
+        mapping.get(raw) ||
+        mapping.get(normalizeForMatch(raw)) ||
+        undefined
+      );
+    };
+
+    const enriched = records.map((rec) => {
+      // Keep existing annotation_id if present
+      if (rec?.annotation_id) return rec;
+
+      // Prefer queryFragment because it corresponds to the scaffold fragment used in searchQueries
+      const fromQuery = resolveAnnotationId(rec?.queryFragment);
+      if (fromQuery) return { ...rec, annotation_id: fromQuery };
+
+      // Fallback: try fragment text
+      const fromFrag = resolveAnnotationId(rec?.fragment);
+      if (fromFrag) return { ...rec, annotation_id: fromFrag };
+
+      return rec;
+    });
+
+    // Store enriched records for later scroll matching
+    highlightRecordsRef.current = enriched;
+
+    // Draw overlay rectangles
+    enriched.forEach(rec => {
       if (rec.rangeType !== 'text') return;
       const p = rec.rangePage;
       drawRectOnPage(p, rec.positionStartX, rec.positionStartY, rec.positionEndX, rec.positionEndY);
@@ -1757,7 +1835,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
    * @param fragment - Text fragment to scroll to (from scaffold)
    * @param scaffoldIdx - Optional 0-based scaffold index for direct matching
    */
-  function scrollToMatchFragment(fragment: string, scaffoldIdx?: number) {
+  function scrollToMatchFragment(fragment: string, scaffoldIdx?: number, scaffoldId?: string, attempt = 0) {
     const list = highlightRecordsRef.current || [];
     
     if (!list.length) { 
@@ -1774,7 +1852,22 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
     // Strategy 1: Use annotation_id if available (most accurate)
     // Find the annotation_id from fragmentToAnnotationIdRef using the fragment from searchQueries
     let targetAnnotationId: string | undefined;
-    if (typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
+    if (scaffoldId && typeof scaffoldId === 'string') {
+      targetAnnotationId = scaffoldId;
+    }
+    if (
+      !targetAnnotationId &&
+      typeof scaffoldIdx === 'number' &&
+      scaffoldIdx >= 0 &&
+      Array.isArray(scaffolds) &&
+      scaffoldIdx < scaffolds.length
+    ) {
+      const idFromScaffold = scaffolds[scaffoldIdx]?.id;
+      if (idFromScaffold) {
+        targetAnnotationId = String(idFromScaffold);
+      }
+    }
+    if (!targetAnnotationId && typeof scaffoldIdx === 'number' && scaffoldIdx >= 0 && searchQueries) {
       const queries = Array.isArray(searchQueries) ? searchQueries : [searchQueries];
       if (scaffoldIdx < queries.length) {
         const targetQuery = queries[scaffoldIdx];
@@ -1821,7 +1914,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
         const targetQuery = queries[scaffoldIdx];
         if (targetQuery && typeof targetQuery === 'string') {
           // Find the first highlight record that matches this query
-          const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+          const norm = (s: string) => normalizeForMatch(s || '');
           const targetNormalized = norm(targetQuery);
           
           // Try exact match first
@@ -1851,7 +1944,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
     
     // Strategy 3: Text matching (last resort)
     if (!rec && fragment) {
-      const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+      const norm = (s: string) => normalizeForMatch(s || '');
       const target = norm(fragment);
       const targetFirst50 = target.substring(0, 50);
       
@@ -1860,8 +1953,10 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       let bestScore = 0;
       
       for (const r of list) {
-        if (!r.queryFragment) continue;
-        const pdfFrag = norm(r.queryFragment);
+        // Prefer queryFragment, but fallback to stored fragment text.
+        const sourceText = r.queryFragment || r.fragment;
+        if (!sourceText) continue;
+        const pdfFrag = norm(sourceText);
         const pdfFirst50 = pdfFrag.substring(0, 50);
         
         // Calculate similarity score
@@ -1882,13 +1977,91 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
         }
       }
       
-      if (bestMatch && bestScore >= 50) {
+      if (bestMatch && bestScore >= 45) {
         rec = bestMatch;
-        console.log('[PdfPreview] Found highlight by text matching, score:', bestScore.toFixed(1));
+        console.log('[PdfPreview] Found highlight by text matching fallback, score:', bestScore.toFixed(1));
       }
     }
     
+    // Strategy 4: DOM text fallback (when highlight marks exist but records/ids are missing)
+    if (!rec && fragment && containerRef.current) {
+      const isScaffoldClick = Boolean(scaffoldId) || typeof scaffoldIdx === 'number';
+      const norm = (s: string) => normalizeForMatch(s || '');
+      const target = norm(fragment);
+      const hintedPage =
+        (scaffoldId && scaffoldPageHintRef.current.get(scaffoldId)) ||
+        undefined;
+      // For scaffold clicks, only allow DOM fallback if we have a page hint.
+      // Otherwise this may jump to an unrelated first match.
+      if (isScaffoldClick && !hintedPage) {
+        console.warn('[PdfPreview] Skip DOM fallback for scaffold click: no page hint for target id/index.', {
+          scaffoldId,
+          scaffoldIdx,
+        });
+      } else {
+      const pageScope = hintedPage
+        ? (containerRef.current.querySelector(`[data-page="${hintedPage}"]`) as HTMLElement | null)
+        : null;
+      const marks = Array.from(
+        (pageScope || containerRef.current).querySelectorAll('mark.pdf-highlight, mark.pdf-highlight-alt')
+      ) as HTMLElement[];
+      let bestEl: HTMLElement | null = null;
+      let bestScore = 0;
+      for (const el of marks) {
+        const txt = norm(el.textContent || '');
+        if (!txt) continue;
+        let score = 0;
+        if (txt === target) score = 100;
+        else if (txt.includes(target) || target.includes(txt)) score = 85;
+        else {
+          const a = txt.substring(0, 80);
+          const b = target.substring(0, 80);
+          const overlap = a.split('').filter((c, i) => b[i] === c).length;
+          score = (overlap / Math.max(a.length, b.length, 1)) * 60;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestEl = el;
+        }
+      }
+      if (bestEl && bestScore >= 45) {
+        console.log('[PdfPreview] Found highlight by DOM fallback, score:', bestScore.toFixed(1));
+        clearAllHighlights();
+        highlightSentence(bestEl);
+        const container = containerRef.current;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          const elRect = bestEl.getBoundingClientRect();
+          const targetTop =
+            container.scrollTop +
+            (elRect.top - containerRect.top) -
+            (container.clientHeight / 2) +
+            (elRect.height / 2);
+          container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        } else {
+          bestEl.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        activeHighlightRef.current = bestEl;
+        return;
+      }
+      }
+    }
     if (!rec) {
+      if (scaffoldId || typeof scaffoldIdx === 'number') {
+        console.warn('[PdfPreview] No matching highlight record for scaffold click; skip DOM fallback to avoid wrong jump.', {
+          scaffoldId,
+          scaffoldIdx,
+          attempt,
+        });
+        // Transient timing issue: records/page hints may arrive slightly later.
+        // Retry a few times so user doesn't need to click multiple rounds.
+        if (attempt < 3) {
+          const nextAttempt = attempt + 1;
+          window.setTimeout(() => {
+            try { scrollToMatchFragment(fragment, scaffoldIdx, scaffoldId, nextAttempt); } catch {}
+          }, 140);
+        }
+      }
       return;
     }
     
@@ -2047,6 +2220,9 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
         console.log('[PdfPreview] Simple match mode - searching for:', query.substring(0, 100));
         console.log('[PdfPreview] Text length:', text.length);
         console.log('[PdfPreview] Text sample (first 300 chars):', text.substring(0, 300));
+        const raw = text;
+        const hit = raw.match(/[ℓ𝓁𝓵𝕝𝗹𝘭𝙡𝚕]/g);
+        if (hit) console.log('[PdfPreview] Found script-l variants in raw text:', hit);
       }
       const queryFragmentForRecord = originalQueryFragment || query;
       const queryNorm = normalizeForMatch(query);
@@ -2305,9 +2481,13 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
   // Track if coords have been reported to avoid duplicate uploads
   const coordsReportedRef = useRef<boolean>(false);
   const lastSearchQueriesRef = useRef<string>('');
+  const lastScaffoldIdentityRef = useRef<string>('');
   const lastHighlightRefreshRef = useRef<number | undefined>(undefined);
   // Track code version for development hot reload - forces re-highlight when code changes
   const codeVersionRef = useRef<number>(0);
+  const scaffoldIdentityKey = Array.isArray(scaffolds)
+    ? scaffolds.map((s) => `${String(s.id)}::${String(s.fragment || '').trim()}`).join('|')
+    : '';
   
   // In development, increment version on hot reload to force re-highlight
   useEffect(() => {
@@ -2327,6 +2507,12 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
     const searchQueriesKey = Array.isArray(searchQueries) 
       ? searchQueries.join('|') 
       : (searchQueries || '');
+    const scaffoldIdentityChanged = scaffoldIdentityKey !== lastScaffoldIdentityRef.current;
+    if (scaffoldIdentityChanged) {
+      coordsReportedRef.current = false;
+      lastScaffoldIdentityRef.current = scaffoldIdentityKey;
+      console.log('[PdfPreview] Scaffolds identity changed (id/fragment), forcing re-highlight');
+    }
 
     // If highlight refresh key changed, force a re-run even if queries are the same.
     if (highlightRefreshKey !== lastHighlightRefreshRef.current) {
@@ -2342,7 +2528,12 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
     
     // Only run if searchQueries actually changed (not just scaffolds status)
     // OR if code version changed in development (hot reload)
-    if (searchQueriesKey === lastSearchQueriesRef.current && coordsReportedRef.current && !codeVersionChanged) {
+    if (
+      searchQueriesKey === lastSearchQueriesRef.current &&
+      coordsReportedRef.current &&
+      !codeVersionChanged &&
+      !scaffoldIdentityChanged
+    ) {
       console.log('[PdfPreview] Skipping duplicate highlight/search - searchQueries unchanged and coords already reported');
       return;
     }
@@ -2435,12 +2626,17 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
               try {
           console.log(`[PdfPreview] Processing fragment ${i + 1}/${list.length}:`, q.substring(0, 100));
           
-          // Find annotation_id for this fragment
+          // Find annotation_id for this fragment.
+          // Priority: index-aligned scaffold id > fragment text mapping.
           let annotationId: string | undefined;
-          const normalizedQuery = q.toLowerCase().trim();
-          annotationId = fragmentToAnnotationIdRef.current.get(normalizedQuery) || 
-                         fragmentToAnnotationIdRef.current.get(q) || 
-                         undefined;
+          if (Array.isArray(scaffolds) && i < scaffolds.length && scaffolds[i]?.id) {
+            annotationId = String(scaffolds[i].id);
+          } else {
+            const normalizedQuery = q.toLowerCase().trim();
+            annotationId = fragmentToAnnotationIdRef.current.get(normalizedQuery) || 
+                           fragmentToAnnotationIdRef.current.get(q) || 
+                           undefined;
+          }
           if (annotationId) {
             console.log(`[PdfPreview] Found annotation_id for fragment ${i + 1}:`, annotationId);
           } else {
@@ -2464,6 +2660,11 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
                     const isDebug = (i === 0 && layerIdx === 0) || (q.length > 200 && layerIdx === 0);
                 const matches = highlightInLayer(layer, q, applier, isDebug, annotationId, q);
                     if (matches > 0) {
+                      if (annotationId) {
+                        const pageEl = layer.closest('.page') as HTMLElement | null;
+                        const hintedPage = pageEl ? parseInt(pageEl.dataset.page || `${layerIdx + 1}`, 10) : (layerIdx + 1);
+                        scaffoldPageHintRef.current.set(annotationId, hintedPage);
+                      }
                       console.log(`[PdfPreview] ✅ Found ${matches} match(es) for fragment ${i + 1} in layer ${layerIdx + 1}`);
               fragmentTotal += matches;
                       foundInLayer = true;
@@ -2509,6 +2710,11 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
                 if (fragmentTotal === 0) {
                   console.warn(`[PdfPreview] ⚠️ Fragment ${i + 1} not found in any layer:`, q.substring(0, 100));
                   console.warn(`[PdfPreview] Fragment text:`, q);
+                  const normalizedQ = normalizeForMatch(q);
+                  console.warn(`[PdfPreview][Debug] Fragment raw length: ${q.length}, normalized length: ${normalizedQ.length}`);
+                  console.warn('[PdfPreview][Debug] Fragment visible:', debugVisible(q));
+                  console.warn('[PdfPreview][Debug] Fragment normalized:', normalizedQ);
+                  console.warn('[PdfPreview][Debug] Fragment tail code points:', debugTailCodePoints(q, 24));
                   // Log first 500 chars of first 10 layers for debugging
                   layers.slice(0, Math.min(10, layers.length)).forEach((layer, idx) => {
                     const layerText = layer.textContent || '';
@@ -2609,16 +2815,16 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
         }
       }
     })();
-  }, [pdfDoc, renderedPages, searchQueries, highlightRefreshKey]); // Removed 'scaffolds' from dependencies to avoid re-triggering on status changes
+  }, [pdfDoc, renderedPages, searchQueries, highlightRefreshKey, scaffoldIdentityKey]);
 
   // Handle external scroll requests
   useEffect(() => {
     if (!scrollToFragment) return;
     const id = window.setTimeout(() => {
-      try { scrollToMatchFragment(scrollToFragment, scaffoldIndex); } catch {}
+      try { scrollToMatchFragment(scrollToFragment, scaffoldIndex, activeScaffoldId); } catch {}
     }, 100);
     return () => window.clearTimeout(id);
-  }, [scrollToFragment, scaffoldIndex, renderedPages]);
+  }, [scrollToFragment, scaffoldIndex, activeScaffoldId, renderedPages]);
 
   // Scroll to initial page (1-based) once pages are attached
   useEffect(() => {
@@ -2652,8 +2858,8 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
     if ((highlightRecordsRef.current || []).length === 0) return;
     const frag = pendingScrollRef.current;
     pendingScrollRef.current = null;
-    scrollToMatchFragment(frag!, scaffoldIndex);
-  }, [renderedPages, scaffoldIndex]);
+    scrollToMatchFragment(frag!, scaffoldIndex, activeScaffoldId);
+  }, [renderedPages, scaffoldIndex, activeScaffoldId]);
 
   // Debug: Log pageElements state
   // IMPORTANT: This hook must be before any early returns to maintain hooks order
