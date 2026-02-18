@@ -39,6 +39,18 @@
   background-color: #ede0fb;
 }
 
+/* Yellow/Orange button for Upload PDF and Create Session */
+.btnOrange {
+  background-color: #FFF3E0;
+  border: 1px solid #F57C00;
+  color: #E65100;
+}
+
+.btnOrange:hover:not(:disabled) {
+  background-color: #FFE0B2;
+  border-color: #FB8C00;
+}
+
 .btnRegenerateAi {
   border: 1px solid #b3ce9d !important;
   background-color: #eefae4 !important;
