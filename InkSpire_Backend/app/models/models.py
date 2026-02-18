@@ -219,6 +219,48 @@ class ClassProfileVersion(Base):
         return f"<ClassProfileVersion(id={self.id}, class_profile_id={self.class_profile_id}, version={self.version_number})>"
 
 
+class ClassProfileGenerationLog(Base):
+    """
+    class_profile_generation_logs table
+    Stores raw workflow outputs for class profile generation runs
+    """
+    __tablename__ = "class_profile_generation_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    class_profile_id = Column(UUID(as_uuid=True), ForeignKey("class_profiles.id"), nullable=True, index=True)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
+    instructor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    class_input = Column(JSONB, nullable=True)
+    class_profile_json = Column(Text, nullable=True)
+    metadata_json = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    def __repr__(self):
+        return f"<ClassProfileGenerationLog(id={self.id}, class_profile_id={self.class_profile_id})>"
+
+
+class ScaffoldGenerationLog(Base):
+    """
+    scaffold_generation_logs table
+    Stores material/focus/scaffold raw outputs for scaffold generation runs
+    """
+    __tablename__ = "scaffold_generation_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    course_id = Column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False, index=True)
+    reading_id = Column(UUID(as_uuid=True), ForeignKey("readings.id"), nullable=False, index=True)
+    generation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    scaffold_count = Column(Integer, nullable=True)
+    material_report_text = Column(Text, nullable=True)
+    focus_report_json = Column(Text, nullable=True)
+    scaffold_json = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    def __repr__(self):
+        return f"<ScaffoldGenerationLog(id={self.id}, session_id={self.session_id}, reading_id={self.reading_id})>"
+
+
 class Reading(Base):
     """
     readings table

@@ -75,6 +75,7 @@ export default function ScaffoldPage() {
   const [pdfResetKey, setPdfResetKey] = useState(0);
   const [highlightRefreshKey, setHighlightRefreshKey] = useState(0);
   const [activeFragment, setActiveFragment] = useState<string | null>(null);
+  const [scrollNonce, setScrollNonce] = useState(0);
   const [manualEditSubmittingId, setManualEditSubmittingId] = useState<string | null>(null);
   const [manualEditOpenId, setManualEditOpenId] = useState<string | null>(null);
   const [manualEditMap, setManualEditMap] = useState<Record<string, string>>({});
@@ -405,6 +406,7 @@ export default function ScaffoldPage() {
     setCurrentReviewIndex(scaffoldIndex);
     if (scaffold.fragment) {
       setActiveFragment(scaffold.fragment);
+      setScrollNonce((prev) => prev + 1);
     }
     if (typeof window !== 'undefined') {
       window.requestAnimationFrame(() => {
@@ -470,6 +472,7 @@ export default function ScaffoldPage() {
 
       if (scaffold?.fragment) {
         setActiveFragment(scaffold.fragment);
+        setScrollNonce((prev) => prev + 1);
       }
 
       try {
@@ -1344,6 +1347,7 @@ ${scaffold.text || 'No scaffold text available'}
               file={null}
               searchQueries={processedScaffolds.map(s => s.fragment).filter(f => f && f.trim())}
               highlightRefreshKey={highlightRefreshKey}
+              scrollNonce={scrollNonce}
               scaffolds={processedScaffolds.map(s => ({
                 id: s.id,
                 fragment: s.fragment,
@@ -1414,6 +1418,7 @@ ${scaffold.text || 'No scaffold text available'}
                         if ((e.target as HTMLElement).closest('button, textarea, li')) return;
                         if (scaffold.fragment) {
                           setActiveFragment(scaffold.fragment);
+                          setScrollNonce((prev) => prev + 1);
                         } else {
                           console.warn('No fragment available for scaffold:', scaffold.number);
                         }

@@ -27,6 +27,7 @@ from app.services.course_service import (
     update_course_basic_info,
 )
 from app.services.user_service import get_user_by_id
+from app.models.models import ClassProfileGenerationLog
 from app.workflows.profile_workflow import (
     build_workflow as build_profile_workflow,
     WorkflowState as ProfileWorkflowState,
@@ -446,6 +447,22 @@ def create_class_profile(
         metadata_json=metadata_json,
         created_by="pipeline",
     )
+
+    # Log generation outputs for auditing/debugging
+    try:
+        log = ClassProfileGenerationLog(
+            class_profile_id=class_profile.id,
+            course_id=course.id,
+            instructor_id=instructor_uuid,
+            class_input=payload.class_input,
+            class_profile_json=profile_text,
+            metadata_json=metadata_json,
+        )
+        db.add(log)
+        db.commit()
+    except Exception as log_error:
+        db.rollback()
+        print(f"[class_profile_generation_logs] Failed to save generation log: {log_error}")
 
     # Build frontend profile format
     profile_text = _get_current_profile_text(class_profile, db)

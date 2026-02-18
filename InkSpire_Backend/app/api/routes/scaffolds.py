@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.database import get_db, get_supabase_client
-from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation
+from app.models.models import AnnotationHighlightCoords, ScaffoldAnnotationVersion, ScaffoldAnnotation, ScaffoldGenerationLog
 from app.services.reading_scaffold_service import (
     create_scaffold_annotation,
     get_scaffold_annotation,
@@ -727,7 +727,7 @@ def run_material_focus_scaffold(
         "scaffold_count": scaffold_count,
         "model": "gemini-2.5-flash",
         "temperature": 0.3,
-        "max_output_tokens": 8192,
+        "max_output_tokens": 16384,
     }
 
     try:
@@ -755,6 +755,38 @@ def run_material_focus_scaffold(
     print(f"Final state keys: {list(final_state.keys())}")
     print(f"scaffold_json present: {'scaffold_json' in final_state}")
     print(f"annotation_scaffolds_review present: {'annotation_scaffolds_review' in final_state}")
+
+    # Persist raw generation artifacts for auditing/debugging
+    try:
+        course_uuid = None
+        if getattr(payload, "course_id", None):
+            try:
+                course_uuid = uuid.UUID(payload.course_id)
+            except (ValueError, TypeError):
+                course_uuid = None
+        if course_uuid is None:
+            reading = get_reading_by_id(db, reading_id)
+            if reading:
+                course_uuid = reading.course_id
+
+        if course_uuid is not None:
+            log = ScaffoldGenerationLog(
+                course_id=course_uuid,
+                session_id=session_id,
+                reading_id=reading_id,
+                generation_id=generation_id,
+                scaffold_count=scaffold_count,
+                material_report_text=final_state.get("material_report_text"),
+                focus_report_json=final_state.get("focus_report_json"),
+                scaffold_json=final_state.get("scaffold_json"),
+            )
+            db.add(log)
+            db.commit()
+        else:
+            print("[scaffold_generation_logs] Skipping log: course_id unresolved")
+    except Exception as log_error:
+        db.rollback()
+        print(f"[scaffold_generation_logs] Failed to save generation log: {log_error}")
 
     review_list: List[Dict[str, Any]] = final_state.get("annotation_scaffolds_review") or []
     print(f"review_list length: {len(review_list)}")

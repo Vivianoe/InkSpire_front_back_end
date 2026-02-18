@@ -168,12 +168,47 @@ CREATE TABLE IF NOT EXISTS class_profile_versions (
 CREATE INDEX IF NOT EXISTS idx_class_profile_versions_class_profile_id ON class_profile_versions(class_profile_id);
 CREATE INDEX IF NOT EXISTS idx_class_profile_versions_version_number ON class_profile_versions(class_profile_id, version_number);
 
+-- Create class_profile_generation_logs table
+CREATE TABLE IF NOT EXISTS class_profile_generation_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_profile_id UUID REFERENCES class_profiles(id) ON DELETE SET NULL,
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    instructor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    class_input JSONB,
+    class_profile_json TEXT,
+    metadata_json JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_profile_generation_logs_course_id ON class_profile_generation_logs(course_id);
+CREATE INDEX IF NOT EXISTS idx_class_profile_generation_logs_instructor_id ON class_profile_generation_logs(instructor_id);
+CREATE INDEX IF NOT EXISTS idx_class_profile_generation_logs_class_profile_id ON class_profile_generation_logs(class_profile_id);
+
 -- Create trigger for class_profiles table
 DROP TRIGGER IF EXISTS update_class_profiles_updated_at ON class_profiles;
 CREATE TRIGGER update_class_profiles_updated_at
     BEFORE UPDATE ON class_profiles
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Create scaffold_generation_logs table
+CREATE TABLE IF NOT EXISTS scaffold_generation_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    reading_id UUID NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
+    generation_id UUID,
+    scaffold_count INTEGER,
+    material_report_text TEXT,
+    focus_report_json TEXT,
+    scaffold_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scaffold_generation_logs_course_id ON scaffold_generation_logs(course_id);
+CREATE INDEX IF NOT EXISTS idx_scaffold_generation_logs_session_id ON scaffold_generation_logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_scaffold_generation_logs_reading_id ON scaffold_generation_logs(reading_id);
+CREATE INDEX IF NOT EXISTS idx_scaffold_generation_logs_generation_id ON scaffold_generation_logs(generation_id);
 
 -- Create readings table
 CREATE TABLE IF NOT EXISTS readings (

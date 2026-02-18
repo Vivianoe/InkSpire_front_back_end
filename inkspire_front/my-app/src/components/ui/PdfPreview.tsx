@@ -71,6 +71,8 @@ interface PdfPreviewProps {
   scrollToFragment?: string;
   // Scaffold index for direct matching (0-based, Card 1 -> index 0)
   scaffoldIndex?: number;
+  // Force scroll even if fragment string is unchanged
+  scrollNonce?: number;
   // Session ID for mapping fragments to annotation_version_id
   sessionId?: string | null;
   // Course ID for RESTful API calls
@@ -79,7 +81,7 @@ interface PdfPreviewProps {
   initialPage?: number;
 }
 
-export default function PdfPreview({ file, url, searchQueries, highlightRefreshKey, scaffolds, scrollToFragment, scaffoldIndex, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
+export default function PdfPreview({ file, url, searchQueries, highlightRefreshKey, scaffolds, scrollToFragment, scaffoldIndex, scrollNonce, sessionId, courseId, readingId, initialPage }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initialPageScrolledRef = useRef<number | null>(null);
   
@@ -2618,7 +2620,7 @@ export default function PdfPreview({ file, url, searchQueries, highlightRefreshK
       try { scrollToMatchFragment(scrollToFragment, scaffoldIndex); } catch {}
     }, 100);
     return () => window.clearTimeout(id);
-  }, [scrollToFragment, scaffoldIndex, renderedPages]);
+  }, [scrollToFragment, scaffoldIndex, scrollNonce, renderedPages]);
 
   // Scroll to initial page (1-based) once pages are attached
   useEffect(() => {

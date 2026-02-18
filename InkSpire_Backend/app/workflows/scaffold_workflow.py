@@ -2,7 +2,8 @@ import json
 import os
 import time
 import re
-from typing import Any, List, Literal, Dict
+from typing import Any, List, Literal, Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from typing_extensions import TypedDict
 from dotenv import load_dotenv
@@ -684,15 +685,11 @@ def node_material(state: WorkflowState) -> dict:
     if "class_profile" not in state or "reading_chunks" not in state:
         raise KeyError("node_material requires 'class_profile' and 'reading_chunks' in state.")
 
-    llm = make_llm(state)
     prompt: ChatPromptTemplate = get_material_prompt()
 
     # Debug: Check input data
-    
     reading_chunks = state.get("reading_chunks", {})
-    #print(reading_chunks)
     chunks = reading_chunks.get("chunks", []) if isinstance(reading_chunks, dict) else []
-    #print(chunks)
     print(f"[node_material] Input check:")
     print(f"  - reading_chunks.chunks count: {len(chunks)}")
     if chunks:
@@ -700,21 +697,82 @@ def node_material(state: WorkflowState) -> dict:
         chunk_content = first_chunk.get("content", first_chunk.get("text", ""))
         print(f"  - First chunk content length: {len(chunk_content)}")
         print(f"  - First chunk content (first 200 chars): {chunk_content[:200] if chunk_content else 'N/A'}")
-    
-    result = run_chain(
-        llm=llm,
-        prompt=prompt,
-        variables={
-            "class_profile": state["class_profile"],
-            "reading_chunks": state["reading_chunks"],
-        },
-        context="node_material",
-    )
-    
-    print(f"[node_material] Material report length: {len(result) if result else 0}")
-    print(f"[node_material] Material report (first 300 chars): {str(result)[:300] if result else 'None'}")
 
-    return {"material_report_text": result}
+    if not chunks:
+        return {"material_report_text": ""}
+
+    max_workers = int(os.getenv("MATERIAL_ANALYSIS_MAX_WORKERS", "4"))
+    max_retries = int(os.getenv("MATERIAL_ANALYSIS_MAX_RETRIES", "2"))
+    base_backoff = float(os.getenv("MATERIAL_ANALYSIS_RETRY_BACKOFF_SECONDS", "0.75"))
+
+    def _validate_output(text: Any) -> bool:
+        return isinstance(text, str) and len(text.strip()) >= 20
+
+    def _build_chunk_payload(chunk: Dict[str, Any], fallback_index: int) -> Dict[str, Any]:
+        content = chunk.get("content") or chunk.get("text") or ""
+        return {
+            "chunks": [
+                {
+                    "document_id": chunk.get("document_id"),
+                    "chunk_index": chunk.get("chunk_index", fallback_index),
+                    "content": content,
+                    "token_count": chunk.get("token_count"),
+                }
+            ]
+        }
+
+    def _analyze_chunk(task: Tuple[int, Dict[str, Any]]) -> Tuple[int, int, str]:
+        idx, chunk = task
+        chunk_index = int(chunk.get("chunk_index", idx)) if isinstance(chunk, dict) else idx
+        if not isinstance(chunk, dict):
+            return (idx, chunk_index, "")
+        chunk_payload = _build_chunk_payload(chunk, idx)
+        if not chunk_payload["chunks"][0]["content"]:
+            return (idx, chunk_index, "")
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                llm = make_llm(state)
+                result = run_chain(
+                    llm=llm,
+                    prompt=prompt,
+                    variables={
+                        "class_profile": state["class_profile"],
+                        "reading_chunks": chunk_payload,
+                    },
+                    context=f"node_material_chunk_{chunk_index}",
+                )
+                if _validate_output(result):
+                    return (idx, chunk_index, result)
+                last_error = f"invalid_output_len={len(result) if isinstance(result, str) else 'n/a'}"
+            except Exception as e:
+                last_error = str(e)
+            if attempt < max_retries:
+                time.sleep(base_backoff * (attempt + 1))
+        print(f"[node_material] Chunk {chunk_index} failed after retries: {last_error}")
+        return (idx, chunk_index, "")
+
+    # Task queue → parallel execution with limited concurrency
+    tasks: List[Tuple[int, Dict[str, Any]]] = list(enumerate(chunks))
+    results: List[Tuple[int, int, str]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(_analyze_chunk, task): task[0] for task in tasks}
+        for future in as_completed(future_map):
+            results.append(future.result())
+
+    # Reassemble in original chunk order (by chunk_index, then original order)
+    results.sort(key=lambda x: (x[1], x[0]))
+    assembled_sections: List[str] = []
+    for _, chunk_index, text in results:
+        if not text:
+            continue
+        assembled_sections.append(f"=== Chunk {chunk_index} ===\n{text.strip()}")
+
+    material_report_text = "\n\n---\n\n".join(assembled_sections)
+    print(f"[node_material] Material report length: {len(material_report_text) if material_report_text else 0}")
+    print(f"[node_material] Material report (first 300 chars): {str(material_report_text)[:300] if material_report_text else 'None'}")
+
+    return {"material_report_text": material_report_text}
 
 
 # ======================================================
