@@ -1166,11 +1166,27 @@ ${scaffold.text || 'No scaffold text available'}
       <div className={styles.layoutAfterGeneration}>
         {/* Left: Info Panel */}
         <div className={styles.leftPanel}>
+          <div className={`${styles.scaffoldsHeader} ${styles.scaffoldsSettingsHeader}`}>
+            <h3>Scaffolds Settings</h3>
+            <div className={styles.scaffoldsSettingsButtonWrap} style={{ textAlign: 'center' }}>
+              <button
+                onClick={() =>
+                  handleGenerateScaffolds({ resetBeforeGenerate: hasScaffolds })
+                }
+                className={`${uiStyles.btn} ${uiStyles.btnStartSession}`}
+                disabled={generating}
+                style={{ width: '100%', maxWidth: '300px' }}
+              >
+                {generating
+                  ? 'Generating...'
+                  : hasScaffolds
+                    ? 'Regenerate'
+                    : 'Generate Scaffolds'}
+              </button>
+            </div>
+          </div>
+
           <div className={styles.formCard}>
-            {/* <div className={styles.formHeader}>
-              <h1 className={styles.formTitle}>Reading Scaffolds</h1> 
-            </div>*/}
-            
             {/* Session Information Form */}
             <div className={`${uiStyles.field} ${styles.fieldNarrow}`}>
               <div className={styles.labelWithIcon}>
@@ -1280,24 +1296,6 @@ ${scaffold.text || 'No scaffold text available'}
 
             
 
-            {/* Generate Scaffolds Button */}
-            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-              <button
-                onClick={() =>
-                  handleGenerateScaffolds({ resetBeforeGenerate: hasScaffolds })
-                }
-                className={`${uiStyles.btn} ${uiStyles.btnPrimary}`}
-                disabled={generating}
-                style={{ width: '100%', maxWidth: '300px' }}
-              >
-                {generating
-                  ? 'Generating...'
-                  : hasScaffolds
-                    ? 'Regenerate Scaffolds'
-                    : 'Generate Scaffolds'}
-              </button>
-            </div>
-
             {/* Publish and Download buttons */}
             {/*
             <div style={{ marginTop: '2rem', textAlign: 'center' }}>
@@ -1379,7 +1377,8 @@ ${scaffold.text || 'No scaffold text available'}
                   {reviewedCount}/{processedScaffolds.length} reviewed
                 </div>
               </div>
-              
+
+              <div className={styles.scaffoldsListScroll}>
               <div className={styles.scaffoldsList}>
               {processedScaffolds.length === 0 ? (
                 <div style={{ 
@@ -1652,6 +1651,7 @@ ${scaffold.text || 'No scaffold text available'}
                     </div>
                   </div>
                 </div>
+              </div>
               </div>
             </div>
           </div>
