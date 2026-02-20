@@ -65,7 +65,7 @@ html, body {
 }
 
 .fieldNarrow textarea {
-  min-height: 4rem;
+  min-height: 8rem;
 }
 
 .scaffoldCountRow {
@@ -482,17 +482,10 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* padding-top: 1rem; */
-  overflow-y: auto;
-    overflow-x: hidden;
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  overflow: hidden;
   position: relative;
 }
 
-.rightPanel::-webkit-scrollbar {
-  display: none;  /* Chrome, Safari and Opera */
-}
 
 .rightPanel .container {
   display: flex;
@@ -629,8 +622,7 @@ html, body {
     margin-bottom: 1rem;
     padding: 1rem 1rem 0.5rem 1rem;
     border-bottom: 1px solid #e5e7eb;
-    position: sticky;
-    top: 0;
+    flex-shrink: 0;
     z-index: 5;
     background: #ffffff;
     pointer-events: none;
@@ -646,6 +638,25 @@ html, body {
     color: #111827;
     margin: 0;
   }
+
+  /* Scaffolds Settings header: horizontal on large, vertical on small */
+  .scaffoldsSettingsHeader {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+  }
+  @media (max-width: 640px) {
+    .scaffoldsSettingsHeader {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .scaffoldsSettingsHeader .scaffoldsSettingsButtonWrap {
+      width: 100%;
+    }
+    .scaffoldsSettingsHeader .scaffoldsSettingsButtonWrap button {
+      max-width: none;
+    }
+  }
   
   .progressBadge {
     background: #f3f4f6;
@@ -655,9 +666,21 @@ html, body {
     font-size: 1rem;
     font-weight: 500;
   }
+
+  /* Scroll only the list; header stays fixed at top of right panel */
+  .scaffoldsListScroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scaffoldsListScroll::-webkit-scrollbar {
+    display: none;
+  }
   
   .scaffoldsList {
-    flex: 1;
     overflow: visible;
     display: flex;
     flex-direction: column;
